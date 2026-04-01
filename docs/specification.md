@@ -469,9 +469,86 @@ pub enum Theme {
 
 ---
 
+## 21. ローカライズ（i18n）
+
+### 対応言語
+
+| コード | 言語 |
+|--------|------|
+| `en` | English（デフォルト） |
+| `ja` | 日本語 |
+
+言語設定は `config.toml` の `[ui] language` フィールドで指定する。起動時に読み込み、アプリ全体に適用する。
+
+### ハイブリッド i18n アーキテクチャ
+
+UI 文字列と Rust 側メッセージで異なるツールを使う：
+
+| 対象 | ツール | ファイル形式 | マクロ |
+|------|--------|-------------|--------|
+| `.slint` 内の UI 文字列 | Slint 組み込み i18n (GNU gettext) | `.po` | `@tr("key")` |
+| Rust 側メッセージ（エラー・ライフサイクル） | `rust-i18n` crate | `.yml` | `t!("ns.key")` |
+
+### ファイル構成
+
+```
+app/
+├── lang/
+│   ├── en/LC_MESSAGES/wellfeather.po   ← Slint UI 文字列（英語）
+│   └── ja/LC_MESSAGES/wellfeather.po   ← Slint UI 文字列（日本語）
+└── locales/
+    ├── en.yml                           ← Rust 側メッセージ（英語）
+    └── ja.yml                           ← Rust 側メッセージ（日本語）
+```
+
+### 初期化
+
+```rust
+// app/src/main.rs または lib.rs
+slint::init_translations!(concat!(env!("CARGO_MANIFEST_DIR"), "/lang"));
+slint::select_bundled_translation(&config.ui.language);
+
+rust_i18n::i18n!("locales", fallback = "en");
+rust_i18n::set_locale(&config.ui.language);
+```
+
+### `.yml` ネーミング規則
+
+```yaml
+en:
+  app:
+    ready: "Ready"
+  error:
+    db_connect_failed: "Failed to connect: %{reason}"
+    query_timeout: "Query timed out after %{seconds}s"
+  query:
+    cancelled: "Query cancelled"
+  config:
+    load_failed: "Failed to load config: %{reason}"
+```
+
+### `LocalizedMessage` トレイト
+
+UI に表示するエラーはすべて `LocalizedMessage` トレイトを実装し、`t!()` で翻訳済み文字列を返す。
+
+```rust
+pub trait LocalizedMessage {
+    fn localized_message(&self) -> String;
+}
+```
+
+`wf-db`、`wf-config`、`wf-query`、`wf-completion`、`wf-history` の各エラー型がこのトレイトを実装する。
+
+### `.slint` 文字列規則
+
+`.slint` ファイル内のユーザー向け文字列は必ず `@tr("key")` を使用する。ハードコードされた英語文字列は禁止。
+
+---
+
 ## 変更履歴
 
 | 日付 | 内容 |
 |------|------|
 | 2026-03-31 | 初版: 基本仕様決定 |
 | 2026-03-31 | 競合比較を踏まえた詳細仕様追加（仮想スクロール・NULL表示・フォーマッター等） |
+| 2026-04-01 | §21 ローカライズ仕様追加（Slint i18n + rust-i18n ハイブリッド、en/ja 対応） |

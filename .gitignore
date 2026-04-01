@@ -1,4 +1,13 @@
+# Ignore build artifacts and lock files
+**/target/
+
+# Internal design docs (not for public repo)
 docs/roadmap/tasks/
 docs/master-password/
 
+# Claude session file
 SESSION.md
+
+# Claude Code — personal use only, not shared with contributors
+/CLAUDE.md
+/.claude/

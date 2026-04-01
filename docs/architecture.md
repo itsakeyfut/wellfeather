@@ -1,6 +1,6 @@
 # Wellfeather アーキテクチャ設計書
 
-> 最終更新: 2026-03-31
+> 最終更新: 2026-04-01
 
 ---
 
@@ -245,11 +245,11 @@ impl DbService {
 ## 5. エラーハンドリング
 
 ### 方針
-- `db / query` モジュール: `thiserror` で型付きエラー定義
-- `Controller` 以上: `anyhow` でコンテキスト付きエラー処理
+- `wf-db` / `wf-query` など各クレート: `thiserror` で型付きエラー定義
+- `AppController` 以上: `anyhow` でコンテキスト付きエラー処理
 
 ```rust
-// db/error.rs
+// wf-db/src/error.rs
 #[derive(Debug, thiserror::Error)]
 pub enum DbError {
     #[error("Connection failed: {0}")]
@@ -262,7 +262,7 @@ pub enum DbError {
     Sqlx(#[from] sqlx::Error),
 }
 
-// controller.rs (anyhow使用)
+// app/src/app/controller.rs (anyhow使用)
 pub async fn run_query(&self, sql: &str) -> anyhow::Result<()> {
     let result = self.db.execute(conn_id, sql)
         .await
@@ -364,82 +364,177 @@ impl ConfigManager {
 
 ---
 
-## 10. 主要依存クレート
+## 10. ワークスペース構成
 
-```toml
-[dependencies]
-slint            = "1"
-sqlx             = { features = ["postgres", "mysql", "sqlite", "runtime-tokio"] }
-tokio            = { features = ["full"] }
-tokio-util       = "0.7"      # CancellationToken
-serde            = { features = ["derive"] }
-toml             = "0.8"
-anyhow           = "1"
-thiserror        = "1"
-tracing          = "0.1"
-tracing-subscriber = "0.3"
-aes-gcm          = "0.10"     # パスワード暗号化
-directories      = "5"        # OS設定ディレクトリ解決
-uuid             = { features = ["v4"] }
-chrono           = "0.4"
+Cargo workspace を使用する。`app/` が唯一 Slint に依存するバイナリクレートであり、
+`crates/` 配下の各クレートは Slint に依存しない。
+
+### クレート依存グラフ
+
+```
+wf-db ──────────────────────────────┐
+wf-config ──────────────────────────┤
+wf-query  ──────────────────────────┼──→ app  (+ slint)
+wf-completion ──────────────────────┤
+wf-history ─────────────────────────┘
+```
+
+### クレート責務
+
+| クレート | 責務 |
+|---------|------|
+| `wf-db` | DB接続・クエリ実行・スキーマ取得。`DbPool`, `DbService`, pg/my/sqlite ドライバ, `DbError`, `DbConnection`, `QueryResult`, `DbMetadata` |
+| `wf-config` | 設定ファイル管理 + パスワード暗号化。`Config` 構造体, `ConfigManager`, AES-256-GCM crypto |
+| `wf-query` | SQLユーティリティ。カーソル位置解析 (`analyzer`), SQLフォーマッタ, CSV/JSONエクスポート |
+| `wf-completion` | SQL補完一式。`CompletionService`, `MetadataCache`, `CompletionEngine`, `parser` |
+| `wf-history` | クエリ履歴の SQLite 永続化。`HistoryService`, `QueryExecution` |
+| `app` | Slint UI + tokio 起動 + `AppController` + `AppState` + `Command/Event` + セッション復元 |
+
+### ディレクトリ構成
+
+```
+wellfeather/
+├── Cargo.toml                   # workspace root
+│
+├── app/                         # バイナリクレート（Slint依存はここのみ）
+│   ├── Cargo.toml
+│   ├── build.rs                 # slint_build::compile
+│   └── src/
+│       ├── main.rs              # tokio起動 + slint::run_event_loop
+│       ├── app/
+│       │   ├── controller.rs    # Command受信 → Service → Event送信
+│       │   ├── command.rs       # Command enum
+│       │   ├── event.rs         # Event / StateEvent enum
+│       │   └── session.rs       # セッション復元ロジック
+│       ├── state/
+│       │   ├── mod.rs           # AppState / SharedState
+│       │   ├── connection_state.rs
+│       │   ├── query_state.rs
+│       │   └── ui_state.rs
+│       └── ui/
+│           ├── mod.rs           # register_*_callbacks()
+│           ├── app.slint
+│           └── components/
+│               ├── sidebar.slint
+│               ├── editor.slint
+│               ├── result_table.slint
+│               └── status_bar.slint
+│
+└── crates/
+    ├── wf-db/
+    │   ├── Cargo.toml
+    │   └── src/
+    │       ├── lib.rs
+    │       ├── pool.rs          # DbPool enum / DbKind enum
+    │       ├── service.rs       # DbService
+    │       ├── models.rs        # DbConnection, QueryResult, DbMetadata, etc.
+    │       ├── error.rs         # DbError (thiserror)
+    │       └── drivers/
+    │           ├── pg.rs
+    │           ├── my.rs
+    │           └── sqlite.rs
+    │
+    ├── wf-config/
+    │   ├── Cargo.toml
+    │   └── src/
+    │       ├── lib.rs
+    │       ├── models.rs        # Config / AppearanceConfig / etc.
+    │       ├── manager.rs       # ConfigManager
+    │       └── crypto.rs        # AES-256-GCM パスワード暗号化
+    │
+    ├── wf-query/
+    │   ├── Cargo.toml
+    │   └── src/
+    │       ├── lib.rs
+    │       ├── analyzer.rs      # カーソル位置からSQL文抽出
+    │       ├── formatter.rs     # SQLフォーマッタ
+    │       └── export.rs        # CSV / JSON エクスポート
+    │
+    ├── wf-completion/
+    │   ├── Cargo.toml
+    │   └── src/
+    │       ├── lib.rs
+    │       ├── service.rs       # CompletionService (debounce)
+    │       ├── engine.rs        # CompletionEngine
+    │       ├── cache.rs         # MetadataCache (Memory + SQLite flush)
+    │       └── parser.rs        # カーソル位置コンテキスト解析
+    │
+    └── wf-history/
+        ├── Cargo.toml
+        └── src/
+            ├── lib.rs
+            └── service.rs       # HistoryService (SQLite)
 ```
 
 ---
 
-## 11. ディレクトリ構成（確定版）
+## 11. 主要依存クレート
 
+### workspace root (`Cargo.toml`)
+
+```toml
+[workspace]
+members = ["app", "crates/wf-db", "crates/wf-config", "crates/wf-query", "crates/wf-completion", "crates/wf-history"]
+resolver = "2"
+
+[workspace.dependencies]
+tokio       = { version = "1", features = ["full"] }
+tokio-util  = "0.7"
+serde       = { version = "1", features = ["derive"] }
+anyhow      = "1"
+thiserror   = "1"
+tracing     = "0.1"
+sqlx        = { version = "0.8", features = ["postgres", "mysql", "sqlite", "runtime-tokio", "macros"] }
+uuid        = { version = "1", features = ["v4"] }
+chrono      = { version = "0.4", features = ["serde"] }
 ```
-src/
-├── main.rs                  # Slint初期化・Controller起動・チャネル接続
-│
-├── ui/
-│   ├── app.slint
-│   └── components/
-│       ├── sidebar.slint
-│       ├── editor.slint
-│       ├── result_table.slint
-│       └── status_bar.slint
-│
-├── app/
-│   ├── controller.rs        # Command受信・Service呼び出し・Event送信
-│   ├── command.rs           # Command enum
-│   ├── event.rs             # Event / StateEvent enum
-│   └── session.rs           # セッション復元ロジック
-│
-├── state/
-│   ├── mod.rs               # AppState / SharedState
-│   ├── connection_state.rs  # ConnectionState + ConnectionData
-│   ├── query_state.rs       # QueryState + QueryData
-│   └── ui_state.rs          # UiState + UiData
-│
-├── db/
-│   ├── mod.rs
-│   ├── service.rs           # DbService
-│   ├── pool.rs              # DbPool enum / DbKind enum
-│   ├── error.rs             # DbError (thiserror)
-│   ├── models.rs            # QueryResult / DbMetadata / DbConnection
-│   └── drivers/
-│       ├── pg.rs            # PostgreSQL固有実装
-│       ├── my.rs            # MySQL固有実装
-│       └── sqlite.rs        # SQLite固有実装
-│
-├── history/
-│   ├── mod.rs
-│   └── service.rs           # HistoryService (SQLite)
-│
-├── completion/
-│   ├── mod.rs
-│   ├── service.rs           # CompletionService
-│   ├── cache.rs             # MetadataCache (Memory + SQLite flush)
-│   └── parser.rs            # カーソル位置解析
-│
-├── config/
-│   ├── mod.rs
-│   ├── manager.rs           # ConfigManager (即時保存)
-│   └── models.rs            # Config / FontConfig 構造体
-│
-└── crypto/
-    └── mod.rs               # AES-256-GCM パスワード暗号化
+
+### `app/Cargo.toml`
+
+```toml
+[dependencies]
+slint       = "1"
+wf-db       = { path = "../crates/wf-db" }
+wf-config   = { path = "../crates/wf-config" }
+wf-query    = { path = "../crates/wf-query" }
+wf-completion = { path = "../crates/wf-completion" }
+wf-history  = { path = "../crates/wf-history" }
+tokio       = { workspace = true }
+tokio-util  = { workspace = true }
+anyhow      = { workspace = true }
+tracing     = { workspace = true }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[build-dependencies]
+slint-build = "1"
+```
+
+### `crates/wf-db/Cargo.toml`
+
+```toml
+[dependencies]
+sqlx        = { workspace = true }
+tokio       = { workspace = true }
+tokio-util  = { workspace = true }
+serde       = { workspace = true }
+thiserror   = { workspace = true }
+uuid        = { workspace = true }
+chrono      = { workspace = true }
+anyhow      = { workspace = true }
+tracing     = { workspace = true }
+```
+
+### `crates/wf-config/Cargo.toml`
+
+```toml
+[dependencies]
+serde       = { workspace = true }
+toml        = "0.8"
+anyhow      = { workspace = true }
+thiserror   = { workspace = true }
+aes-gcm     = "0.10"
+directories = "5"
+uuid        = { workspace = true }
 ```
 
 ---
@@ -448,11 +543,13 @@ src/
 
 | 対象 | 方式 | 使用するもの |
 |------|------|-------------|
-| Service層ロジック | ユニットテスト | モック実装 |
-| DB操作 | 統合テスト | SQLite（インメモリ） |
-| CompletionService | ユニットテスト | MetadataCache モック |
-| ConfigManager | ユニットテスト | 一時ディレクトリ |
-| 暗号化/復号 | ユニットテスト | - |
+| `wf-db` Service層 | ユニットテスト | SQLite インメモリ |
+| `wf-db` ドライバ (PG/MySQL) | 統合テスト (`#[ignore]`) | 実DB |
+| `wf-completion` | ユニットテスト | MetadataCache モック |
+| `wf-config` ConfigManager | ユニットテスト | 一時ディレクトリ |
+| `wf-config` 暗号化/復号 | ユニットテスト | - |
+| `wf-query` analyzer/formatter | ユニットテスト | - |
+| `wf-history` HistoryService | ユニットテスト | SQLite インメモリ |
 
 ---
 
@@ -474,3 +571,4 @@ tracing::warn!("Metadata cache flush failed: {}", e);
 | 日付 | 内容 |
 |------|------|
 | 2026-03-31 | 初版作成 |
+| 2026-04-01 | ワークスペース構成に変更: app/ + crates/(wf-db, wf-config, wf-query, wf-completion, wf-history) |

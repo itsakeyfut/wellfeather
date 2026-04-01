@@ -1,0 +1,117 @@
+name: Feature Request
+description: Suggest a new feature or improvement
+title: "[Feature]: "
+labels: ["T-Feat"]
+assignees: []
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for suggesting a feature! Please provide enough information to help us evaluate and prioritize it.
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: A concise description of the feature in 1-2 sentences.
+      placeholder: Add keyboard shortcut to duplicate the current editor tab with its query text preserved.
+    validations:
+      required: true
+
+  - type: textarea
+    id: motivation
+    attributes:
+      label: Motivation
+      description: What problem does this solve? Who benefits from it?
+      placeholder: |
+        When iterating on a query, I often want to run a variation without losing the original.
+        Currently I have to manually copy the text, open a new tab, and paste.
+
+        Target user: developers who run frequent ad-hoc queries against multiple databases.
+    validations:
+      required: true
+
+  - type: textarea
+    id: detailed_description
+    attributes:
+      label: Detailed Description
+      description: Describe the desired behavior, UI interaction, and any edge cases to consider.
+      placeholder: |
+        A "Duplicate Tab" action (e.g. Ctrl+Shift+D or via the command palette):
+        - Opens a new tab with the same query text as the active tab
+        - Does not copy the result — only the editor content
+        - New tab is focused immediately
+        - Works when there is only one tab (duplicates into a second)
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives Considered
+      description: What other approaches have you tried or considered?
+      placeholder: |
+        - Manually copying text to a new tab: works but is tedious
+        - Session restore (T075): saves query text on close but not for mid-session branching
+
+  - type: textarea
+    id: references
+    attributes:
+      label: References
+      description: Links to related issues, similar tools, or prior art.
+      placeholder: |
+        - Related issue: #60 (multi-tab UI)
+        - Similar behavior in: TablePlus, DataGrip
+
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Priority
+      description: How important is this feature to you?
+      options:
+        - Low - Nice to have
+        - Medium - Would improve my workflow
+        - High - Blocking my use case
+      default: 0
+    validations:
+      required: true
+
+  - type: dropdown
+    id: target_area
+    attributes:
+      label: Target Area
+      description: Which part of the codebase is most relevant?
+      options:
+        - app (UI / Controller / Command / Event)
+        - wf-db (database drivers, connection pool)
+        - wf-config (configuration, encryption)
+        - wf-query (SQL analyzer, formatter, export)
+        - wf-completion (SQL completion engine)
+        - wf-history (query history)
+        - Unknown
+      default: 6
+
+  - type: checkboxes
+    id: contribution
+    attributes:
+      label: Contribution
+      options:
+        - label: I am willing to help implement this feature
+          required: false
+        - label: I can provide test cases or sample SQL
+          required: false
+        - label: I can help with documentation
+          required: false
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Pre-submission Checklist
+      options:
+        - label: I have searched existing issues to ensure this is not a duplicate
+          required: true
+        - label: I have checked the roadmap to see if this is already planned
+          required: false
+        - label: This feature aligns with the project's goals (fast, keyboard-centric SQL client)
+          required: false
