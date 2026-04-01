@@ -1,4 +1,15 @@
 [workspace]
-members = ["xtask"]
-default-members = []
+members = ["app", "xtask"]
+default-members = ["app"]
 resolver = "2"
+
+[workspace.dependencies]
+tokio         = { version = "1.50.0", features = ["full"] }
+tokio-util    = "0.7.18"
+serde         = { version = "1.0.228", features = ["derive"] }
+anyhow        = "1.0.102"
+thiserror     = "2.0.18"
+tracing       = "0.1.44"
+sqlx          = { version = "0.8.6", features = ["postgres", "mysql", "sqlite", "runtime-tokio", "macros"] }
+uuid          = { version = "1.23.0", features = ["v4"] }
+chrono        = { version = "0.4.44", features = ["serde"] }
