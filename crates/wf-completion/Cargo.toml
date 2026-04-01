@@ -1,0 +1,19 @@
+[package]
+name = "wf-completion"
+description = "SQL completion engine with metadata cache and debounce for wellfeather"
+readme = "README.md"
+categories = ["text-editors"]
+keywords = ["sql", "completion", "autocomplete", "metadata"]
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+tokio     = { workspace = true }
+tokio-util = { workspace = true }
+sqlx      = { workspace = true }
+anyhow    = { workspace = true }
+thiserror = { workspace = true }
+tracing   = { workspace = true }

@@ -1,0 +1,20 @@
+[package]
+name = "wf-config"
+description = "Configuration management and AES-256-GCM password encryption for wellfeather"
+readme = "README.md"
+categories = ["config"]
+keywords = ["config", "toml", "encryption", "aes-gcm"]
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+serde       = { workspace = true }
+anyhow      = { workspace = true }
+thiserror   = { workspace = true }
+uuid        = { workspace = true }
+toml        = "1"
+aes-gcm     = "0.10.3"
+directories = "6.0.0"

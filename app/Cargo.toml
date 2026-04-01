@@ -5,6 +5,11 @@ edition = "2024"
 
 [dependencies]
 slint              = "1.15.1"
+wf-db              = { path = "../crates/wf-db" }
+wf-config          = { path = "../crates/wf-config" }
+wf-query           = { path = "../crates/wf-query" }
+wf-completion      = { path = "../crates/wf-completion" }
+wf-history         = { path = "../crates/wf-history" }
 tokio              = { workspace = true }
 tokio-util         = { workspace = true }
 anyhow             = { workspace = true }
