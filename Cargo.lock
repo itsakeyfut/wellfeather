@@ -6393,6 +6393,7 @@ dependencies = [
  "anyhow",
  "directories",
  "serde",
+ "tempfile",
  "thiserror 2.0.18",
  "toml 1.1.1+spec-1.1.0",
  "uuid",
