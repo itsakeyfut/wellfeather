@@ -1,36 +1,39 @@
-# v1.1.0 — エディタ強化（シンタックスハイライト・マルチタブ）
+# v1.1.0 — Editor Enhancement (Syntax Highlighting + Multi-tab)
 
-> **テーマ**: エディタをリッチにする。Phase 2 開始。
-> **前提バージョン**: v1.0.0
-
----
-
-## 目標
-
-シンタックスハイライトとマルチタブを実装し、複数クエリを並行して書ける環境にする。
+> **Theme**: Make the editor richer. Start of Phase 2.
+> **Prerequisite**: v1.0.0
 
 ---
 
-## 達成基準 (Exit Criteria)
+## Goal
 
-- [ ] SQLキーワード・文字列リテラル・コメントが色分けされる
-- [ ] 複数のエディタタブを開き、独立したクエリを管理できる
-- [ ] タブ間でアクティブ接続を共有できる（または個別設定できる）
-- [ ] タブの追加・閉じる・名前変更ができる
+Implement syntax highlighting and multi-tab support so users can write multiple queries in parallel.
 
 ---
 
-## 主要リスク・注意点
+## Exit Criteria
 
-- Slint でのシンタックスハイライト: テキストの部分的なスタイリングは Slint の `TextInput` では直接できない。カスタム描画（`Path` / `Text` の組み合わせ）またはサードパーティ統合が必要な可能性がある。実装前に Slint の capabilities を確認する
-- マルチタブは状態管理（どのタブがアクティブか、各タブのクエリ・結果）の設計変更が必要
+- [ ] SQL keywords, string literals, and comments are color-coded in the editor
+- [ ] Multiple editor tabs can be opened, each managing an independent query
+- [ ] Tabs share the active connection (one connection per app)
+- [ ] Tabs can be added, closed, and renamed
 
 ---
 
-## タスク一覧（概要）
+## Key Risks
 
-詳細は `docs/roadmap/tasks/v1-1-0.md` を参照。
+- **Syntax highlighting in Slint**: Slint's `TextInput` does not natively support per-token styling. A custom rendering approach (canvas overlay or custom `Path`/`Text` elements) may be required. Complete the investigation spike (#84) before starting implementation
+- Multi-tab support requires a state management redesign: which tab is active, and each tab's independent query text and result
 
-- シンタックスハイライト実装
-- マルチタブ UI
-- タブごとの状態管理（QueryState の複数インスタンス化）
+---
+
+## Task List
+
+See `docs/roadmap/tasks/v1-1-0.md` for details.
+
+| Task ID | Title | Issue |
+|---------|-------|-------|
+| — | Slint syntax highlighting: technical investigation spike | #84 |
+| T111 | SQL syntax highlighting in editor | #59 |
+| T112 | Multi-tab editor UI | #60 |
+| T113 | Per-tab state management (TabState in AppState) | #61 |

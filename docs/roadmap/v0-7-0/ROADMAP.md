@@ -1,71 +1,74 @@
-# v0.7.0 — 仕上げ・設定・エクスポート
+# v0.7.0 — Polish, Settings, and Export
 
-> **テーマ**: MVP の残機能を揃え、日常使用に耐えるアプリにする。
-> **前提バージョン**: v0.6.0
-
----
-
-## 目標
-
-エクスポート・テーマ・フォント・セッション復元・メニューバーを実装し、
-「毎日使えるDBクライアント」として完成させる。
+> **Theme**: Complete the remaining MVP features and make the app fit for daily use.
+> **Prerequisite**: v0.6.0
 
 ---
 
-## 達成基準 (Exit Criteria)
+## Goal
 
-- [ ] 結果をCSVファイルとしてエクスポートできる
-- [ ] 結果をJSONファイルとしてエクスポートできる
-- [ ] ダーク / ライト テーマを切り替えられる（設定に保存・再起動後も保持）
-- [ ] `config.toml` の font_family / font_size がエディタ・結果テーブルに適用される
-- [ ] アプリ再起動後にエディタに前回のクエリが復元される
-- [ ] メニューバーからエクスポート・テーマ切り替え等の主要操作ができる
-- [ ] tracing ログが動作する（RUST_LOG=debug でデバッグ出力）
+Implement export, theming, font configuration, session restore, menu bar, localization, and logging
+to finish wellfeather as a daily-use database client.
 
 ---
 
-## 対象機能・実装範囲
+## Exit Criteria
 
-| カテゴリ | 内容 |
-|---------|------|
-| CSVエクスポート | QueryResult → CSV変換 + ファイル保存 |
-| JSONエクスポート | QueryResult → JSON変換 + ファイル保存 |
-| エクスポートUI | ファイル保存パス選択 |
-| テーマ切り替え | ダーク/ライト切り替え + config.toml 保存 |
-| フォント設定 | config.toml の font 設定をエディタ・テーブルに反映 |
-| セッション復元 | 前回のクエリ文字列をエディタに復元（v0.2.0 の接続復元に追加） |
-| メニューバー | ファイル・設定メニューの実装 |
-| tracing | tracing-subscriber セットアップ + RUST_LOG 対応 |
+- [ ] Query results can be exported as a CSV file
+- [ ] Query results can be exported as a JSON file
+- [ ] Dark / light theme can be toggled (saved to config, persists across restarts)
+- [ ] `font_family` / `font_size` from `config.toml` are applied to the editor and result table
+- [ ] The previous query is restored in the editor after restarting
+- [ ] Major operations (export, theme toggle, etc.) are accessible from the menu bar
+- [ ] Both English and Japanese locales are fully supported (Slint .po + rust-i18n .yml)
+- [ ] Structured logging works (`RUST_LOG=debug` prints debug output)
 
 ---
 
-## 実装しないもの（スコープ外）
+## Scope
 
-- フォント設定のUI（config.toml 直接編集のみ、UI は将来）
-- 起動時間最適化（v1.0.0）
-- クロスプラットフォームテスト（v1.0.0）
+| Category | Content |
+|----------|---------|
+| CSV export | QueryResult → CSV conversion + file save |
+| JSON export | QueryResult → JSON conversion + file save |
+| Export UI | File save dialog for path selection |
+| Theme switching | Dark/light toggle + config.toml persistence |
+| Font config | Apply font settings from config.toml to editor and result table |
+| Session restore | Restore previous query text in editor (extends v0.2.0 connection restore) |
+| Menu bar | File and Settings menu implementation |
+| Localization | Slint .po files (en/ja) + rust-i18n .yml files, LocalizedMessage trait on error types |
+| Logging | tracing-subscriber setup + RUST_LOG support |
 
 ---
 
-## 主要リスク・注意点
+## Out of Scope
 
-- Slint のファイル保存ダイアログは標準では提供されていない。`rfd`（Rust File Dialog）クレートの追加を検討する
-- テーマ切り替えは Slint のカラー変数（グローバル定義）で実現する。コンポーネント全体への伝播に注意
-- セッション復元のクエリ文字列が非常に長い場合でも、config.toml に保存できることを確認する
-- CSV 出力のエンコーディング（UTF-8 BOM付き vs なし）は Windows の Excel 互換性のためにオプションを検討
+- Font settings UI (config.toml direct edit only; UI in v1.3.0)
+- Startup time optimization (v1.0.0)
+- Cross-platform testing (v1.0.0)
 
 ---
 
-## タスク一覧
+## Key Risks
 
-詳細は `docs/roadmap/tasks/v0-7-0.md` を参照。
+- Slint does not provide a native file save dialog — add the `rfd` (Rust File Dialog) crate
+- Theme switching uses Slint color globals (`global ThemeColors`) — verify color propagation to all components including `TextInput` and `ListView`
+- Very long query strings (e.g. > 10KB) must still persist correctly in `config.toml`
+- CSV encoding: output UTF-8 BOM (`\xEF\xBB\xBF`) for Excel compatibility on Windows
 
-| タスクID | タイトル |
-|---------|---------|
-| T071 | CSV エクスポート |
-| T072 | JSON エクスポート |
-| T073 | テーマ切り替え（ダーク/ライト） |
-| T074 | フォント設定の適用 |
-| T075 | セッション復元（クエリ文字列） |
-| T076 | メニューバー実装 |
-| T077 | tracing セットアップ |
+---
+
+## Task List
+
+See `docs/roadmap/tasks/v0-7-0.md` for details.
+
+| Task ID | Title | Issue |
+|---------|-------|-------|
+| T071 | CSV export of query results | #45 |
+| T072 | JSON export of query results | #46 |
+| T073 | Dark/light theme switching with ThemeColors global | #47 |
+| T074 | Font family/size configuration applied to editor and result table | #48 |
+| T075 | Session restore: persist and reload editor query text | #49 |
+| T076 | Custom menu bar (File / Edit / Query / Settings) | #50 |
+| T077 | tracing setup: structured logging with RUST_LOG control | #51 |
+| — | Localization support (Slint i18n + rust-i18n, en/ja) | #79 |

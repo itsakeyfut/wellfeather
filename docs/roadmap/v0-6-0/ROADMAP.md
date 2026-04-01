@@ -1,71 +1,71 @@
-# v0.6.0 — SQL体験
+# v0.6.0 — SQL Writing Experience
 
-> **テーマ**: SQL を書く体験を DataGrip レベルに近づける。軽量・高速で。
-> **前提バージョン**: v0.5.0
-
----
-
-## 目標
-
-SQL補完とフォーマッターを実装し、「書きやすく・読みやすい」クエリ体験を実現する。
-補完は DBeaver / TablePlus より優れた体験を、フォーマッターは DataGrip に匹敵するものを、
-いずれも軽量・高速に実装する。
+> **Theme**: Bring the SQL writing experience close to DataGrip quality — lightweight and fast.
+> **Prerequisite**: v0.5.0
 
 ---
 
-## 達成基準 (Exit Criteria)
+## Goal
 
-- [ ] 入力から 300ms 後に補完候補が自動表示される
-- [ ] Ctrl+Space で手動補完トリガーができる
-- [ ] SQLキーワード（SELECT, WHERE, JOIN等）が補完される
-- [ ] 接続中のDBのテーブル名が補完される
-- [ ] FROM句に応じたカラム名補完が働く
-- [ ] 補完候補を ↑↓/Enter で選択・挿入できる、Esc でキャンセルできる
-- [ ] Ctrl+Shift+F で SQL が整形される（インデント・キーワード大文字化）
-- [ ] 補完・フォーマッターどちらも < 100ms で応答する
+Implement SQL completion and a formatter to create a "easy to write, easy to read" query experience.
+Target completion quality better than DBeaver / TablePlus, and a formatter on par with DataGrip,
+both implemented lightweight and fast.
 
 ---
 
-## 対象機能・実装範囲
+## Exit Criteria
 
-| カテゴリ | 内容 |
-|---------|------|
-| パーサー | completion/parser.rs — カーソル位置のコンテキスト判定 |
-| 補完エンジン | completion/engine.rs — キーワード/テーブル/カラム候補生成 |
-| CompletionService | completion/service.rs — debounce 300ms + Ctrl+Space |
-| 補完UI | Slint ポップアップ（候補リスト、キーボード選択） |
-| SQLフォーマッター | query/formatter.rs — 軽量整形ロジック |
-| ショートカット | Ctrl+Shift+F フォーマッター実行 |
-
----
-
-## 実装しないもの（スコープ外）
-
-- LSP（sql-language-server）統合（Phase 3）
-- 型推論ベース補完（Phase 3）
-- シンタックスハイライト（v1.1.0）
-- エイリアスを考慮したカラム補完（将来）
+- [ ] Completion candidates appear automatically 300ms after typing stops
+- [ ] Ctrl+Space triggers completion manually
+- [ ] SQL keywords (SELECT, WHERE, JOIN, etc.) are completed
+- [ ] Table names from the connected DB are completed
+- [ ] Column names are completed based on the FROM clause context
+- [ ] Candidates can be selected with ↑↓/Enter and dismissed with Esc
+- [ ] Ctrl+Shift+F formats the SQL (indentation + keyword uppercasing)
+- [ ] Both completion and formatter respond in < 100ms
 
 ---
 
-## 主要リスク・注意点
+## Scope
 
-- **Slint でのポップアップ実装**: 補完候補をエディタ上に重ねて表示するポップアップは Slint の PopupWindow で実現できるが、カーソル位置への配置は工夫が必要
-- Slint の TextInput はカーソル位置（文字インデックス）取得の API が限定的な場合がある。実装前に Slint のカーソル位置取得方法を確認する
-- フォーマッターは外部クレート（`sqlformat` 等）を使うか自前実装かを判断する
-  - 軽量優先のため `sqlformat` クレート（Rust実装、軽量）の採用を検討する
-- 補完の debounce は `slint::Timer::SingleShot` で実装（reference-patterns.md 参照）
+| Category | Content |
+|----------|---------|
+| Parser | completion/parser.rs — cursor-position context analysis |
+| Completion engine | completion/engine.rs — keyword / table / column candidate generation |
+| CompletionService | completion/service.rs — 300ms debounce + Ctrl+Space trigger |
+| Completion UI | Slint popup (candidate list with keyboard selection) |
+| SQL formatter | query/formatter.rs — lightweight formatting logic |
+| Shortcut | Ctrl+Shift+F triggers formatter |
 
 ---
 
-## タスク一覧
+## Out of Scope
 
-詳細は `docs/roadmap/tasks/v0-6-0.md` を参照。
+- LSP (sql-language-server) integration (Phase 3)
+- Type-inference-based completion (Phase 3)
+- Syntax highlighting (v1.1.0)
+- Alias-aware column completion (future)
 
-| タスクID | タイトル |
-|---------|---------|
-| T061 | completion/parser.rs — カーソル位置コンテキスト解析 |
-| T062 | completion/engine.rs — 補完候補生成 |
-| T063 | completion/service.rs — CompletionService（debounce） |
-| T064 | 補完ポップアップUI |
-| T065 | query/formatter.rs — SQLフォーマッター |
+---
+
+## Key Risks
+
+- **Completion popup in Slint**: Overlaying a popup at the cursor position using `PopupWindow` is possible but requires care for accurate cursor-relative positioning
+- Slint's `TextInput` may have a limited API for retrieving cursor position (character index) — verify before implementation
+- Decide whether to use an external crate (`sqlformat` etc.) or a custom formatter implementation:
+  - Prefer `sqlformat` (pure Rust, lightweight) for speed
+- Debounce for completion uses `slint::Timer::SingleShot` (see reference-patterns.md)
+
+---
+
+## Task List
+
+See `docs/roadmap/tasks/v0-6-0.md` for details.
+
+| Task ID | Title | Issue |
+|---------|-------|-------|
+| T061 | completion/parser.rs — cursor-position context analysis | #40 |
+| T062 | completion/engine.rs — completion candidate generation | #41 |
+| T063 | completion/service.rs — CompletionService with 300ms debounce | #42 |
+| T064 | Completion popup UI in editor | #43 |
+| T065 | query/formatter.rs — SQL formatter (Ctrl+Shift+F) | #44 |

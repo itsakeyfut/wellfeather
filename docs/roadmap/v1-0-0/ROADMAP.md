@@ -1,73 +1,79 @@
-# v1.0.0 — MVP リリース（安定化・パフォーマンス検証）
+# v1.0.0 — MVP Release (Stability and Performance Verification)
 
-> **テーマ**: MVPの品質を担保し、コアバリューを数値で証明してリリースする。
-> **前提バージョン**: v0.7.0（全MVP機能が実装済み）
-
----
-
-## 目標
-
-v0.7.0 までで実装した全MVP機能を安定させ、
-「起動時間 < 1秒」「低メモリ」というコアバリューを計測して証明する。
-Windows / macOS / Linux でビルド・動作が確認できた状態でリリースする。
+> **Theme**: Verify MVP quality and prove the core value proposition with numbers.
+> **Prerequisite**: v0.7.0 (all MVP features implemented)
 
 ---
 
-## 達成基準 (Exit Criteria)
+## Goal
 
-- [ ] **起動時間 < 1秒**（リリースビルド、3プラットフォームで計測）
-- [ ] メモリ使用量を計測し、DBeaver / TablePlus と比較した数値を記録
-- [ ] Windows / macOS / Linux でビルドが通り、基本動作が確認できる
-- [ ] `cargo test` 全テストが通る（ユニット + 統合テスト）
-- [ ] CI パイプライン（フォーマット・clippy・テスト）が整備されている
-- [ ] README.md にセットアップ手順・使い方が記載されている
-- [ ] リリースビルドのバイナリが各プラットフォームで生成される
+Stabilize all MVP features implemented through v0.7.0 and measure the core value proposition —
+startup < 1 second, low memory usage.
+Release with confirmed builds and basic functionality verified on Windows and macOS
+(Linux verified separately; full Linux packaging deferred to v2.0.0).
 
 ---
 
-## 対象作業・実装範囲
+## Exit Criteria
 
-| カテゴリ | 内容 |
-|---------|------|
-| パフォーマンス計測 | 起動時間・メモリ使用量の計測と最適化 |
-| クロスプラットフォーム | Windows/macOS/Linux でのビルド確認・パス・ショートカット検証 |
-| テスト整備 | ユニット・統合テストの補完、CIパイプライン構築 |
-| ドキュメント | README.md、インストール手順、基本的な使い方 |
-| リリースビルド | Cargo.toml [profile.release] の最適化設定 |
-| バグ修正 | v0.1.0〜v0.7.0 で発見された問題の修正 |
-
----
-
-## パフォーマンス目標
-
-| 指標 | 目標値 | 計測方法 |
-|------|--------|---------|
-| 起動時間（初回） | < 1秒 | `time ./wellfeather` |
-| 起動時間（2回目以降） | < 0.5秒 | 〃（config 読み込み後） |
-| アイドル時メモリ | < 50MB | OSのプロセスモニター |
-| 10万行表示メモリ | < 200MB | 〃 |
+- [ ] **Startup time < 1 second** (release build, measured on Windows and macOS)
+- [ ] Memory usage measured and recorded (compare against DBeaver / TablePlus)
+- [ ] Build passes and basic functionality verified on Windows and macOS
+- [ ] All `cargo test` tests pass (unit + integration)
+- [ ] CI pipeline is in place (fmt-check, clippy, test)
+- [ ] README.md contains setup instructions and basic usage
+- [ ] Platform abstraction layer in place (`app/src/platform/`, path DI, DPI awareness)
+- [ ] Windows MSIX and macOS DMG packages can be built via `cargo x package`
 
 ---
 
-## 主要リスク・注意点
+## Performance Targets
 
-- クロスプラットフォーム: キーボードショートカット（特に Ctrl vs Cmd on macOS）の差異
-- クロスプラットフォーム: `directories` クレートのパス差異（特に Linux XDG準拠）
-- パフォーマンス: sqlx の初期化コストが大きい場合、Lazy 初期化を検討
-- パフォーマンス: Slint の初期レンダリングコストの最適化（フォントロード等）
+| Metric | Target | How to Measure |
+|--------|--------|---------------|
+| Startup time (cold) | < 1 second | `time ./wellfeather` |
+| Startup time (warm) | < 0.5 seconds | same (after config loaded) |
+| Idle memory | < 50 MB | OS process monitor |
+| Memory with 100k rows | < 200 MB | same |
 
 ---
 
-## タスク一覧
+## Scope
 
-詳細は `docs/roadmap/tasks/v1-0-0.md` を参照。
+| Category | Content |
+|----------|---------|
+| Performance measurement | Startup time and memory profiling, optimization if needed |
+| Cross-platform | Build verification and path / shortcut testing on Windows and macOS |
+| Test coverage | Unit and integration test additions, CI pipeline setup |
+| Documentation | README.md, installation steps, basic usage |
+| Release build | `[profile.release]` optimization settings (LTO, strip, panic=abort) |
+| Platform abstraction | `app/src/platform/` — data/config/cache dirs, DPI awareness, dark mode detection |
+| Distribution packaging | Windows MSIX + macOS DMG via `cargo x package` with GitHub Actions release workflow |
+| Bug fixes | Fix issues discovered during v0.1.0–v0.7.0 development |
 
-| タスクID | タイトル |
-|---------|---------|
-| T101 | 起動時間計測・最適化 |
-| T102 | メモリ使用量計測 |
-| T103 | クロスプラットフォームビルド確認（macOS/Linux） |
-| T104 | テスト整備・CI構築 |
-| T105 | README.md + ドキュメント整備 |
-| T106 | リリースビルド設定 |
-| T107 | v0.x バグ修正 |
+---
+
+## Key Risks
+
+- Cross-platform: keyboard shortcut differences (Ctrl vs Cmd on macOS)
+- Cross-platform: `directories` crate path differences (Linux XDG compliance)
+- Performance: sqlx initialization cost may be significant — consider lazy initialization
+- Performance: Slint initial render cost (font loading, etc.) may need optimization
+
+---
+
+## Task List
+
+See `docs/roadmap/tasks/v1-0-0.md` for details.
+
+| Task ID | Title | Issue |
+|---------|-------|-------|
+| T101 | Startup time measurement and optimization (< 1 second) | #52 |
+| T102 | Memory usage measurement (idle < 50 MB, 100k rows < 200 MB) | #53 |
+| T103 | Cross-platform build verification (Windows + macOS) | #54 |
+| T104 | Test coverage audit + GitHub Actions CI pipeline | #55 |
+| T105 | README.md and user documentation | #56 |
+| T106 | Release build profile optimization (LTO, strip, panic=abort) | #57 |
+| T107 | v0.x bug fixes and clippy clean-up | #58 |
+| — | Platform abstraction layer (data/config/cache dirs, DPI awareness, dark mode) | #80 |
+| — | Distribution packaging: Windows MSIX + macOS DMG (MVP release) | #81 |

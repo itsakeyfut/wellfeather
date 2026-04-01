@@ -1,29 +1,31 @@
-# v2.1.0 — CLI連携・LSP補完
+# v2.1.0 — CLI Integration and LSP Completion
 
-> **テーマ**: GUIとCLIのハイブリッド運用と、最高品質のSQL補完を実現する。
-> **前提バージョン**: v2.0.0
-
----
-
-## 目標
-
-CLIからのクエリ実行とLSPベースの高精度SQL補完を実装し、
-開発者の多様なワークフローに対応する。
+> **Theme**: Support hybrid GUI + CLI workflows and deliver top-tier SQL completion.
+> **Prerequisite**: v2.0.0
 
 ---
 
-## 達成基準 (Exit Criteria)
+## Goal
 
-- [ ] `wellfeather query "SELECT * FROM users"` でCLIからクエリ実行できる
-- [ ] CLIとGUIで接続設定・クエリエンジンを共有できる
-- [ ] LSP（sql-language-server 等）ベースの補完が動作する
+Implement CLI-based query execution and LSP-powered high-accuracy SQL completion
+to support diverse developer workflows.
 
 ---
 
-## タスク一覧（概要）
+## Exit Criteria
 
-詳細は `docs/roadmap/tasks/v2-1-0.md` を参照。
+- [ ] `wellfeather query "SELECT * FROM users"` executes a query from the CLI
+- [ ] CLI and GUI share connection config and the query engine
+- [ ] LSP-based completion (e.g. sql-language-server) is operational, with fallback to the built-in completion engine when the LSP server is unavailable
 
-- CLIサブコマンド（clap クレート）
-- Query Engine の CLI / GUI 共有
-- LSP統合（sql-language-server プロセス管理）
+---
+
+## Task List
+
+See `docs/roadmap/tasks/v2-1-0.md` for details.
+
+| Task ID | Title | Issue |
+|---------|-------|-------|
+| T211 | CLI subcommand: wellfeather query | #75 |
+| T212 | Refactor: CLI/GUI shared query engine separation | #76 |
+| T213 | LSP-based SQL completion integration | #77 |

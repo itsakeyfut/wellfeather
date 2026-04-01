@@ -1,69 +1,69 @@
-# v0.5.0 — 結果テーブル完成
+# v0.5.0 — Result Table Polish
 
-> **テーマ**: 大量データを快適に閲覧する。競合との差別化を結果表示で示す。
-> **前提バージョン**: v0.4.0
-
----
-
-## 目標
-
-結果テーブルを DBeaver / TablePlus を超える品質に仕上げる。
-仮想スクロールで数万行を滑らかに表示し、NULL の視認性を高め、
-コピー・ソート・プレビューを整えて「見やすくて使いやすい」体験を実現する。
+> **Theme**: Browse large datasets comfortably. Differentiate from competitors through result display quality.
+> **Prerequisite**: v0.4.0
 
 ---
 
-## 達成基準 (Exit Criteria)
+## Goal
 
-- [ ] 10万行の結果でも仮想スクロールにより滑らかに表示される
-- [ ] NULL セルにバッジ（「NULL」と薄い色で表示）が付く
-- [ ] カラムヘッダークリックで昇順/降順ソートができる（取得済みデータのみ）
-- [ ] セルを選択すると下部プレビューペインに全文が表示される（長テキスト・JSON対応）
-- [ ] Ctrl+C でセル値をクリップボードにコピーできる
-- [ ] 右クリックメニューで「セル値 / 行全体 / TSV形式」のコピーができる
-- [ ] ページサイズを 100 / 500 / 1000 行から選択できる（設定に保存）
+Bring the result table to a quality level that surpasses DBeaver and TablePlus.
+Display tens of thousands of rows smoothly with virtual scroll, improve NULL visibility,
+and complete copy / sort / preview functionality for a "readable and usable" experience.
 
 ---
 
-## 対象機能・実装範囲
+## Exit Criteria
 
-| カテゴリ | 内容 |
-|---------|------|
-| 仮想スクロール | Slint ListView を使ったビューポート描画のみ |
-| NULL バッジ | None値セルの視覚化（薄いNULLラベル） |
-| カラムソート | クライアントサイド昇順/降順ソート |
-| 下部プレビューペイン | 選択セル全文の常時表示エリア |
-| コピー | Ctrl+C セル値、右クリックメニュー |
-| ページネーション | 100/500/1000 行セレクター + config.toml 保存 |
-
----
-
-## 実装しないもの（スコープ外）
-
-- セル編集・UPDATE発行（MVP対象外）
-- エクスポート（v0.7.0）
-- サーバーサイドソート・ページング（将来）
+- [ ] 100,000-row results render smoothly via virtual scroll
+- [ ] NULL cells display a badge ("NULL" in a muted color)
+- [ ] Clicking a column header sorts ascending/descending (fetched data only)
+- [ ] Selecting a cell shows its full content in a bottom preview pane (supports long text and JSON)
+- [ ] Ctrl+C copies the cell value to the clipboard
+- [ ] Right-click context menu offers "Copy cell value / Copy row / Copy as TSV"
+- [ ] Page size can be set to 100 / 500 / 1000 rows (saved to config)
 
 ---
 
-## 主要リスク・注意点
+## Scope
 
-- **Slint の仮想スクロール**: `ListView` でビューポートのみ描画できるが、可変高さの行の場合に制限が出ることがある。行高さを固定にする設計にする
-- 仮想スクロールでは Slint の `Model` が全データを保持しつつ表示範囲だけ描画する形になるため、`VecModel` のメモリ使用量は全行分となる。必要に応じてページネーションで制限する
-- カラムソートはクライアントサイドのみ（既取得データ内）のため、ページネーションで切り捨てられた行は含まれない旨を UI で明示する
-- 右クリックメニューは Slint での実装に工夫が必要（PopupWindow or 独自実装）
+| Category | Content |
+|----------|---------|
+| Virtual scroll | Slint ListView viewport-only rendering |
+| NULL badge | Visualize None-valued cells (muted NULL label) |
+| Column sort | Client-side ascending/descending sort |
+| Bottom preview pane | Always-visible area showing full content of the selected cell |
+| Copy | Ctrl+C for cell value, right-click context menu |
+| Pagination | 100/500/1000 row selector + config.toml persistence |
 
 ---
 
-## タスク一覧
+## Out of Scope
 
-詳細は `docs/roadmap/tasks/v0-5-0.md` を参照。
+- Cell editing and UPDATE statements (intentionally excluded from MVP)
+- Export (v0.7.0)
+- Server-side sort and pagination (future)
 
-| タスクID | タイトル |
-|---------|---------|
-| T051 | 仮想スクロール実装 — Slint ListView |
-| T052 | NULL バッジ表示 |
-| T053 | カラムソート（クライアントサイド） |
-| T054 | 下部プレビューペイン |
-| T055 | コピー機能（Ctrl+C + 右クリックメニュー） |
-| T056 | ページネーションセレクター |
+---
+
+## Key Risks
+
+- **Slint virtual scroll**: `ListView` renders only the viewport, but variable-height rows can cause issues — fix row height in the design
+- Virtual scroll with `VecModel` holds all rows in memory; use pagination to limit memory when needed
+- Client-side sort applies only to fetched rows, not to pages that have been truncated — make this clear in the UI
+- Right-click context menu requires custom work in Slint (PopupWindow or custom implementation)
+
+---
+
+## Task List
+
+See `docs/roadmap/tasks/v0-5-0.md` for details.
+
+| Task ID | Title | Issue |
+|---------|-------|-------|
+| T051 | Virtual scroll implementation for result table (Slint ListView) | #34 |
+| T052 | NULL badge display in result table | #35 |
+| T053 | Client-side column sort in result table | #36 |
+| T054 | Bottom preview pane for full cell content | #37 |
+| T055 | Copy from result table (Ctrl+C + right-click context menu) | #38 |
+| T056 | Pagination row-count selector (100 / 500 / 1000) | #39 |

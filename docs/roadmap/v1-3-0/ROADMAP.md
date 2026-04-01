@@ -1,32 +1,36 @@
-# v1.3.0 — 履歴UI・遅いクエリ検出・タイムアウト設定
+# v1.3.0 — History UI, Slow Query Detection, and Timeout
 
-> **テーマ**: クエリ履歴を活用できるようにし、パフォーマンス問題を早期発見する。
-> **前提バージョン**: v1.2.0
-
----
-
-## 目標
-
-過去のクエリを検索・再利用できる履歴UIと、
-遅いクエリへの気づきを与えるアラート機能を実装する。
+> **Theme**: Make query history actionable and surface performance issues early.
+> **Prerequisite**: v1.2.0
 
 ---
 
-## 達成基準 (Exit Criteria)
+## Goal
 
-- [ ] クエリ履歴をUIで閲覧できる（一覧表示）
-- [ ] 履歴をキーワードで検索・フィルタリングできる
-- [ ] 履歴エントリをクリックするとエディタに挿入できる
-- [ ] 設定で「タイムアウト秒数」を指定でき、超過時に自動キャンセルされる
-- [ ] 設定した閾値（例: 1秒）を超えたクエリにステータスバーで警告が表示される
+Implement a history UI for searching and reusing past queries, alert functionality for slow queries,
+and an interactive settings screen so users can change configuration without editing `config.toml` by hand.
 
 ---
 
-## タスク一覧（概要）
+## Exit Criteria
 
-詳細は `docs/roadmap/tasks/v1-3-0.md` を参照。
+- [ ] Query history is viewable via the UI (list display)
+- [ ] History can be searched and filtered by keyword
+- [ ] Clicking a history entry inserts it into the editor
+- [ ] A timeout duration can be configured; queries that exceed it are automatically cancelled
+- [ ] Queries exceeding a configured threshold (e.g. 1 second) trigger a warning in the status bar
+- [ ] Font, theme, timeout, slow query threshold, and language can be changed from the settings screen without editing `config.toml`
 
-- history/service.rs に検索機能追加
-- 履歴UI（サイドパネルまたはモーダル）
-- タイムアウト設定（config.toml）+ 自動キャンセル
-- 遅いクエリ検出・警告表示
+---
+
+## Task List
+
+See `docs/roadmap/tasks/v1-3-0.md` for details.
+
+| Task ID | Title | Issue |
+|---------|-------|-------|
+| T131 | HistoryService: keyword search and connection filter | #65 |
+| T132 | Query history panel UI (list, search, insert, re-run) | #66 |
+| T133 | Configurable query timeout with auto-cancel | #67 |
+| T134 | Slow query detection and status bar warning | #68 |
+| — | Settings screen UI: interactive configuration panel | #85 |

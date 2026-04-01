@@ -1,10 +1,10 @@
-# Wellfeather アーキテクチャ設計書
+# Wellfeather Architecture Design
 
-> 最終更新: 2026-04-01
+> Last updated: 2026-04-01
 
 ---
 
-## 1. 全体アーキテクチャ
+## 1. Overall Architecture
 
 ```
 ┌─────────────────────────────────────────────────────┐
@@ -14,7 +14,7 @@
                    │  Slint callbacks + invoke_from_event_loop
 ┌──────────────────▼──────────────────────────────────┐
 │               AppController                         │
-│  Command受信 → Service呼び出し → Event送信          │
+│  Receive Command → Call Service → Send Event        │
 └──────┬───────────┬────────────────┬─────────────────┘
        │           │                │
 ┌──────▼──┐  ┌─────▼──────┐  ┌─────▼──────────┐
@@ -29,26 +29,26 @@
 
 ---
 
-## 2. 通信パターン: Controller + Channel ハイブリッド
+## 2. Communication Pattern: Controller + Channel Hybrid
 
-UI と バックエンドは **Command** と **Event** の2方向チャネルで通信する。
-UI は Command を送るだけ、Controller は Event を返すだけ。UI更新は常に `invoke_from_event_loop` 経由。
+The UI and backend communicate over two directional channels: **Command** and **Event**.
+The UI only sends Commands; the Controller only returns Events. UI updates always go through `invoke_from_event_loop`.
 
 ```
 UI (Slint)
   │  tx_cmd.send(Command::RunQuery(sql))
   │
   ▼
-AppController (tokio task でループ)
-  │  rx_cmd.recv() → match cmd → Service呼び出し
+AppController (looping in a tokio task)
+  │  rx_cmd.recv() → match cmd → call Service
   │  tx_event.send(Event::QueryResult(...))
   │
   ▼
-UI更新ハンドラ (invoke_from_event_loop)
-  │  rx_event.recv() → match event → Slint property set
+UI update handler (invoke_from_event_loop)
+  │  rx_event.recv() → match event → set Slint property
 ```
 
-### Command / Event 定義
+### Command / Event Definitions
 
 ```rust
 /// UI → Controller
@@ -56,8 +56,8 @@ pub enum Command {
     Connect(DbConnection),
     Disconnect(String),           // connection_id
     RunQuery(String),             // sql
-    RunSelection(String),         // sql (選択範囲)
-    RunAll(String),               // sql (全文)
+    RunSelection(String),         // sql (selected range)
+    RunAll(String),               // sql (entire editor)
     CancelQuery,
     FetchCompletion(String, usize), // sql, cursor_pos
     ExportResult(ExportFormat, PathBuf),
@@ -94,15 +94,15 @@ pub enum ExportFormat {
 
 ---
 
-## 3. 状態管理
+## 3. State Management
 
-### 設計方針
-- `Arc<AppState>` を全サービスで共有（外側にはロックなし）
-- 各サブ状態が内部に `RwLock<Data>` を持つ
-- Controller / UI は直接 `RwLock` を触らない（メソッド経由のみ）
-- 状態変更は `StateEvent` としてチャネルに流してUI更新を統一
+### Design Policy
+- `Arc<AppState>` is shared across all services (no outer lock)
+- Each sub-state holds an internal `RwLock<Data>`
+- Controllers and the UI never touch `RwLock` directly — method-only access
+- State changes are sent as `StateEvent` through the channel to unify UI updates
 
-### 構造
+### Structure
 
 ```rust
 pub struct AppState {
@@ -176,7 +176,7 @@ impl UiState {
 
 ---
 
-## 4. DB層の設計
+## 4. DB Layer Design
 
 ### DbPool (enum dispatch)
 
@@ -220,7 +220,7 @@ impl DbPool {
 }
 ```
 
-> **発展方針**: 各DB固有の差分が増えた段階で、内部に `trait QueryExecutor` を導入し実装を分離する。
+> **Evolution path**: When DB-specific differences grow, introduce a `trait QueryExecutor` internally to separate implementations.
 
 ### DbService
 
@@ -242,11 +242,11 @@ impl DbService {
 
 ---
 
-## 5. エラーハンドリング
+## 5. Error Handling
 
-### 方針
-- `wf-db` / `wf-query` など各クレート: `thiserror` で型付きエラー定義
-- `AppController` 以上: `anyhow` でコンテキスト付きエラー処理
+### Policy
+- Each crate (`wf-db`, `wf-query`, etc.): typed error definitions via `thiserror`
+- `AppController` and above: contextual error handling via `anyhow`
 
 ```rust
 // wf-db/src/error.rs
@@ -262,7 +262,7 @@ pub enum DbError {
     Sqlx(#[from] sqlx::Error),
 }
 
-// app/src/app/controller.rs (anyhow使用)
+// app/src/app/controller.rs (using anyhow)
 pub async fn run_query(&self, sql: &str) -> anyhow::Result<()> {
     let result = self.db.execute(conn_id, sql)
         .await
@@ -273,23 +273,23 @@ pub async fn run_query(&self, sql: &str) -> anyhow::Result<()> {
 
 ---
 
-## 6. SQL補完の設計
+## 6. SQL Completion Design
 
 ```
-入力イベント
+Input event
   │
   ├─ debounce (300ms)
   │
   ▼
 CompletionService.complete(sql, cursor_pos)
   │
-  ├─ Parser: カーソル位置のコンテキスト解析
-  │    - キーワード / テーブル名 / カラム名 を判定
+  ├─ Parser: analyze context at cursor position
+  │    - determine keyword / table name / column name
   │
-  ├─ MetadataCache (in-memory) から候補取得
-  │    - テーブル一覧 / カラム一覧（FROM句連動）
+  ├─ Fetch candidates from MetadataCache (in-memory)
+  │    - table list / column list (filtered by FROM clause)
   │
-  └─ 結果: Vec<CompletionItem>
+  └─ Result: Vec<CompletionItem>
 ```
 
 ### MetadataCache
@@ -297,50 +297,50 @@ CompletionService.complete(sql, cursor_pos)
 ```rust
 pub struct MetadataCache {
     memory: RwLock<HashMap<String, DbMetadata>>,  // conn_id → metadata
-    db_path: PathBuf,                             // SQLite flush先
+    db_path: PathBuf,                             // SQLite flush destination
 }
 
 impl MetadataCache {
     pub async fn load(&self, conn_id: &str) -> Option<DbMetadata>;
     pub async fn store(&self, conn_id: &str, meta: DbMetadata);
-    pub async fn flush_to_disk(&self) -> anyhow::Result<()>;  // 定期呼び出し
+    pub async fn flush_to_disk(&self) -> anyhow::Result<()>;  // called periodically
 }
 ```
 
 ---
 
-## 7. クエリキャンセルの設計
+## 7. Query Cancellation Design
 
-`tokio_util::sync::CancellationToken` を使用。
+Uses `tokio_util::sync::CancellationToken`.
 
 ```rust
-// クエリ実行時
+// At query execution
 let token = CancellationToken::new();
 state.query.set_cancel_token(token.clone());
 
 tokio::select! {
-    result = db.execute(sql) => { /* 正常完了 */ }
-    _ = token.cancelled()   => { /* キャンセル */ }
+    result = db.execute(sql) => { /* normal completion */ }
+    _ = token.cancelled()   => { /* cancelled */ }
 }
 
-// Esc / Cancel ボタン時
-state.query.cancel();  // → token.cancel() を内部で呼ぶ
+// On Esc / Cancel button
+state.query.cancel();  // → internally calls token.cancel()
 ```
 
 ---
 
-## 8. 設定管理
+## 8. Configuration Management
 
 ```rust
 pub struct ConfigManager {
-    path: PathBuf,  // OS設定ディレクトリ / config.toml
+    path: PathBuf,  // OS config directory / config.toml
 }
 
 impl ConfigManager {
     pub fn load() -> anyhow::Result<Config>;
-    pub fn save(&self, config: &Config) -> anyhow::Result<()>;  // 即時保存
+    pub fn save(&self, config: &Config) -> anyhow::Result<()>;  // save immediately
     pub fn app_dir() -> PathBuf {
-        // directories クレートで解決
+        // resolved via the `directories` crate
         // Windows: %APPDATA%\wellfeather
         // macOS:   ~/Library/Application Support/wellfeather
         // Linux:   ~/.config/wellfeather
@@ -350,26 +350,26 @@ impl ConfigManager {
 
 ---
 
-## 9. セッション復元
+## 9. Session Restore
 
-アプリ起動時のシーケンス:
+Startup sequence:
 
 ```
-1. ConfigManager::load() → Config（接続一覧 + 最後のセッション情報）
-2. 最後のアクティブ接続IDに自動接続
-3. 最後のクエリ文字列をエディタに復元
-4. MetadataCache を SQLite から読み込み（バックグラウンド）
-5. UI表示
+1. ConfigManager::load() → Config (connection list + last session info)
+2. Auto-connect to the last active connection ID
+3. Restore the last query string into the editor
+4. Load MetadataCache from SQLite (background)
+5. Display UI
 ```
 
 ---
 
-## 10. ワークスペース構成
+## 10. Workspace Structure
 
-Cargo workspace を使用する。`app/` が唯一 Slint に依存するバイナリクレートであり、
-`crates/` 配下の各クレートは Slint に依存しない。
+Uses a Cargo workspace. `app/` is the only binary crate that depends on Slint;
+crates under `crates/` do not depend on Slint.
 
-### クレート依存グラフ
+### Crate Dependency Graph
 
 ```
 wf-db ──────────────────────────────┐
@@ -379,33 +379,33 @@ wf-completion ──────────────────────
 wf-history ─────────────────────────┘
 ```
 
-### クレート責務
+### Crate Responsibilities
 
-| クレート | 責務 |
-|---------|------|
-| `wf-db` | DB接続・クエリ実行・スキーマ取得。`DbPool`, `DbService`, pg/my/sqlite ドライバ, `DbError`, `DbConnection`, `QueryResult`, `DbMetadata` |
-| `wf-config` | 設定ファイル管理 + パスワード暗号化。`Config` 構造体, `ConfigManager`, AES-256-GCM crypto |
-| `wf-query` | SQLユーティリティ。カーソル位置解析 (`analyzer`), SQLフォーマッタ, CSV/JSONエクスポート |
-| `wf-completion` | SQL補完一式。`CompletionService`, `MetadataCache`, `CompletionEngine`, `parser` |
-| `wf-history` | クエリ履歴の SQLite 永続化。`HistoryService`, `QueryExecution` |
-| `app` | Slint UI + tokio 起動 + `AppController` + `AppState` + `Command/Event` + セッション復元 |
+| Crate | Responsibility |
+|-------|---------------|
+| `wf-db` | DB connection, query execution, schema retrieval. `DbPool`, `DbService`, pg/my/sqlite drivers, `DbError`, `DbConnection`, `QueryResult`, `DbMetadata` |
+| `wf-config` | Config file management + password encryption. `Config` struct, `ConfigManager`, AES-256-GCM crypto |
+| `wf-query` | SQL utilities. Cursor position analysis (`analyzer`), SQL formatter, CSV/JSON export |
+| `wf-completion` | Full SQL completion. `CompletionService`, `MetadataCache`, `CompletionEngine`, `parser` |
+| `wf-history` | SQLite persistence of query history. `HistoryService`, `QueryExecution` |
+| `app` | Slint UI + tokio startup + `AppController` + `AppState` + `Command/Event` + session restore |
 
-### ディレクトリ構成
+### Directory Layout
 
 ```
 wellfeather/
 ├── Cargo.toml                   # workspace root
 │
-├── app/                         # バイナリクレート（Slint依存はここのみ）
+├── app/                         # binary crate (only crate that depends on Slint)
 │   ├── Cargo.toml
 │   ├── build.rs                 # slint_build::compile
 │   └── src/
-│       ├── main.rs              # tokio起動 + slint::run_event_loop
+│       ├── main.rs              # tokio startup + slint::run_event_loop
 │       ├── app/
-│       │   ├── controller.rs    # Command受信 → Service → Event送信
+│       │   ├── controller.rs    # receive Command → Service → send Event
 │       │   ├── command.rs       # Command enum
 │       │   ├── event.rs         # Event / StateEvent enum
-│       │   └── session.rs       # セッション復元ロジック
+│       │   └── session.rs       # session restore logic
 │       ├── state/
 │       │   ├── mod.rs           # AppState / SharedState
 │       │   ├── connection_state.rs
@@ -440,15 +440,15 @@ wellfeather/
     │       ├── lib.rs
     │       ├── models.rs        # Config / AppearanceConfig / etc.
     │       ├── manager.rs       # ConfigManager
-    │       └── crypto.rs        # AES-256-GCM パスワード暗号化
+    │       └── crypto.rs        # AES-256-GCM password encryption
     │
     ├── wf-query/
     │   ├── Cargo.toml
     │   └── src/
     │       ├── lib.rs
-    │       ├── analyzer.rs      # カーソル位置からSQL文抽出
-    │       ├── formatter.rs     # SQLフォーマッタ
-    │       └── export.rs        # CSV / JSON エクスポート
+    │       ├── analyzer.rs      # extract SQL statement from cursor position
+    │       ├── formatter.rs     # SQL formatter
+    │       └── export.rs        # CSV / JSON export
     │
     ├── wf-completion/
     │   ├── Cargo.toml
@@ -457,7 +457,7 @@ wellfeather/
     │       ├── service.rs       # CompletionService (debounce)
     │       ├── engine.rs        # CompletionEngine
     │       ├── cache.rs         # MetadataCache (Memory + SQLite flush)
-    │       └── parser.rs        # カーソル位置コンテキスト解析
+    │       └── parser.rs        # cursor position context analysis
     │
     └── wf-history/
         ├── Cargo.toml
@@ -468,7 +468,7 @@ wellfeather/
 
 ---
 
-## 11. 主要依存クレート
+## 11. Key Dependencies
 
 ### workspace root (`Cargo.toml`)
 
@@ -539,26 +539,26 @@ uuid        = { workspace = true }
 
 ---
 
-## 12. テスト方針
+## 12. Testing Policy
 
-| 対象 | 方式 | 使用するもの |
-|------|------|-------------|
-| `wf-db` Service層 | ユニットテスト | SQLite インメモリ |
-| `wf-db` ドライバ (PG/MySQL) | 統合テスト (`#[ignore]`) | 実DB |
-| `wf-completion` | ユニットテスト | MetadataCache モック |
-| `wf-config` ConfigManager | ユニットテスト | 一時ディレクトリ |
-| `wf-config` 暗号化/復号 | ユニットテスト | - |
-| `wf-query` analyzer/formatter | ユニットテスト | - |
-| `wf-history` HistoryService | ユニットテスト | SQLite インメモリ |
+| Target | Approach | Tooling |
+|--------|----------|---------|
+| `wf-db` service layer | Unit tests | SQLite in-memory |
+| `wf-db` drivers (PG/MySQL) | Integration tests (`#[ignore]`) | Real DB |
+| `wf-completion` | Unit tests | MetadataCache mock |
+| `wf-config` ConfigManager | Unit tests | Temporary directory |
+| `wf-config` encrypt/decrypt | Unit tests | — |
+| `wf-query` analyzer/formatter | Unit tests | — |
+| `wf-history` HistoryService | Unit tests | SQLite in-memory |
 
 ---
 
-## 13. ロギング
+## 13. Logging
 
-`tracing` クレートを使用。非同期スパントレース対応。
+Uses the `tracing` crate with async span tracing support.
 
 ```rust
-// 使用例
+// Usage examples
 tracing::info!(conn_id = %id, "Connected to database");
 tracing::debug!(sql = %sql, duration_ms = %ms, "Query executed");
 tracing::warn!("Metadata cache flush failed: {}", e);
@@ -566,9 +566,9 @@ tracing::warn!("Metadata cache flush failed: {}", e);
 
 ---
 
-## 変更履歴
+## Change Log
 
-| 日付 | 内容 |
-|------|------|
-| 2026-03-31 | 初版作成 |
-| 2026-04-01 | ワークスペース構成に変更: app/ + crates/(wf-db, wf-config, wf-query, wf-completion, wf-history) |
+| Date | Description |
+|------|-------------|
+| 2026-03-31 | Initial version |
+| 2026-04-01 | Workspace structure update: app/ + crates/(wf-db, wf-config, wf-query, wf-completion, wf-history) |

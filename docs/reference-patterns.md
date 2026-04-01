@@ -1,28 +1,28 @@
-# Slint + Rust 連携パターン集
+# Slint + Rust Integration Patterns
 
-> 参考プロジェクト: `docs/master-password/`
-> 主要参照ファイル:
-> - `app/src/ui/mod.rs` — Slint↔Rust 連携の中心
-> - `app/src/app_context.rs` — 状態管理の実装
-> - `app/build.rs` — ビルド設定
+> Reference project: `docs/master-password/`
+> Key reference files:
+> - `app/src/ui/mod.rs` — central Slint↔Rust integration
+> - `app/src/app_context.rs` — state management implementation
+> - `app/build.rs` — build configuration
 
 ---
 
-## 1. Slint `global` による UI状態の統一管理
+## 1. Unified UI State Management with Slint `global`
 
-全プロパティ・コールバックを1つの `global` コンポーネントにまとめる。
-Rust からは `window.global::<UiState>()` で読み書きする。
+Consolidate all properties and callbacks into a single `global` component.
+Access it from Rust via `window.global::<UiState>()`.
 
 ```slint
 // app.slint
 export global UiState {
-    // プロパティ (in-out = Rust/Slint双方向)
+    // Properties (in-out = bidirectional between Rust and Slint)
     in-out property <bool>   is_loading: false;
     in-out property <string> current_screen: "main";
     in-out property <string> status_message: "";
     in-out property <[RowData]> result_rows: [];
 
-    // コールバック (Slint → Rust)
+    // Callbacks (Slint → Rust)
     callback run_query(string);
     callback cancel_query();
     callback connect(string);
@@ -31,21 +31,21 @@ export global UiState {
 ```
 
 ```rust
-// Rust側: プロパティの読み書き
+// Rust side: reading and writing properties
 let ui = window.global::<UiState>();
 ui.set_is_loading(true);
-ui.set_status_message("実行中...".into());
-let rows = ui.get_result_rows();  // 読み取り
+ui.set_status_message("Running...".into());
+let rows = ui.get_result_rows();  // read
 ```
 
-**参照**: `app/src/ui/app.slint` L43-252、`app/src/ui/mod.rs` L169-207
+**Reference**: `app/src/ui/app.slint` L43-252, `app/src/ui/mod.rs` L169-207
 
 ---
 
-## 2. コールバック登録の分割パターン
+## 2. Split Callback Registration Pattern
 
-`register_*_callbacks()` 関数ごとに分割し、`UI::new()` で一括登録する。
-`main.rs` や `new()` にロジックが肥大化しない。
+Split into `register_*_callbacks()` functions and batch-register them in `UI::new()`.
+This prevents logic from accumulating in `main.rs` or `new()`.
 
 ```rust
 // ui/mod.rs
@@ -58,7 +58,7 @@ impl UI {
         let window = AppWindow::new()?;
 
         Self::init_ui_state(&window, &ctx);
-        // 関心ごとにコールバックを分割登録
+        // Register callbacks split by concern
         Self::register_query_callbacks(&window, ctx.clone());
         Self::register_connection_callbacks(&window, ctx.clone());
         Self::register_settings_callbacks(&window, ctx.clone());
@@ -73,28 +73,28 @@ impl UI {
 
     fn register_query_callbacks(window: &AppWindow, ctx: AppContext) {
         let ui = window.global::<UiState>();
-        // ... コールバック登録
+        // ... register callbacks
     }
 }
 ```
 
-**参照**: `app/src/ui/mod.rs` L89-166
+**Reference**: `app/src/ui/mod.rs` L89-166
 
 ---
 
-## 3. クロージャ内のウィンドウ参照: `as_weak()` パターン
+## 3. Window References Inside Closures: `as_weak()` Pattern
 
-コールバックのクロージャにウィンドウを直接キャプチャすると循環参照になる。
-必ず `as_weak()` で弱参照を取り、使用時に `upgrade()` する。
+Capturing the window directly in a callback closure creates a cycle.
+Always take a weak reference with `as_weak()` and call `upgrade()` when needed.
 
 ```rust
 fn register_query_callbacks(window: &AppWindow, ctx: AppContext) {
     let ui = window.global::<UiState>();
 
-    // NG: window を直接クロージャにキャプチャしない
+    // WRONG: do not capture window directly in a closure
     // ui.on_run_query(move |sql| { window.global::<UiState>()... });
 
-    // OK: 弱参照を使う
+    // OK: use a weak reference
     let window_weak = window.as_weak();
     ui.on_run_query(move |sql| {
         if let Some(window) = window_weak.upgrade() {
@@ -104,26 +104,26 @@ fn register_query_callbacks(window: &AppWindow, ctx: AppContext) {
 }
 ```
 
-**参照**: `app/src/ui/mod.rs` L641-711
+**Reference**: `app/src/ui/mod.rs` L641-711
 
 ---
 
-## 4. コールバック内の `ctx.clone()` パターン
+## 4. `ctx.clone()` Pattern Inside Callbacks
 
-各コールバックは `AppContext` の所有権を必要とするため、クロージャに渡す前に `clone()` する。
-`AppContext` は `Arc<RwLock<Inner>>` のラッパーなので clone はポインタコピーのみ。
+Each callback requires ownership of `AppContext`, so clone it before passing it to the closure.
+`AppContext` is a wrapper around `Arc<RwLock<Inner>>`, so cloning is just a pointer copy.
 
 ```rust
 fn register_query_callbacks(window: &AppWindow, ctx: AppContext) {
     let ui = window.global::<UiState>();
 
-    // コールバックごとに clone
+    // Clone per callback
     {
         // clone required: callback closure needs owned ctx
         let ctx = ctx.clone();
         let window_weak = window.as_weak();
         ui.on_run_query(move |sql| {
-            // ctx を使って処理
+            // use ctx to handle the operation
         });
     }
     {
@@ -136,15 +136,15 @@ fn register_query_callbacks(window: &AppWindow, ctx: AppContext) {
 }
 ```
 
-> **規約**: clone が必要な箇所には必ず `// clone required: <理由>` のコメントを付ける。
-> （`app/src/ui/mod.rs` L641, L716 等）
+> **Convention**: Always annotate clones with `// clone required: <reason>`.
+> (See `app/src/ui/mod.rs` L641, L716, etc.)
 
 ---
 
-## 5. `Arc<RwLock<Inner>>` + ポイズニング回復パターン
+## 5. `Arc<RwLock<Inner>>` + Poison Recovery Pattern
 
-状態管理の中心となる `AppContext` は `Arc<RwLock<Inner>>` でスレッド安全に共有する。
-パニック後のロックポイズニングから回復する `read()` / `write()` ヘルパーを必ず実装する。
+`AppContext`, the core of state management, is shared thread-safely via `Arc<RwLock<Inner>>`.
+Always implement `read()` / `write()` helpers that recover from lock poisoning after a panic.
 
 ```rust
 // app_context.rs
@@ -154,21 +154,21 @@ pub struct AppContext {
 }
 
 impl AppContext {
-    /// ロックポイズニングから回復しつつ読み取りロックを取得
+    /// Acquire a read lock, recovering from poisoning
     fn read(&self) -> RwLockReadGuard<'_, AppContextInner> {
         self.inner
             .read()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
-    /// ロックポイズニングから回復しつつ書き込みロックを取得
+    /// Acquire a write lock, recovering from poisoning
     fn write(&self) -> RwLockWriteGuard<'_, AppContextInner> {
         self.inner
             .write()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
-    // 外部からはメソッド経由のみアクセス (RwLock を直接触らせない)
+    // External access only through methods (never expose RwLock directly)
     pub fn is_loading(&self) -> bool {
         self.read().is_loading
     }
@@ -179,19 +179,19 @@ impl AppContext {
 }
 ```
 
-**参照**: `app/src/app_context.rs` L190-310
+**Reference**: `app/src/app_context.rs` L190-310
 
 ---
 
-## 6. `slint::VecModel` でリストをバインド
+## 6. Binding Lists with `slint::VecModel`
 
-Slint のリスト (`[T]` プロパティ) には `VecModel` を使う。
-ドメインモデル → UI用プレビュー型の変換メソッドをセットで実装する。
+Use `VecModel` for Slint list properties (`[T]`).
+Always implement a paired conversion method: domain model → UI type.
 
 ```rust
 use std::rc::Rc;
 
-// ドメインモデル → Slint UI型 の変換
+// Convert domain model → Slint UI type
 fn rows_to_ui(rows: &QueryResult) -> Vec<crate::RowData> {
     rows.rows.iter().map(|r| crate::RowData {
         // clone required: Slint requires owned SharedString
@@ -202,69 +202,69 @@ fn rows_to_ui(rows: &QueryResult) -> Vec<crate::RowData> {
     }).collect()
 }
 
-// UIに反映
+// Reflect in UI
 let model = Rc::new(slint::VecModel::from(rows_to_ui(&result)));
 ui_state.set_result_rows(model.into());
 ```
 
-**参照**: `app/src/ui/mod.rs` L459-482, L452-453
+**Reference**: `app/src/ui/mod.rs` L459-482, L452-453
 
 ---
 
-## 7. `slint::Timer` の使い方
+## 7. Using `slint::Timer`
 
-Slint の `Timer` はイベントループと同スレッドで動作する。
-`TimerMode::Repeated` で繰り返し実行、`TimerMode::SingleShot` で1回実行。
+Slint's `Timer` runs on the same thread as the event loop.
+Use `TimerMode::Repeated` for recurring execution and `TimerMode::SingleShot` for one-shot execution.
 
 ```rust
 use std::time::Duration;
 
-// 繰り返しタイマー (例: ステータスバーの実行時間更新)
+// Repeating timer (e.g., update elapsed time in the status bar)
 let timer = slint::Timer::default();
 timer.start(
     slint::TimerMode::Repeated,
     Duration::from_millis(100),
     move || {
-        // UIスレッドで実行される
+        // runs on the UI thread
         if let Some(window) = window_weak.upgrade() {
             // ...
         }
     },
 );
-// timer を drop するとタイマーが止まる → フィールドに保持して制御する
+// Dropping the timer stops it → keep it in a field to control its lifetime
 
-// 1回限りタイマー (例: デバウンス後の補完トリガー)
+// One-shot timer (e.g., trigger completion after debounce)
 let timer = slint::Timer::default();
 timer.start(
     slint::TimerMode::SingleShot,
     Duration::from_millis(300),
     move || {
-        // 300ms後に1回だけ実行
+        // runs once after 300ms
     },
 );
 ```
 
-> **注意**: `Timer` を `drop` すると即座に停止する。
-> フィールドや `Rc<RefCell<Option<Timer>>>` で保持して寿命を管理する。
+> **Note**: Dropping a `Timer` stops it immediately.
+> Keep it in a field or `Rc<RefCell<Option<Timer>>>` to manage its lifetime.
 
-**参照**: `app/src/ui/mod.rs` L390-440 (ホットキーポーリング), L1249-1326 (クリップボードカウントダウン)
+**Reference**: `app/src/ui/mod.rs` L390-440 (hotkey polling), L1249-1326 (clipboard countdown)
 
 ---
 
-## 8. `Rc<RefCell<>>` で UIスレッド内の可変状態を共有
+## 8. Sharing Mutable State Within the UI Thread with `Rc<RefCell<>>`
 
-複数のクロージャ間でUIスレッド内のみの可変状態を共有するとき、
-`Arc<Mutex<>>` ではなく `Rc<RefCell<>>` を使う（Slintはシングルスレッド）。
+When sharing mutable state that lives only on the UI thread across multiple closures,
+use `Rc<RefCell<>>` rather than `Arc<Mutex<>>` (Slint is single-threaded).
 
 ```rust
-// 例: デバウンスタイマーを複数のクロージャで共有
+// Example: share a debounce timer across multiple closures
 let debounce_timer: Rc<RefCell<Option<slint::Timer>>> = Rc::new(RefCell::new(None));
 
 {
     let debounce_timer = debounce_timer.clone();
     let window_weak = window.as_weak();
     ui.on_text_changed(move |text| {
-        // 前のタイマーをキャンセル (dropで停止)
+        // Cancel the previous timer (stopped by drop)
         *debounce_timer.borrow_mut() = None;
 
         let window_weak = window_weak.clone();
@@ -275,7 +275,7 @@ let debounce_timer: Rc<RefCell<Option<slint::Timer>>> = Rc::new(RefCell::new(Non
             Duration::from_millis(300),
             move || {
                 if let Some(window) = window_weak.upgrade() {
-                    // 300ms後に補完を実行
+                    // trigger completion after 300ms
                     trigger_completion(&window, &text);
                 }
             },
@@ -285,17 +285,17 @@ let debounce_timer: Rc<RefCell<Option<slint::Timer>>> = Rc::new(RefCell::new(Non
 }
 ```
 
-**参照**: `app/src/ui/mod.rs` L1249-1326
+**Reference**: `app/src/ui/mod.rs` L1249-1326
 
 ---
 
-## 9. 非同期処理 + UI更新: `invoke_from_event_loop`
+## 9. Async Processing + UI Updates: `invoke_from_event_loop`
 
-> **この項目は master-password にはない wellfeather 固有のパターン。**
-> master-password は同期処理のみだが、wellfeather はDB クエリが非同期のため必須。
+> **This pattern is specific to wellfeather and does not exist in master-password.**
+> master-password uses only synchronous operations; wellfeather requires this pattern because DB queries are async.
 
-Slint の UI 更新はイベントループスレッドからしか行えない。
-tokio タスクから UI を更新するには `slint::invoke_from_event_loop` を使う。
+Slint UI updates can only be performed from the event loop thread.
+Use `slint::invoke_from_event_loop` to update the UI from a tokio task.
 
 ```rust
 fn register_query_callbacks(window: &AppWindow, ctx: Arc<AppState>) {
@@ -309,10 +309,10 @@ fn register_query_callbacks(window: &AppWindow, ctx: Arc<AppState>) {
         let ctx = ctx.clone();
 
         tokio::spawn(async move {
-            // UIスレッド外 (tokioランタイム) で実行
+            // Runs outside the UI thread (tokio runtime)
             let result = ctx.db.execute(&sql).await;
 
-            // UIスレッドに戻って更新
+            // Return to the UI thread to update
             slint::invoke_from_event_loop(move || {
                 if let Some(window) = window_weak.upgrade() {
                     let ui = window.global::<UiState>();
@@ -334,44 +334,44 @@ fn register_query_callbacks(window: &AppWindow, ctx: Arc<AppState>) {
 }
 ```
 
-> **注意**: `invoke_from_event_loop` のクロージャ内では `Rc` が使えない。
-> VecModel の生成はクロージャ内で行う。
+> **Note**: `Rc` cannot be used inside the `invoke_from_event_loop` closure.
+> Convert to `Vec` before entering the closure, then create the `VecModel` inside it.
 
 ---
 
-## 10. 初期 UI 状態の設定 (`init_ui_state`)
+## 10. Setting Initial UI State (`init_ui_state`)
 
-`UI::new()` でコールバック登録前に、現在の状態を UI に反映する初期化関数を用意する。
+Before registering callbacks in `UI::new()`, provide an initialization function that reflects the current state into the UI.
 
 ```rust
 fn init_ui_state(window: &AppWindow, ctx: &AppContext) {
     let ui = window.global::<UiState>();
 
-    // 状態から初期画面を決定
+    // Determine initial screen from state
     ui.set_current_screen(ctx.initial_screen().into());
 
-    // 各プロパティを設定
+    // Set each property
     ui.set_is_loading(false);
     ui.set_theme(ctx.theme().into());
     ui.set_font_size(ctx.font_size() as i32);
 }
 ```
 
-**参照**: `app/src/ui/mod.rs` L169-207
+**Reference**: `app/src/ui/mod.rs` L169-207
 
 ---
 
-## 11. `build.rs` の設定
+## 11. `build.rs` Configuration
 
-`.slint` ファイルを Rust コードにコンパイルするための最小設定。
-変更検知パスを登録することでインクリメンタルビルドが効く。
+Minimal configuration to compile `.slint` files into Rust code.
+Register change-detection paths to enable incremental builds.
 
 ```rust
 // build.rs
 fn main() {
     println!("cargo:rerun-if-changed=src/ui/app.slint");
 
-    // components/ 配下の .slint ファイルも監視
+    // Also watch .slint files under components/
     if let Ok(entries) = std::fs::read_dir("src/ui/components") {
         for entry in entries.flatten() {
             let path = entry.path();
@@ -386,20 +386,20 @@ fn main() {
 }
 ```
 
-Rust 側でコンポーネントを使えるようにするには:
+To use components on the Rust side:
 
 ```rust
-// main.rs または lib.rs
+// main.rs or lib.rs
 slint::include_modules!();
 ```
 
-**参照**: `app/build.rs`
+**Reference**: `app/build.rs`
 
 ---
 
-## 12. Slint の型変換
+## 12. Slint Type Conversions
 
-Rust の文字列 ↔ Slint の `SharedString` は `.into()` で相互変換できる。
+Rust strings and Slint `SharedString` convert to each other with `.into()`.
 
 ```rust
 // Rust String / &str → SharedString
@@ -409,25 +409,25 @@ ui.set_message(my_string.clone().into());
 // SharedString → Rust String
 let s: String = ui.get_message().to_string();
 
-// i32 への変換 (Slint は整数を i32 で扱う)
+// i32 conversion (Slint represents integers as i32)
 ui.set_row_count(result.row_count as i32);
 ui.set_font_size(config.font_size as i32);
 
-// bool はそのまま
+// bool passes through as-is
 ui.set_is_loading(true);
 ```
 
 ---
 
-## 13. エラー処理とUIへの表示
+## 13. Error Handling and UI Display
 
-エラーはダイアログを使わず、`UiState` のエラープロパティ経由でインライン表示する。
+Display errors inline via a `UiState` error property rather than using dialogs.
 
 ```rust
 match result {
     Ok(r)  => {
-        ui.set_error_message("".into());  // エラーをクリア
-        // 結果を反映
+        ui.set_error_message("".into());  // clear error
+        // reflect result
     }
     Err(e) => {
         tracing::error!("Query failed: {}", e);
@@ -439,28 +439,28 @@ match result {
 
 ---
 
-## 14. よくあるミスと対策
+## 14. Common Mistakes and Fixes
 
-| ミス | 対策 |
-|------|------|
-| ウィンドウを直接クロージャにキャプチャ | `as_weak()` + `upgrade()` を使う |
-| UIスレッド外から直接プロパティ更新 | `invoke_from_event_loop` を使う |
-| `Rc` を tokio タスク内で使う | クロージャ外で `Vec` に変換してから渡す |
-| clone の理由を書かない | `// clone required: <理由>` コメントを付ける |
-| `Timer` を局所変数に置く | フィールドまたは `Rc<RefCell<Option<Timer>>>` で保持 |
-| RwLock の `unwrap()` | `unwrap_or_else(|p| p.into_inner())` でポイズニング回復 |
+| Mistake | Fix |
+|---------|-----|
+| Capturing the window directly in a closure | Use `as_weak()` + `upgrade()` |
+| Updating properties directly from outside the UI thread | Use `invoke_from_event_loop` |
+| Using `Rc` inside a tokio task | Convert to `Vec` outside the closure, then pass it in |
+| Not documenting the reason for a clone | Add `// clone required: <reason>` comment |
+| Storing a `Timer` in a local variable | Keep it in a field or `Rc<RefCell<Option<Timer>>>` |
+| Calling `unwrap()` on a `RwLock` | Use `unwrap_or_else(|p| p.into_inner())` for poison recovery |
 
 ---
 
-## 参照ファイル一覧
+## Reference File Index
 
-| パターン | 参照ファイル | 行 |
-|---------|-------------|-----|
-| global UiState 定義 | `docs/master-password/app/src/ui/app.slint` | L43-252 |
-| UI 構造体・初期化 | `docs/master-password/app/src/ui/mod.rs` | L62-166 |
-| コールバック登録例 | `docs/master-password/app/src/ui/mod.rs` | L630-711 |
-| VecModel 変換 | `docs/master-password/app/src/ui/mod.rs` | L459-482 |
-| Timer 使用例 | `docs/master-password/app/src/ui/mod.rs` | L390-440 |
-| AppContext 状態管理 | `docs/master-password/app/src/app_context.rs` | L190-310 |
-| RwLock ポイズニング回復 | `docs/master-password/app/src/app_context.rs` | L292-310 |
+| Pattern | Reference File | Lines |
+|---------|---------------|-------|
+| global UiState definition | `docs/master-password/app/src/ui/app.slint` | L43-252 |
+| UI struct + initialization | `docs/master-password/app/src/ui/mod.rs` | L62-166 |
+| Callback registration example | `docs/master-password/app/src/ui/mod.rs` | L630-711 |
+| VecModel conversion | `docs/master-password/app/src/ui/mod.rs` | L459-482 |
+| Timer usage example | `docs/master-password/app/src/ui/mod.rs` | L390-440 |
+| AppContext state management | `docs/master-password/app/src/app_context.rs` | L190-310 |
+| RwLock poison recovery | `docs/master-password/app/src/app_context.rs` | L292-310 |
 | build.rs | `docs/master-password/app/build.rs` | L1-53 |

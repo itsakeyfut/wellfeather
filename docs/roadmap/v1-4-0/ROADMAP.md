@@ -1,30 +1,33 @@
-# v1.4.0 — EXPLAIN表示
+# v1.4.0 — EXPLAIN Visualization
 
-> **テーマ**: クエリのパフォーマンスを視覚的に理解できるようにする。
-> **前提バージョン**: v1.3.0
-
----
-
-## 目標
-
-EXPLAIN / EXPLAIN ANALYZE の結果をツリー構造で表示し、
-クエリのボトルネックを一目で把握できるようにする。
+> **Theme**: Understand query performance visually.
+> **Prerequisite**: v1.3.0
 
 ---
 
-## 達成基準 (Exit Criteria)
+## Goal
 
-- [ ] 「EXPLAIN」ボタンまたはショートカットでクエリのEXPLAINが実行される
-- [ ] DBごとに適切なEXPLAINコマンドが使われる（PG: EXPLAIN ANALYZE, MySQL: EXPLAIN, SQLite: EXPLAIN QUERY PLAN）
-- [ ] 結果がノード単位のツリー表示になる
-- [ ] 各ノードにコスト・実行時間（PostgreSQL EXPLAIN ANALYZE の場合）が表示される
+Display EXPLAIN / EXPLAIN ANALYZE results as a tree structure so users can
+identify query bottlenecks at a glance.
 
 ---
 
-## タスク一覧（概要）
+## Exit Criteria
 
-詳細は `docs/roadmap/tasks/v1-4-0.md` を参照。
+- [ ] An "EXPLAIN" button or keyboard shortcut runs EXPLAIN for the current query
+- [ ] The appropriate EXPLAIN command is used per DB (PostgreSQL: EXPLAIN ANALYZE, MySQL: EXPLAIN, SQLite: EXPLAIN QUERY PLAN)
+- [ ] Results are shown as a per-node tree
+- [ ] Each node displays its cost and actual execution time (where available, e.g. PostgreSQL EXPLAIN ANALYZE)
+- [ ] High-cost nodes are visually highlighted (red text or background)
 
-- EXPLAIN実行（DbPool::explain_prefix() 活用）
-- EXPLAINパーサー（DBごとの出力を構造化）
-- EXPLAINツリーUI（Slint）
+---
+
+## Task List
+
+See `docs/roadmap/tasks/v1-4-0.md` for details.
+
+| Task ID | Title | Issue |
+|---------|-------|-------|
+| T141 | EXPLAIN execution per DB type (PG, MySQL, SQLite) | #69 |
+| T142 | EXPLAIN output parser: raw output to ExplainNode tree | #70 |
+| T143 | EXPLAIN tree view UI | #71 |

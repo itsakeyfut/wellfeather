@@ -1,72 +1,72 @@
-# v0.2.0 — DB接続管理
+# v0.2.0 — DB Connection Management
 
-> **テーマ**: 実際のDBに接続する。接続情報を安全に管理する。
-> **前提バージョン**: v0.1.0
-
----
-
-## 目標
-
-PostgreSQL / MySQL / SQLite への接続・切断・切り替えができる状態にする。
-接続情報は TOML + AES-256-GCM で永続化し、次回起動時に自動復元する。
+> **Theme**: Connect to a real database. Manage connection credentials securely.
+> **Prerequisite**: v0.1.0
 
 ---
 
-## 達成基準 (Exit Criteria)
+## Goal
 
-- [ ] UIから接続情報を追加し、DBへ接続できる（SQLite / PostgreSQL / MySQL）
-- [ ] 複数の接続を同時に保持し、切り替えられる
-- [ ] 接続情報が `config.toml` に暗号化保存される
-- [ ] アプリ再起動後に前回の接続が自動復元される
-- [ ] ステータスバーに接続名・DB名が表示される
-- [ ] 統合テスト: SQLite接続のテストが通る
+Enable connecting to, disconnecting from, and switching between PostgreSQL, MySQL, and SQLite databases.
+Connection credentials are persisted in TOML encrypted with AES-256-GCM and automatically restored on next launch.
 
 ---
 
-## 対象機能・実装範囲
+## Exit Criteria
 
-| カテゴリ | 内容 |
-|---------|------|
-| DB接続層 | db/pool.rs（DbPool enum）、db/drivers/sqlite.rs, pg.rs, my.rs（接続のみ） |
-| DbService | db/service.rs — connect / disconnect / pools HashMap管理 |
-| Controller | app/controller.rs — Command::Connect / Disconnect 処理、Eventループ開始 |
-| 接続管理UI | 接続追加ダイアログ（個別フィールド + 接続文字列の両対応） |
-| 接続一覧UI | サイドバー上部の接続リスト、アクティブ接続の切り替え |
-| セッション | app/session.rs — 前回接続の保存・起動時自動接続 |
-| ステータスバー | 接続名 / DB名 の表示 |
+- [ ] Connection credentials can be added via the UI and used to connect (SQLite / PostgreSQL / MySQL)
+- [ ] Multiple connections can be held simultaneously and switched between
+- [ ] Connection credentials are saved to `config.toml` in encrypted form
+- [ ] The previous connection is automatically restored after restarting the app
+- [ ] The status bar displays the active connection name and database name
+- [ ] Integration test: SQLite connection test passes
 
 ---
 
-## 実装しないもの（スコープ外）
+## Scope
 
-- クエリ実行（接続確立のみ）
-- メタデータ取得（v0.4.0）
-- 接続のサイドバーツリー展開（v0.4.0）
-
----
-
-## 主要リスク・注意点
-
-- sqlx の `AnyPool` は使わず `DbPool` enum dispatch を採用（architecture.md 参照）
-- 接続タイムアウト・接続失敗時のリトライは MVP では考慮しない（エラー表示のみ）
-- MySQL / PostgreSQL の統合テストには実際のDBが必要なため、CI環境での扱いに注意
-  - ローカルの SQLite 統合テストを優先し、PG/MySQL はオプション扱いにする
-- パスワードの暗号化鍵（crypto::key()）は v0.1.0 で確立したものを使う
+| Category | Content |
+|----------|---------|
+| DB connection layer | db/pool.rs (DbPool enum), db/drivers/sqlite.rs, pg.rs, my.rs (connect only) |
+| DbService | db/service.rs — connect / disconnect / pools HashMap management |
+| Controller | app/controller.rs — Command::Connect / Disconnect handling, event loop start |
+| Connection management UI | Add-connection dialog (individual fields + connection string) |
+| Connection list UI | Sidebar connection list with active connection switching |
+| Session | app/session.rs — save last connection, auto-connect on startup |
+| Status bar | Display connection name and database name |
 
 ---
 
-## タスク一覧
+## Out of Scope
 
-詳細は `docs/roadmap/tasks/v0-2-0.md` を参照。
+- Query execution (connection establishment only)
+- Metadata fetch (v0.4.0)
+- Schema tree expansion in the sidebar (v0.4.0)
 
-| タスクID | タイトル |
-|---------|---------|
-| T021 | db/pool.rs — DbPool enum + 接続関数 |
-| T022 | db/drivers/sqlite.rs — SQLite接続実装 |
-| T023 | db/drivers/pg.rs — PostgreSQL接続実装 |
-| T024 | db/drivers/my.rs — MySQL接続実装 |
-| T025 | db/service.rs — DbService（connect/disconnect） |
-| T026 | app/controller.rs — Commandループ + Connect/Disconnect処理 |
-| T027 | 接続管理UI — 追加ダイアログ + 一覧・切り替え |
-| T028 | app/session.rs — セッション保存・復元 |
-| T029 | status_bar.slint — 接続名/DB名表示 |
+---
+
+## Key Risks
+
+- Use `DbPool` enum dispatch instead of sqlx `AnyPool` (see architecture.md)
+- Connection timeout and retry on failure are out of scope for MVP — show an error only
+- MySQL / PostgreSQL integration tests require a live database; handle carefully in CI
+  - Prioritize local SQLite integration tests; treat PG/MySQL tests as optional
+- The encryption key (`crypto::key()`) must be the one established in v0.1.0
+
+---
+
+## Task List
+
+See `docs/roadmap/tasks/v0-2-0.md` for details.
+
+| Task ID | Title | Issue |
+|---------|-------|-------|
+| T021 | db/pool.rs — DbPool enum and connect function | #10 |
+| T022 | db/drivers/sqlite.rs — SQLite connection implementation | #11 |
+| T023 | db/drivers/pg.rs — PostgreSQL connection implementation | #12 |
+| T024 | db/drivers/my.rs — MySQL connection implementation | #13 |
+| T025 | db/service.rs — DbService connect/disconnect | #14 |
+| T026 | app/controller.rs — Command loop + Connect/Disconnect handling | #15 |
+| T027 | Connection management UI: add dialog + list/switch | #16 |
+| T028 | app/session.rs — connection session save and restore | #17 |
+| T029 | status_bar.slint — connection name/DB display | #18 |

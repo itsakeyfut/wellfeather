@@ -1,40 +1,41 @@
-# v1.2.0 — キーボード強化（Vimモード・コマンドパレット）
+# v1.2.0 — Keyboard Enhancement (Vim Mode + Command Palette)
 
-> **テーマ**: キーボード操作の差別化を完成させる。
-> **前提バージョン**: v1.1.0
-
----
-
-## 目標
-
-Vimキーバインドとコマンドパレットを実装し、
-「マウス不要でDBを操作できる」という wellfeather 最大の差別化を完成させる。
+> **Theme**: Complete wellfeather's keyboard-centric differentiation.
+> **Prerequisite**: v1.1.0
 
 ---
 
-## 達成基準 (Exit Criteria)
+## Goal
 
-- [ ] エディタで Normal / Insert / Visual モードが動作する
-- [ ] Vim の基本操作（移動・削除・yank・paste・検索）が機能する
-- [ ] Ctrl+K（またはCtrl+Shift+P）でコマンドパレットが開く
-- [ ] コマンドパレットから接続切り替え・クエリ実行・設定変更等にアクセスできる
-- [ ] コマンドパレットにあいまい検索が効く
+Implement Vim keybindings and a command palette to complete the experience of
+"operating a database without a mouse" — wellfeather's primary differentiator.
 
 ---
 
-## 主要リスク・注意点
+## Exit Criteria
 
-- Vimモード実装は複雑。既存の Rust Vim クレート（`vim-like` 等）の活用を検討
-- Slint の TextInput をVimモード対応にするには、テキスト操作APIの深い理解が必要
-- コマンドパレットは Slint の PopupWindow で実装する。検索ロジックはファジーマッチング
+- [ ] Normal / Insert / Visual modes work in the editor
+- [ ] Vim basic operations work (movement, deletion, yank, paste, search)
+- [ ] Ctrl+K (or Ctrl+Shift+P) opens the command palette
+- [ ] Connection switching, query execution, and settings changes are accessible from the command palette
+- [ ] Fuzzy search filters the command palette
 
 ---
 
-## タスク一覧（概要）
+## Key Risks
 
-詳細は `docs/roadmap/tasks/v1-2-0.md` を参照。
+- Vim mode is complex — consider reusing an existing Rust Vim crate (`vim-like`, etc.)
+- Making Slint's `TextInput` Vim-compatible requires deep understanding of its text manipulation API; investigate before implementation
+- The command palette is implemented with Slint's `PopupWindow`; fuzzy matching logic needs a dedicated crate (`fuzzy-matcher`, etc.)
 
-- Vimモード実装（Normal/Insert/Visual）
-- Vimキーマップ定義
-- コマンドパレット UI + ファジー検索
-- コマンドパレット アクション登録
+---
+
+## Task List
+
+See `docs/roadmap/tasks/v1-2-0.md` for details.
+
+| Task ID | Title | Issue |
+|---------|-------|-------|
+| T121 | Vim keybindings: Normal/Insert/Visual mode | #62 |
+| T122 | Command palette UI with fuzzy search (Ctrl+K) | #63 |
+| T123 | Command palette action registry | #64 |

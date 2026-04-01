@@ -1,29 +1,33 @@
-# v2.0.0 — 分析・最適化提案（Phase 3）
+# v2.0.0 — Analysis and Optimization Hints (Phase 3)
 
-> **テーマ**: wellfeather を「使うだけ」から「改善を助けるツール」へ。
-> **前提バージョン**: v1.4.0
-
----
-
-## 目標
-
-軽量な分析機能とパフォーマンスヒントを実装し、
-インデックス不足や遅いクエリに対する改善提案をできるようにする。
+> **Theme**: Evolve wellfeather from a tool you "just use" to one that helps you improve.
+> **Prerequisite**: v1.4.0
 
 ---
 
-## 達成基準 (Exit Criteria)
+## Goal
 
-- [ ] クエリ結果のメタデータ（行数・実行計画）を分析し、改善ヒントを表示できる
-- [ ] インデックスが貼られていないカラムへの WHERE 句使用を検出してヒントを出せる
-- [ ] OSキーチェーン（Windows Credential Manager / macOS Keychain）へのパスワード保存ができる
+Implement lightweight analysis and performance hints so wellfeather can suggest improvements
+for missing indexes and slow queries.
 
 ---
 
-## タスク一覧（概要）
+## Exit Criteria
 
-詳細は `docs/roadmap/tasks/v2-0-0.md` を参照。
+- [ ] Query result metadata (row count, execution plan) is analyzed and improvement hints are displayed
+- [ ] WHERE clause usage on unindexed columns is detected and a hint is shown
+- [ ] DB passwords can be stored in the OS keychain (Windows Credential Manager / macOS Keychain)
+- [ ] Linux distribution packages (AppImage / .deb / .rpm) can be built via `cargo x package --platform linux`
 
-- 軽量パフォーマンス分析エンジン
-- インデックス提案ロジック
-- OSキーチェーン連携（`keyring` クレート）
+---
+
+## Task List
+
+See `docs/roadmap/tasks/v2-0-0.md` for details.
+
+| Task ID | Title | Issue |
+|---------|-------|-------|
+| T201 | Lightweight performance analysis engine with hint generation | #72 |
+| T202 | Index advisor: missing index detection and suggestion | #73 |
+| T203 | OS keychain integration for password storage | #74 |
+| — | Linux distribution packaging (AppImage / .deb / .rpm) | #82 |
