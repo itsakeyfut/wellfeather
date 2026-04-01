@@ -1,0 +1,4 @@
+[workspace]
+members = ["xtask"]
+default-members = []
+resolver = "2"
