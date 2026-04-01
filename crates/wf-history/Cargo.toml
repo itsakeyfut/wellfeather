@@ -1,0 +1,19 @@
+[package]
+name = "wf-history"
+description = "SQLite-backed query execution history for wellfeather"
+readme = "README.md"
+categories = ["database"]
+keywords = ["sql", "history", "sqlite"]
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+sqlx      = { workspace = true }
+tokio     = { workspace = true }
+anyhow    = { workspace = true }
+thiserror = { workspace = true }
+chrono    = { workspace = true }
+uuid      = { workspace = true }

@@ -1,7 +1,23 @@
 [workspace]
-members = ["app", "xtask"]
+members = [
+    "app",
+    "crates/wf-db",
+    "crates/wf-config",
+    "crates/wf-query",
+    "crates/wf-completion",
+    "crates/wf-history",
+    "xtask",
+]
 default-members = ["app"]
 resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.93.0"
+# license = ""
+repository = "https://github.com/itsakeyfut/wellfeather"
+authors = ["itsakeyfut"]
 
 [workspace.dependencies]
 tokio         = { version = "1.50.0", features = ["full"] }
