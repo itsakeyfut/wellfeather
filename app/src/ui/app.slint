@@ -1,5 +1,53 @@
+import { Sidebar }     from "components/sidebar.slint";
+import { Editor }      from "components/editor.slint";
+import { ResultTable } from "components/result_table.slint";
+import { StatusBar }   from "components/status_bar.slint";
+
+// Global UI state and callbacks — properties and callbacks filled in T020+.
+export global UiState {
+    // State
+    in-out property <bool>   is_loading:     false;
+    in-out property <string> status_message: "";
+    in-out property <string> error_message:  "";
+    in-out property <string> editor_text:    "";
+
+    // UI → Controller callbacks
+    callback run_query(string);
+    callback cancel_query();
+    callback connect(string);
+    callback disconnect(string);
+}
+
 export component AppWindow inherits Window {
     title: "wellfeather";
     min-width: 800px;
     min-height: 600px;
+
+    VerticalLayout {
+        // Main content area: sidebar (fixed width) + right pane (editor / result)
+        HorizontalLayout {
+            vertical-stretch: 1;
+
+            Sidebar {
+                width: 220px;
+            }
+
+            VerticalLayout {
+                horizontal-stretch: 1;
+
+                Editor {
+                    vertical-stretch: 1;
+                }
+
+                ResultTable {
+                    vertical-stretch: 1;
+                }
+            }
+        }
+
+        // Full-width status bar at the bottom
+        StatusBar {
+            height: 24px;
+        }
+    }
 }
