@@ -1,0 +1,280 @@
+// Connection form component.
+// Receives all state as properties bound from UiState in app.slint.
+// Does not import UiState directly to avoid circular imports
+// (app.slint imports this file; UiState is defined in app.slint).
+
+// ── Helper: labelled text field row ──────────────────────────────────────────
+
+component FieldRow inherits HorizontalLayout {
+    in property <string>     label-text;
+    in property <string>     placeholder: "";
+    in property <bool>       is-password: false;
+    in-out property <string> value;
+
+    spacing: 8px;
+    Text {
+        text: label-text;
+        color: #a6adc8;
+        width: 80px;
+        vertical-alignment: center;
+    }
+    Rectangle {
+        horizontal-stretch: 1;
+        background: #1e1e2e;
+        border-radius: 4px;
+        height: 28px;
+        // Placeholder overlaid at the same position as TextInput.
+        // Rendered first (behind) so TextInput stays on top and receives focus.
+        // Not shown for password fields.
+        if !is-password && root.placeholder != "" && root.value == "": Text {
+            x: 6px;
+            y: 0;
+            width: parent.width - 12px;
+            height: parent.height;
+            text: root.placeholder;
+            color: #585b70;
+            vertical-alignment: center;
+        }
+        // TextInput rendered last → on top → receives all pointer/focus events.
+        TextInput {
+            x: 6px;
+            y: 0;
+            width: parent.width - 12px;
+            height: parent.height;
+            vertical-alignment: center;
+            text <=> value;
+            color: #cdd6f4;
+            input-type: is-password ? InputType.password : InputType.text;
+        }
+    }
+}
+
+// ── Helper: tab button with underline ────────────────────────────────────────
+
+component TabButton inherits VerticalLayout {
+    in property <string> label-text;
+    in property <bool>   active;
+    callback clicked;
+
+    horizontal-stretch: 1;
+    Text {
+        text: label-text;
+        color: active ? #89b4fa : #a6adc8;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        height: 28px;
+    }
+    Rectangle {
+        height: 2px;
+        background: active ? #89b4fa : #45475a;
+    }
+    TouchArea { clicked => { root.clicked(); } }
+}
+
+// ── Helper: DB type toggle button ────────────────────────────────────────────
+
+component DbTypeButton inherits Rectangle {
+    in property <string> label-text;
+    in property <bool>   active;
+    callback clicked;
+
+    background: active ? #89b4fa : #45475a;
+    border-radius: 4px;
+    height: 28px;
+    horizontal-stretch: 1;
+    Text {
+        text: label-text;
+        color: active ? #1e1e2e : #cdd6f4;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+    TouchArea { clicked => { root.clicked(); } }
+}
+
+// ── Connection form ───────────────────────────────────────────────────────────
+
+export component ConnectionForm inherits Rectangle {
+    // ── Properties bound from UiState in app.slint ───────────────────────────
+    in-out property <int>    tab-index:   0;
+    in-out property <int>    db-type:     0;
+    in-out property <string> name:        "";
+    in-out property <string> conn-string: "";
+    in-out property <string> host:        "";
+    in-out property <string> port:        "";
+    in-out property <string> user:        "";
+    in-out property <string> password:    "";
+    in-out property <string> database:    "";
+    in-out property <string> status:      "";
+    in-out property <bool>   testing:     false;
+
+    callback cancel();
+    callback test-connection();
+
+    // ── Layout ────────────────────────────────────────────────────────────────
+    background: #313244;
+    border-radius: 8px;
+    border-width: 1px;
+    border-color: #585b70;
+    drop-shadow-blur: 24px;
+    drop-shadow-color: #00000066;
+    width: 480px;
+
+    VerticalLayout {
+        padding: 20px;
+        spacing: 10px;
+
+        // Title
+        Text {
+            text: @tr("Add Connection");
+            color: #cdd6f4;
+            font-size: 16px;
+            font-weight: 700;
+        }
+
+        // Name
+        FieldRow {
+            label-text: @tr("Name");
+            placeholder: @tr("My Database");
+            value <=> root.name;
+        }
+
+        // DB type selector
+        HorizontalLayout {
+            spacing: 6px;
+            DbTypeButton {
+                label-text: "PostgreSQL";
+                active: root.db-type == 0;
+                clicked => { root.db-type = 0; }
+            }
+            DbTypeButton {
+                label-text: "MySQL";
+                active: root.db-type == 1;
+                clicked => { root.db-type = 1; }
+            }
+            DbTypeButton {
+                label-text: "SQLite";
+                active: root.db-type == 2;
+                clicked => { root.db-type = 2; }
+            }
+        }
+
+        // Tab bar
+        HorizontalLayout {
+            TabButton {
+                label-text: @tr("Connection String");
+                active: root.tab-index == 0;
+                clicked => { root.tab-index = 0; }
+            }
+            TabButton {
+                label-text: @tr("Individual Fields");
+                active: root.tab-index == 1;
+                clicked => { root.tab-index = 1; }
+            }
+        }
+
+        // Connection String tab
+        if root.tab-index == 0: Rectangle {
+            background: #1e1e2e;
+            border-radius: 4px;
+            height: 28px;
+            if root.conn-string == "": Text {
+                x: 6px;
+                y: 0;
+                width: parent.width - 12px;
+                height: parent.height;
+                text: "postgres://user:pass@host:5432/db";
+                color: #585b70;
+                vertical-alignment: center;
+            }
+            TextInput {
+                x: 6px;
+                y: 0;
+                width: parent.width - 12px;
+                height: parent.height;
+                vertical-alignment: center;
+                text <=> root.conn-string;
+                color: #cdd6f4;
+            }
+        }
+
+        // Individual Fields tab
+        if root.tab-index == 1: VerticalLayout {
+            spacing: 6px;
+            FieldRow {
+                label-text: @tr("Host");
+                placeholder: "localhost";
+                value <=> root.host;
+            }
+            FieldRow {
+                label-text: @tr("Port");
+                placeholder: "5432";
+                value <=> root.port;
+            }
+            FieldRow {
+                label-text: @tr("User");
+                placeholder: @tr("username");
+                value <=> root.user;
+            }
+            FieldRow {
+                label-text: @tr("Password");
+                value <=> root.password;
+                is-password: true;
+            }
+            FieldRow {
+                label-text: @tr("Database");
+                placeholder: @tr("database name");
+                value <=> root.database;
+            }
+        }
+
+        // Status message (shown only when not empty)
+        Text {
+            text: root.status;
+            color: root.status == "" ? transparent : #f38ba8;
+            height: 20px;
+            font-size: 12px;
+            overflow: elide;
+        }
+
+        // Buttons
+        HorizontalLayout {
+            spacing: 8px;
+            alignment: end;
+
+            // Cancel
+            Rectangle {
+                width: 80px;
+                height: 32px;
+                background: #45475a;
+                border-radius: 4px;
+                Text {
+                    text: @tr("Cancel");
+                    color: #cdd6f4;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+                TouchArea {
+                    clicked => { root.cancel(); }
+                }
+            }
+
+            // Test Connection
+            Rectangle {
+                width: 150px;
+                height: 32px;
+                background: root.testing ? #585b70 : #89b4fa;
+                border-radius: 4px;
+                Text {
+                    text: root.testing ? @tr("Testing…") : @tr("Test Connection");
+                    color: root.testing ? #a6adc8 : #1e1e2e;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+                TouchArea {
+                    enabled: !root.testing;
+                    clicked => { root.test-connection(); }
+                }
+            }
+        }
+    }
+}
