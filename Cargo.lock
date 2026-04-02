@@ -6404,6 +6404,7 @@ dependencies = [
  "tokio-util",
  "tracing",
  "tracing-subscriber",
+ "uuid",
  "wf-completion",
  "wf-config",
  "wf-db",

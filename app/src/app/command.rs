@@ -24,7 +24,10 @@ pub enum ConfigUpdate {
 /// UI → Controller channel messages.
 #[derive(Debug)]
 pub enum Command {
-    Connect(DbConnection),
+    /// Connect to a database. The second field carries the plaintext password
+    /// (decrypted by the caller); `wf-db` must not depend on `wf-config::crypto`.
+    /// Password encryption is wired in T028.
+    Connect(DbConnection, Option<String>),
     Disconnect(String),   // connection_id
     RunQuery(String),     // sql
     RunSelection(String), // sql (selected range)

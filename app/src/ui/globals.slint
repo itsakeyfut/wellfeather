@@ -1,0 +1,10 @@
+// Shared value types used by multiple components.
+// Keep only structs here — globals defined in non-root files are not
+// included in the Slint-generated Rust bindings, so UiState lives in app.slint.
+
+export struct ConnectionEntry {
+    id: string,
+    name: string,
+    db-type: string,   // "PostgreSQL" | "MySQL" | "SQLite"
+    is-active: bool,
+}

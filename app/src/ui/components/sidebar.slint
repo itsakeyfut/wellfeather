@@ -1,3 +1,70 @@
+import { ConnectionEntry } from "../globals.slint";
+
 export component Sidebar inherits Rectangle {
     background: #1e1e2e;
+
+    in property <[ConnectionEntry]> connections: [];
+    callback switch-connection(string);
+    callback add-connection();
+
+    VerticalLayout {
+        // ── Connection list ───────────────────────────────────────────────────
+        for conn in root.connections: Rectangle {
+            height: 36px;
+            background: conn.is-active ? #313244 : transparent;
+
+            HorizontalLayout {
+                padding-left: 12px;
+                padding-right: 8px;
+                spacing: 6px;
+                Text {
+                    text: conn.name;
+                    color: conn.is-active ? #cdd6f4 : #a6adc8;
+                    vertical-alignment: center;
+                    overflow: elide;
+                    horizontal-stretch: 1;
+                }
+                Text {
+                    text: conn.db-type;
+                    color: #585b70;
+                    font-size: 11px;
+                    vertical-alignment: center;
+                }
+            }
+
+            // Click area on top to intercept pointer events
+            TouchArea {
+                width: parent.width;
+                height: parent.height;
+                clicked => { root.switch-connection(conn.id); }
+            }
+        }
+
+        // ── Divider ───────────────────────────────────────────────────────────
+        Rectangle {
+            height: 1px;
+            background: #313244;
+        }
+
+        // ── Add connection button ─────────────────────────────────────────────
+        Rectangle {
+            height: 36px;
+            background: transparent;
+
+            HorizontalLayout {
+                padding-left: 12px;
+                Text {
+                    text: @tr("＋ Add connection");
+                    color: #89b4fa;
+                    vertical-alignment: center;
+                }
+            }
+
+            TouchArea {
+                width: parent.width;
+                height: parent.height;
+                clicked => { root.add-connection(); }
+            }
+        }
+    }
 }

@@ -40,21 +40,23 @@ impl AppController {
     pub async fn run(mut self) {
         while let Some(cmd) = self.rx_cmd.recv().await {
             match cmd {
-                Command::Connect(conn) => self.handle_connect(conn).await,
+                Command::Connect(conn, pw) => self.handle_connect(conn, pw).await,
                 Command::Disconnect(id) => self.handle_disconnect(id).await,
                 _ => {} // remaining commands handled in later tasks
             }
         }
     }
 
-    async fn handle_connect(&self, conn: DbConnection) {
+    async fn handle_connect(&self, conn: DbConnection, password: Option<String>) {
         let id = conn.id.clone();
         info!(conn_id = %id, "handling Connect command");
-        // Password decryption (via wf-config::crypto) wired in a later task;
-        // pass None for now so wf-db remains dependency-free.
-        match self.db.connect(&conn, None).await {
+        match self.db.connect(&conn, password.as_deref()).await {
             Ok(()) => {
-                self.state.conn.add(conn);
+                // Only add to the saved list if this is a new connection.
+                let already_saved = self.state.conn.all().iter().any(|c| c.id == id);
+                if !already_saved {
+                    self.state.conn.add(conn);
+                }
                 self.state.conn.set_active(&id);
                 info!(conn_id = %id, "connected successfully");
                 let _ = self.tx_event.send(Event::Connected(id)).await;
@@ -114,7 +116,7 @@ mod tests {
         let (controller, tx_cmd, mut rx_event) = AppController::new(state.clone(), db);
 
         tx_cmd
-            .send(Command::Connect(sqlite_conn("c1")))
+            .send(Command::Connect(sqlite_conn("c1"), None))
             .await
             .unwrap();
         drop(tx_cmd); // close channel → run() exits after processing
@@ -143,7 +145,7 @@ mod tests {
             password_encrypted: None,
             database: None,
         };
-        tx_cmd.send(Command::Connect(bad)).await.unwrap();
+        tx_cmd.send(Command::Connect(bad, None)).await.unwrap();
         drop(tx_cmd);
 
         controller.run().await;
@@ -159,7 +161,7 @@ mod tests {
         let (controller, tx_cmd, mut rx_event) = AppController::new(state.clone(), db);
 
         tx_cmd
-            .send(Command::Connect(sqlite_conn("c2")))
+            .send(Command::Connect(sqlite_conn("c2"), None))
             .await
             .unwrap();
         tx_cmd
@@ -174,5 +176,30 @@ mod tests {
         assert!(matches!(e1, Event::Connected(_)));
         let e2 = rx_event.recv().await.unwrap();
         assert!(matches!(e2, Event::Disconnected(ref id) if id == "c2"));
+    }
+
+    #[tokio::test]
+    async fn connect_twice_should_not_duplicate_in_state() {
+        let state = Arc::new(AppState::new());
+        let db = DbService::new();
+        let (controller, tx_cmd, mut rx_event) = AppController::new(state.clone(), db);
+
+        tx_cmd
+            .send(Command::Connect(sqlite_conn("c3"), None))
+            .await
+            .unwrap();
+        tx_cmd
+            .send(Command::Connect(sqlite_conn("c3"), None))
+            .await
+            .unwrap();
+        drop(tx_cmd);
+
+        controller.run().await;
+
+        // drain events
+        rx_event.recv().await.unwrap();
+        rx_event.recv().await.unwrap();
+
+        assert_eq!(state.conn.all().len(), 1, "conn should not be duplicated");
     }
 }

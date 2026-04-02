@@ -1,21 +1,51 @@
-import { Sidebar }     from "components/sidebar.slint";
-import { Editor }      from "components/editor.slint";
-import { ResultTable } from "components/result_table.slint";
-import { StatusBar }   from "components/status_bar.slint";
+import { ConnectionEntry } from "globals.slint";
+import { ConnectionForm }  from "components/connection_form.slint";
+import { Sidebar }         from "components/sidebar.slint";
+import { Editor }          from "components/editor.slint";
+import { ResultTable }     from "components/result_table.slint";
+import { StatusBar }       from "components/status_bar.slint";
 
-// Global UI state and callbacks — properties and callbacks filled in T020+.
+// UiState is defined here (root file) so that Slint generates Rust bindings for it.
+// Sub-components that need global state receive properties bound from UiState below.
 export global UiState {
-    // State
-    in-out property <bool>   is_loading:     false;
-    in-out property <string> status_message: "";
-    in-out property <string> error_message:  "";
-    in-out property <string> editor_text:    "";
+    // ── Core UI state ─────────────────────────────────────────────────────────
+    in-out property <bool>   is-loading:     false;
+    in-out property <string> status-message: "";
+    in-out property <string> error-message:  "";
+    in-out property <string> editor-text:    "";
 
-    // UI → Controller callbacks
-    callback run_query(string);
-    callback cancel_query();
+    // ── Connection list (sidebar) ─────────────────────────────────────────────
+    in-out property <[ConnectionEntry]> connection-list:      [];
+    in-out property <string>            active-connection-id: "";
+
+    // ── Connection form state ─────────────────────────────────────────────────
+    in-out property <bool>   show-connection-form: false;
+    in-out property <int>    form-tab-index:   0;   // 0 = conn-string, 1 = fields
+    in-out property <int>    form-db-type:     0;   // 0 = PostgreSQL, 1 = MySQL, 2 = SQLite
+    in-out property <string> form-name:        "";
+    in-out property <string> form-conn-string: "";
+    in-out property <string> form-host:        "";
+    in-out property <string> form-port:        "";
+    in-out property <string> form-user:        "";
+    in-out property <string> form-password:    "";
+    in-out property <string> form-database:    "";
+    in-out property <string> form-status:      "";
+    in-out property <bool>   form-testing:     false;
+
+    // ── UI → Controller callbacks ─────────────────────────────────────────────
+    callback run-query(string);
+    callback cancel-query();
     callback connect(string);
     callback disconnect(string);
+
+    // ── Connection management callbacks ───────────────────────────────────────
+    callback open-connection-form();
+    callback close-connection-form();
+    // Builds DbConnection from form fields and sends Command::Connect.
+    // Closes the form on success; shows error inline on failure.
+    callback test-connection();
+    // Re-connects an existing saved connection by id.
+    callback switch-connection(string);
 }
 
 export component AppWindow inherits Window {
@@ -30,6 +60,9 @@ export component AppWindow inherits Window {
 
             Sidebar {
                 width: 220px;
+                connections: UiState.connection-list;
+                switch-connection(id) => { UiState.switch-connection(id); }
+                add-connection => { UiState.open-connection-form(); }
             }
 
             VerticalLayout {
@@ -48,6 +81,36 @@ export component AppWindow inherits Window {
         // Full-width status bar at the bottom
         StatusBar {
             height: 24px;
+        }
+    }
+
+    // Connection form modal overlay — rendered last so it appears on top of everything.
+    if UiState.show-connection-form: Rectangle {
+        x: 0;
+        y: 0;
+        width: parent.width;
+        height: parent.height;
+        background: #00000088;
+
+        ConnectionForm {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+
+            // Bind all form state bidirectionally
+            tab-index   <=> UiState.form-tab-index;
+            db-type     <=> UiState.form-db-type;
+            name        <=> UiState.form-name;
+            conn-string <=> UiState.form-conn-string;
+            host        <=> UiState.form-host;
+            port        <=> UiState.form-port;
+            user        <=> UiState.form-user;
+            password    <=> UiState.form-password;
+            database    <=> UiState.form-database;
+            status      <=> UiState.form-status;
+            testing     <=> UiState.form-testing;
+
+            cancel => { UiState.close-connection-form(); }
+            test-connection => { UiState.test-connection(); }
         }
     }
 }
