@@ -66,6 +66,18 @@ impl UI {
                             })
                             .collect();
 
+                        // Build status-bar label outside the closure (state is not Send)
+                        let status_conn = state
+                            .conn
+                            .all()
+                            .into_iter()
+                            .find(|c| c.id == active_id)
+                            .map(|c| match c.database.as_deref() {
+                                Some(db) if !db.is_empty() => format!("{} / {}", c.name, db),
+                                _ => c.name.clone(),
+                            })
+                            .unwrap_or_else(|| active_id.clone());
+
                         // clone required: invoke_from_event_loop closure must be 'static
                         let window_weak = window_weak.clone();
                         let active_id = active_id.clone();
@@ -82,6 +94,7 @@ impl UI {
                             ui.set_form_testing(false);
                             ui.set_form_status("".into());
                             ui.set_error_message("".into());
+                            ui.set_status_connection(status_conn.into());
                         });
                     }
                     Event::QueryError(ref msg) => {
@@ -108,6 +121,7 @@ impl UI {
                             };
                             let ui = window.global::<crate::UiState>();
                             ui.set_status_message(format!("Disconnected: {id}").into());
+                            ui.set_status_connection("Not connected".into());
                         });
                     }
                     _ => {}

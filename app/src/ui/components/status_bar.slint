@@ -1,3 +1,23 @@
+// Status bar — displayed at the bottom of the main window.
+// Shows the active connection on the left side; right side reserved for future indicators.
+
 export component StatusBar inherits Rectangle {
     background: #11111b;
+
+    /// Text shown on the left: active connection name (and DB) or "Not connected".
+    /// Updated from Rust via invoke_from_event_loop on Event::Connected / Event::Disconnected.
+    in property <string> connection-text;
+
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 12px;
+
+        Text {
+            text: root.connection-text;
+            color: #a6adc8;
+            font-size: 12px;
+            vertical-alignment: center;
+            horizontal-stretch: 1;
+        }
+    }
 }
