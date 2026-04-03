@@ -10,8 +10,9 @@ import { StatusBar }       from "components/status_bar.slint";
 export global UiState {
     // ── Core UI state ─────────────────────────────────────────────────────────
     in-out property <bool>   is-loading:     false;
-    in-out property <string> status-message: "";
-    in-out property <string> error-message:  "";
+    in-out property <string> status-message:    "";
+    in-out property <string> error-message:    "";
+    in-out property <string> status-connection: @tr("Not connected");
     in-out property <string> editor-text:    "";
 
     // ── Connection list (sidebar) ─────────────────────────────────────────────
@@ -81,6 +82,7 @@ export component AppWindow inherits Window {
         // Full-width status bar at the bottom
         StatusBar {
             height: 24px;
+            connection-text: UiState.status-connection;
         }
     }
 
