@@ -1,15 +1,36 @@
+//! Application controller — the central async command loop.
+//!
+//! [`AppController`] sits between the UI layer and the service layer. It receives
+//! [`Command`] values sent by UI callbacks and translates them into service calls,
+//! then broadcasts [`Event`] values back to the UI via `invoke_from_event_loop`.
+//!
+//! # Communication model
+//!
+//! ```text
+//! UI callbacks  ──(tx_cmd)──▶  AppController::run  ──(tx_event)──▶  UI event handler
+//! ```
+//!
+//! Both channels are bounded (`capacity = 64`). The controller task exits cleanly
+//! when all `Sender<Command>` clones are dropped (i.e. when the UI window closes).
+
 use tokio::sync::mpsc;
 use tracing::{info, warn};
 use wf_db::{models::DbConnection, service::DbService};
 
 use crate::{
-    app::{command::Command, event::Event},
+    app::{command::Command, event::Event, session::SessionManager},
     state::SharedState,
 };
 
+/// Async command loop that drives the application backend.
+///
+/// Owns the [`DbService`] pool, the [`SessionManager`] for config persistence,
+/// and the [`SharedState`] shared with the UI layer. Created by [`AppController::new`]
+/// and consumed by [`AppController::run`], which is spawned as a tokio task.
 pub struct AppController {
     state: SharedState,
     db: DbService,
+    session: SessionManager,
     rx_cmd: mpsc::Receiver<Command>,
     tx_event: mpsc::Sender<Event>,
 }
@@ -20,6 +41,7 @@ impl AppController {
     pub fn new(
         state: SharedState,
         db: DbService,
+        session: SessionManager,
     ) -> (Self, mpsc::Sender<Command>, mpsc::Receiver<Event>) {
         let (tx_cmd, rx_cmd) = mpsc::channel(64);
         let (tx_event, rx_event) = mpsc::channel(64);
@@ -27,6 +49,7 @@ impl AppController {
             Self {
                 state,
                 db,
+                session,
                 rx_cmd,
                 tx_event,
             },
@@ -47,11 +70,24 @@ impl AppController {
         }
     }
 
+    /// Handle a `Connect` command.
+    ///
+    /// On success:
+    /// 1. Persists the session via [`SessionManager::save_connection`].
+    /// 2. Adds the connection to [`SharedState`] if it is not already present.
+    /// 3. Marks it as the active connection.
+    /// 4. Sends [`Event::Connected`] to the UI.
+    ///
+    /// On failure, sends [`Event::QueryError`] with the error message.
     async fn handle_connect(&self, conn: DbConnection, password: Option<String>) {
         let id = conn.id.clone();
         info!(conn_id = %id, "handling Connect command");
         match self.db.connect(&conn, password.as_deref()).await {
             Ok(()) => {
+                // persist session so we can auto-reconnect on next launch
+                if let Err(e) = self.session.save_connection(&conn) {
+                    warn!(conn_id = %id, error = %e, "failed to save session");
+                }
                 // Only add to the saved list if this is a new connection.
                 let already_saved = self.state.conn.all().iter().any(|c| c.id == id);
                 if !already_saved {
@@ -68,6 +104,9 @@ impl AppController {
         }
     }
 
+    /// Handle a `Disconnect` command.
+    ///
+    /// Drops the connection pool for `id` and sends [`Event::Disconnected`] to the UI.
     async fn handle_disconnect(&self, id: String) {
         info!(conn_id = %id, "handling Disconnect command");
         self.db.disconnect(&id);
@@ -83,17 +122,27 @@ impl AppController {
 mod tests {
     use std::sync::Arc;
 
+    use tempfile::tempdir;
+    use wf_config::manager::ConfigManager;
     use wf_db::{
         models::{DbConnection, DbType},
         service::DbService,
     };
 
     use crate::{
-        app::{command::Command, event::Event},
+        app::{command::Command, event::Event, session::SessionManager},
         state::AppState,
     };
 
     use super::AppController;
+
+    /// Build a [`SessionManager`] backed by a temporary directory.
+    /// `keep()` prevents cleanup so the path stays valid for the test lifetime.
+    fn test_session() -> SessionManager {
+        let dir = tempdir().unwrap();
+        let path = dir.keep().join("config.toml");
+        SessionManager::with_config_manager(ConfigManager::with_path(path))
+    }
 
     fn sqlite_conn(id: &str) -> DbConnection {
         DbConnection {
@@ -113,7 +162,8 @@ mod tests {
     async fn connect_should_send_connected_event_on_success() {
         let state = Arc::new(AppState::new());
         let db = DbService::new();
-        let (controller, tx_cmd, mut rx_event) = AppController::new(state.clone(), db);
+        let (controller, tx_cmd, mut rx_event) =
+            AppController::new(state.clone(), db, test_session());
 
         tx_cmd
             .send(Command::Connect(sqlite_conn("c1"), None))
@@ -132,7 +182,8 @@ mod tests {
     async fn connect_should_send_query_error_on_invalid_url() {
         let state = Arc::new(AppState::new());
         let db = DbService::new();
-        let (controller, tx_cmd, mut rx_event) = AppController::new(state.clone(), db);
+        let (controller, tx_cmd, mut rx_event) =
+            AppController::new(state.clone(), db, test_session());
 
         let bad = DbConnection {
             id: "bad".to_string(),
@@ -158,7 +209,8 @@ mod tests {
     async fn disconnect_should_send_disconnected_event() {
         let state = Arc::new(AppState::new());
         let db = DbService::new();
-        let (controller, tx_cmd, mut rx_event) = AppController::new(state.clone(), db);
+        let (controller, tx_cmd, mut rx_event) =
+            AppController::new(state.clone(), db, test_session());
 
         tx_cmd
             .send(Command::Connect(sqlite_conn("c2"), None))
@@ -182,7 +234,8 @@ mod tests {
     async fn connect_twice_should_not_duplicate_in_state() {
         let state = Arc::new(AppState::new());
         let db = DbService::new();
-        let (controller, tx_cmd, mut rx_event) = AppController::new(state.clone(), db);
+        let (controller, tx_cmd, mut rx_event) =
+            AppController::new(state.clone(), db, test_session());
 
         tx_cmd
             .send(Command::Connect(sqlite_conn("c3"), None))
