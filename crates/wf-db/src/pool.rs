@@ -1,12 +1,14 @@
 use sqlx::{MySqlPool, PgPool, SqlitePool};
 
+use crate::drivers;
 use crate::error::DbError;
-use crate::models::{DbConnection, DbKind, DbType};
+use crate::models::{DbConnection, DbKind, DbType, QueryResult};
 
 // ---------------------------------------------------------------------------
 // DbPool
 // ---------------------------------------------------------------------------
 
+#[derive(Clone)]
 pub enum DbPool {
     Pg(PgPool),
     My(MySqlPool),
@@ -43,6 +45,18 @@ impl DbPool {
                     .map_err(|e| DbError::ConnectionFailed(e.to_string()))?;
                 Ok(DbPool::Sqlite(pool))
             }
+        }
+    }
+
+    /// Execute `sql` against this pool and return a [`QueryResult`].
+    ///
+    /// Dispatches to the correct driver (`sqlite`, `pg`, or `my`) based on
+    /// the pool variant.
+    pub async fn execute(&self, sql: &str) -> Result<QueryResult, DbError> {
+        match self {
+            DbPool::Pg(p) => drivers::pg::execute(p, sql).await,
+            DbPool::My(p) => drivers::my::execute(p, sql).await,
+            DbPool::Sqlite(p) => drivers::sqlite::execute(p, sql).await,
         }
     }
 

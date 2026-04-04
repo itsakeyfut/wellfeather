@@ -1,8 +1,10 @@
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
+use tokio_util::sync::CancellationToken;
+
 use crate::error::DbError;
-use crate::models::DbConnection;
+use crate::models::{DbConnection, QueryResult};
 use crate::pool::DbPool;
 
 // ---------------------------------------------------------------------------
@@ -58,12 +60,51 @@ impl DbService {
             .remove(conn_id);
     }
 
+    /// Execute `sql` on the connection identified by `conn_id`.
+    ///
+    /// Returns `Err(DbError::ConnectionFailed)` if `conn_id` is not in the pool map.
+    pub async fn execute(&self, conn_id: &str, sql: &str) -> Result<QueryResult, DbError> {
+        let pool = self.pool_for(conn_id)?;
+        pool.execute(sql).await
+    }
+
+    /// Execute `sql` on the connection identified by `conn_id`, aborting if
+    /// `token` is cancelled before the query completes.
+    ///
+    /// Returns `Err(DbError::Cancelled)` if the token fires first.
+    /// Returns `Err(DbError::ConnectionFailed)` if `conn_id` is not in the pool map.
+    pub async fn execute_with_cancel(
+        &self,
+        conn_id: &str,
+        sql: &str,
+        token: CancellationToken,
+    ) -> Result<QueryResult, DbError> {
+        let pool = self.pool_for(conn_id)?;
+        tokio::select! {
+            result = pool.execute(sql) => result,
+            _ = token.cancelled() => Err(DbError::Cancelled),
+        }
+    }
+
     /// Returns `true` if a pool for `conn_id` exists in the map.
     pub fn is_connected(&self, conn_id: &str) -> bool {
         self.pools
             .read()
             .unwrap_or_else(|p| p.into_inner())
             .contains_key(conn_id)
+    }
+
+    // ── private helpers ───────────────────────────────────────────────────────
+
+    /// Clone the [`DbPool`] for `conn_id` out of the read-lock so it can be
+    /// used across `.await` points without holding the lock.
+    fn pool_for(&self, conn_id: &str) -> Result<DbPool, DbError> {
+        self.pools
+            .read()
+            .unwrap_or_else(|p| p.into_inner())
+            .get(conn_id)
+            .cloned()
+            .ok_or_else(|| DbError::ConnectionFailed(format!("not connected: {conn_id}")))
     }
 }
 
@@ -147,5 +188,75 @@ mod tests {
         svc.connect(&conn, None).await.unwrap();
 
         assert!(svc2.is_connected("shared"));
+    }
+
+    // ── execute ───────────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn execute_should_return_query_result_for_connected_id() {
+        let svc = DbService::new();
+        let conn = sqlite_memory_conn("exec-1");
+        svc.connect(&conn, None).await.unwrap();
+
+        let result = svc.execute("exec-1", "SELECT 42 AS answer").await.unwrap();
+
+        assert_eq!(result.row_count, 1);
+        assert_eq!(result.rows[0][0], Some("42".to_string()));
+    }
+
+    #[tokio::test]
+    async fn execute_should_return_connection_failed_for_unknown_id() {
+        let svc = DbService::new();
+
+        let err = svc.execute("unknown", "SELECT 1").await.unwrap_err();
+
+        assert!(matches!(err, DbError::ConnectionFailed(_)));
+    }
+
+    // ── execute_with_cancel ───────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn execute_with_cancel_should_return_result_when_not_cancelled() {
+        let svc = DbService::new();
+        let conn = sqlite_memory_conn("cancel-1");
+        svc.connect(&conn, None).await.unwrap();
+
+        let token = CancellationToken::new();
+        let result = svc
+            .execute_with_cancel("cancel-1", "SELECT 1", token)
+            .await
+            .unwrap();
+
+        assert_eq!(result.row_count, 1);
+    }
+
+    #[tokio::test]
+    async fn execute_with_cancel_should_return_cancelled_when_token_fires() {
+        let svc = DbService::new();
+        let conn = sqlite_memory_conn("cancel-2");
+        svc.connect(&conn, None).await.unwrap();
+
+        let token = CancellationToken::new();
+        token.cancel(); // fire immediately before the query starts
+
+        let err = svc
+            .execute_with_cancel("cancel-2", "SELECT 1", token)
+            .await
+            .unwrap_err();
+
+        assert!(matches!(err, DbError::Cancelled));
+    }
+
+    #[tokio::test]
+    async fn execute_with_cancel_should_return_connection_failed_for_unknown_id() {
+        let svc = DbService::new();
+        let token = CancellationToken::new();
+
+        let err = svc
+            .execute_with_cancel("unknown", "SELECT 1", token)
+            .await
+            .unwrap_err();
+
+        assert!(matches!(err, DbError::ConnectionFailed(_)));
     }
 }
