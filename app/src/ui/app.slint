@@ -1,4 +1,4 @@
-import { ConnectionEntry } from "globals.slint";
+import { ConnectionEntry, RowData } from "globals.slint";
 import { ConnectionForm }  from "components/connection_form.slint";
 import { Sidebar }         from "components/sidebar.slint";
 import { Editor }          from "components/editor.slint";
@@ -27,6 +27,11 @@ export global UiState {
     pure callback cursor-line(string, int) -> int;
     /// Moves cursor by delta lines (-1=up, +1=down) from byte offset, returns new offset.
     pure callback move-cursor-line(string, int, int) -> int;
+
+    // ── Query result state ────────────────────────────────────────────────────
+    in-out property <[string]>  result-columns:   [];
+    in-out property <[RowData]> result-rows:      [];
+    in-out property <int>       result-row-count: 0;
 
     // ── Connection list (sidebar) ─────────────────────────────────────────────
     in-out property <[ConnectionEntry]> connection-list:      [];
@@ -84,12 +89,12 @@ export component AppWindow inherits Window {
         add-connection => { UiState.open-connection-form(); }
     }
 
-    // ── SQL editor (full right pane height) ──────────────────────────────────
+    // ── SQL editor — top 55% of content area ─────────────────────────────────
     Editor {
         x: 220px;
         y: 0;
         width:  root.width  - 220px;
-        height: root.height - 24px;
+        height: (root.height - 24px) * 0.55;
         text         <=> UiState.editor-text;
         font-family:     UiState.font-family;
         font-size-px:    UiState.font-size;
@@ -98,13 +103,16 @@ export component AppWindow inherits Window {
         move-cursor-line(text, pos, delta) => { UiState.move-cursor-line(text, pos, delta); }
     }
 
-    // ── Result table (placeholder — shown when query results are available) ───
-    // TODO: restore split layout once ResultTable is implemented (T020+)
+    // ── Result table — bottom 45% of content area ─────────────────────────────
     ResultTable {
         x: 220px;
-        y: root.height - 24px;
+        y: (root.height - 24px) * 0.55;
         width:  root.width  - 220px;
-        height: 0;
+        height: (root.height - 24px) * 0.45;
+        columns:    UiState.result-columns;
+        rows:       UiState.result-rows;
+        row-count:  UiState.result-row-count;
+        is-loading: UiState.is-loading;
     }
 
     // ── Status bar ────────────────────────────────────────────────────────────

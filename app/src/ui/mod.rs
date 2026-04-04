@@ -97,6 +97,63 @@ impl UI {
                             ui.set_status_connection(status_conn.into());
                         });
                     }
+                    Event::QueryStarted => {
+                        // clone required: invoke_from_event_loop closure must be 'static
+                        let window_weak = window_weak.clone();
+                        let _ = slint::invoke_from_event_loop(move || {
+                            let Some(window) = window_weak.upgrade() else {
+                                return;
+                            };
+                            let ui = window.global::<crate::UiState>();
+                            ui.set_is_loading(true);
+                            ui.set_error_message("".into());
+                        });
+                    }
+                    Event::QueryFinished(result) => {
+                        // Build plain (Send) data outside the closure — Rc is not Send.
+                        let columns: Vec<slint::SharedString> =
+                            result.columns.iter().map(|c| c.clone().into()).collect();
+                        let raw_rows: Vec<Vec<slint::SharedString>> = result
+                            .rows
+                            .iter()
+                            .map(|r| {
+                                r.iter()
+                                    .map(|cell| cell.as_deref().unwrap_or("").to_string().into())
+                                    .collect()
+                            })
+                            .collect();
+                        let row_count = result.row_count as i32;
+                        // clone required: invoke_from_event_loop closure must be 'static
+                        let window_weak = window_weak.clone();
+                        let _ = slint::invoke_from_event_loop(move || {
+                            let Some(window) = window_weak.upgrade() else {
+                                return;
+                            };
+                            let ui = window.global::<crate::UiState>();
+                            ui.set_is_loading(false);
+                            // VecModel created on UI thread (Rc is not Send)
+                            let col_model = Rc::new(slint::VecModel::from(columns));
+                            ui.set_result_columns(col_model.into());
+                            let rows: Vec<crate::RowData> = raw_rows
+                                .into_iter()
+                                .map(|cells| crate::RowData {
+                                    cells: Rc::new(slint::VecModel::from(cells)).into(),
+                                })
+                                .collect();
+                            ui.set_result_rows(Rc::new(slint::VecModel::from(rows)).into());
+                            ui.set_result_row_count(row_count);
+                        });
+                    }
+                    Event::QueryCancelled => {
+                        // clone required: invoke_from_event_loop closure must be 'static
+                        let window_weak = window_weak.clone();
+                        let _ = slint::invoke_from_event_loop(move || {
+                            let Some(window) = window_weak.upgrade() else {
+                                return;
+                            };
+                            window.global::<crate::UiState>().set_is_loading(false);
+                        });
+                    }
                     Event::QueryError(ref msg) => {
                         let msg = msg.clone();
                         // clone required: invoke_from_event_loop closure must be 'static
@@ -106,6 +163,7 @@ impl UI {
                                 return;
                             };
                             let ui = window.global::<crate::UiState>();
+                            ui.set_is_loading(false);
                             ui.set_form_status(msg.clone().into());
                             ui.set_form_testing(false);
                             ui.set_error_message(msg.into());
@@ -231,7 +289,7 @@ impl UI {
     fn register_editor_callbacks(
         window: &crate::AppWindow,
         _state: SharedState,
-        _tx_cmd: mpsc::Sender<Command>,
+        tx_cmd: mpsc::Sender<Command>,
     ) {
         let ui = window.global::<crate::UiState>();
 
@@ -285,7 +343,25 @@ impl UI {
             }
         });
 
-        // TODO: T030+ — run_query, cancel_query, completion trigger
+        {
+            let tx_cmd = tx_cmd.clone(); // clone required: callback closure needs owned tx_cmd
+            ui.on_run_query(move |sql| {
+                let sql = sql.to_string();
+                let tx_cmd = tx_cmd.clone(); // clone required: tokio::spawn requires 'static
+                tokio::spawn(async move {
+                    let _ = tx_cmd.send(Command::RunQuery(sql)).await;
+                });
+            });
+        }
+        {
+            let tx_cmd = tx_cmd.clone(); // clone required: callback closure needs owned tx_cmd
+            ui.on_cancel_query(move || {
+                let tx_cmd = tx_cmd.clone(); // clone required: tokio::spawn requires 'static
+                tokio::spawn(async move {
+                    let _ = tx_cmd.send(Command::CancelQuery).await;
+                });
+            });
+        }
     }
 
     // ── Result callbacks (TODO) ───────────────────────────────────────────────
