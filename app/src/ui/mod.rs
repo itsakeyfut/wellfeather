@@ -229,10 +229,62 @@ impl UI {
     // ── Editor callbacks (TODO) ───────────────────────────────────────────────
 
     fn register_editor_callbacks(
-        _window: &crate::AppWindow,
+        window: &crate::AppWindow,
         _state: SharedState,
         _tx_cmd: mpsc::Sender<Command>,
     ) {
+        let ui = window.global::<crate::UiState>();
+
+        // Pure callback: count newlines + 1 to derive the line count for the
+        // line-number gutter. Declared `pure` so Slint can call it inside a
+        // property binding expression (UiState.count-lines(UiState.editor-text)).
+        ui.on_count_lines(|text| (text.chars().filter(|&c| c == '\n').count() + 1) as i32);
+
+        // Pure callback: count newlines before the cursor byte offset to get
+        // the 0-based line index for the current-line highlight.
+        ui.on_cursor_line(|text, pos| {
+            let pos = (pos as usize).min(text.as_str().len());
+            text.as_str().as_bytes()[..pos]
+                .iter()
+                .filter(|&&b| b == b'\n')
+                .count() as i32
+        });
+
+        // Pure callback: move cursor by `delta` lines (-1=up, +1=down) from
+        // byte offset `pos`, preserving column position.  Returns new byte offset.
+        ui.on_move_cursor_line(|text, pos, delta| {
+            let s = text.as_str();
+            let pos = (pos as usize).min(s.len());
+
+            // Byte offset of the start of the current line.
+            let line_start = s[..pos].rfind('\n').map(|i| i + 1).unwrap_or(0);
+            // Column as byte count from line start (preserved when moving).
+            let col = pos - line_start;
+
+            if delta < 0 {
+                // Move up: target the previous line.
+                if line_start == 0 {
+                    return 0; // Already on first line — go to start.
+                }
+                let prev_end = line_start - 1; // byte index of the \n before us
+                let prev_start = s[..prev_end].rfind('\n').map(|i| i + 1).unwrap_or(0);
+                (prev_start + col.min(prev_end - prev_start)) as i32
+            } else {
+                // Move down: target the next line.
+                match s[pos..].find('\n') {
+                    None => pos as i32, // Already on last line — stay.
+                    Some(off) => {
+                        let next_start = pos + off + 1;
+                        let next_end = s[next_start..]
+                            .find('\n')
+                            .map(|i| next_start + i)
+                            .unwrap_or(s.len());
+                        (next_start + col.min(next_end - next_start)) as i32
+                    }
+                }
+            }
+        });
+
         // TODO: T030+ — run_query, cancel_query, completion trigger
     }
 
@@ -245,7 +297,8 @@ impl UI {
     // ── Status callbacks (TODO) ───────────────────────────────────────────────
 
     fn register_status_callbacks(_window: &crate::AppWindow, _state: SharedState) {
-        // TODO: T029 — status updates via invoke_from_event_loop
+        // Status bar text is updated by spawn_event_handler via invoke_from_event_loop.
+        // No additional setup needed here.
     }
 }
 

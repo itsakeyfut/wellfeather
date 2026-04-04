@@ -9,11 +9,24 @@ import { StatusBar }       from "components/status_bar.slint";
 // Sub-components that need global state receive properties bound from UiState below.
 export global UiState {
     // ── Core UI state ─────────────────────────────────────────────────────────
-    in-out property <bool>   is-loading:     false;
+    in-out property <bool>   is-loading:        false;
     in-out property <string> status-message:    "";
-    in-out property <string> error-message:    "";
+    in-out property <string> error-message:     "";
     in-out property <string> status-connection: @tr("Not connected");
-    in-out property <string> editor-text:    "";
+
+    // ── Appearance ────────────────────────────────────────────────────────────
+    in-out property <string> font-family: "JetBrains Mono";
+    in-out property <int>    font-size:   14;  // logical pixels
+
+    // ── Editor state ──────────────────────────────────────────────────────────
+    in-out property <string> editor-text: "";
+
+    // ── Editor helpers (implemented in Rust, callable in property bindings) ───
+    pure callback count-lines(string) -> int;
+    /// Returns the 0-based line index at the given UTF-8 byte offset.
+    pure callback cursor-line(string, int) -> int;
+    /// Moves cursor by delta lines (-1=up, +1=down) from byte offset, returns new offset.
+    pure callback move-cursor-line(string, int, int) -> int;
 
     // ── Connection list (sidebar) ─────────────────────────────────────────────
     in-out property <[ConnectionEntry]> connection-list:      [];
@@ -51,54 +64,71 @@ export global UiState {
 
 export component AppWindow inherits Window {
     title: "wellfeather";
-    min-width: 800px;
-    min-height: 600px;
+    // Explicit width/height fix root.width/root.height as constants, which are then
+    // used in arithmetic expressions below to position all children absolutely.
+    // VerticalLayout + vertical-stretch proved unreliable when height: parent.height
+    // is set on a layout — the stretch distribution ignores the explicit height and
+    // falls back to preferred-height (~61px). Absolute positioning with arithmetic
+    // avoids all layout-engine ambiguity.
+    width:  1280px;
+    height: 800px;
 
-    VerticalLayout {
-        // Main content area: sidebar (fixed width) + right pane (editor / result)
-        HorizontalLayout {
-            vertical-stretch: 1;
-
-            Sidebar {
-                width: 220px;
-                connections: UiState.connection-list;
-                switch-connection(id) => { UiState.switch-connection(id); }
-                add-connection => { UiState.open-connection-form(); }
-            }
-
-            VerticalLayout {
-                horizontal-stretch: 1;
-
-                Editor {
-                    vertical-stretch: 1;
-                }
-
-                ResultTable {
-                    vertical-stretch: 1;
-                }
-            }
-        }
-
-        // Full-width status bar at the bottom
-        StatusBar {
-            height: 24px;
-            connection-text: UiState.status-connection;
-        }
+    // ── Sidebar ───────────────────────────────────────────────────────────────
+    Sidebar {
+        x: 0;
+        y: 0;
+        width:  220px;
+        height: root.height - 24px;
+        connections: UiState.connection-list;
+        switch-connection(id) => { UiState.switch-connection(id); }
+        add-connection => { UiState.open-connection-form(); }
     }
 
-    // Connection form modal overlay — rendered last so it appears on top of everything.
+    // ── SQL editor (full right pane height) ──────────────────────────────────
+    Editor {
+        x: 220px;
+        y: 0;
+        width:  root.width  - 220px;
+        height: root.height - 24px;
+        text         <=> UiState.editor-text;
+        font-family:     UiState.font-family;
+        font-size-px:    UiState.font-size;
+        line-count:      UiState.count-lines(UiState.editor-text);
+        cursor-line(text, pos) => { UiState.cursor-line(text, pos); }
+        move-cursor-line(text, pos, delta) => { UiState.move-cursor-line(text, pos, delta); }
+    }
+
+    // ── Result table (placeholder — shown when query results are available) ───
+    // TODO: restore split layout once ResultTable is implemented (T020+)
+    ResultTable {
+        x: 220px;
+        y: root.height - 24px;
+        width:  root.width  - 220px;
+        height: 0;
+    }
+
+    // ── Status bar ────────────────────────────────────────────────────────────
+    StatusBar {
+        x: 0;
+        y: root.height - 24px;
+        width:  root.width;
+        height: 24px;
+        connection-text: UiState.status-connection;
+    }
+
+    // ── Connection form modal overlay ─────────────────────────────────────────
+    // Rendered last so it appears above everything else.
     if UiState.show-connection-form: Rectangle {
         x: 0;
         y: 0;
-        width: parent.width;
-        height: parent.height;
+        width:  root.width;
+        height: root.height;
         background: #00000088;
 
         ConnectionForm {
-            x: (parent.width - self.width) / 2;
+            x: (parent.width  - self.width)  / 2;
             y: (parent.height - self.height) / 2;
 
-            // Bind all form state bidirectionally
             tab-index   <=> UiState.form-tab-index;
             db-type     <=> UiState.form-db-type;
             name        <=> UiState.form-name;
