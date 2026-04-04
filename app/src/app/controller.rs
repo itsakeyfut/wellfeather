@@ -14,8 +14,9 @@
 //! when all `Sender<Command>` clones are dropped (i.e. when the UI window closes).
 
 use tokio::sync::mpsc;
+use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
-use wf_db::{models::DbConnection, service::DbService};
+use wf_db::{error::DbError, models::DbConnection, service::DbService};
 
 use crate::{
     app::{command::Command, event::Event, session::SessionManager},
@@ -65,6 +66,10 @@ impl AppController {
             match cmd {
                 Command::Connect(conn, pw) => self.handle_connect(conn, pw).await,
                 Command::Disconnect(id) => self.handle_disconnect(id).await,
+                Command::RunQuery(sql) => self.handle_run_query(sql).await,
+                Command::RunAll(sql) => self.handle_run_query(sql).await,
+                Command::RunSelection(sql) => self.handle_run_query(sql).await,
+                Command::CancelQuery => self.handle_cancel_query().await,
                 _ => {} // remaining commands handled in later tasks
             }
         }
@@ -111,6 +116,63 @@ impl AppController {
         info!(conn_id = %id, "handling Disconnect command");
         self.db.disconnect(&id);
         let _ = self.tx_event.send(Event::Disconnected(id)).await;
+    }
+
+    /// Handle a `RunQuery` / `RunAll` / `RunSelection` command.
+    ///
+    /// Steps:
+    /// 1. Cancel any in-flight query via `QueryState::cancel`.
+    /// 2. Bail with [`Event::QueryError`] if there is no active connection.
+    /// 3. Create a fresh [`CancellationToken`] and register it in `QueryState`.
+    /// 4. Send [`Event::QueryStarted`] to the UI immediately.
+    /// 5. Spawn a background task that calls [`DbService::execute_with_cancel`]
+    ///    and sends [`Event::QueryFinished`] / [`Event::QueryCancelled`] /
+    ///    [`Event::QueryError`] when done.
+    async fn handle_run_query(&self, sql: String) {
+        info!("handling RunQuery command");
+        self.state.query.cancel();
+
+        let conn_id = match self.state.conn.active() {
+            Some(c) => c.id.clone(),
+            None => {
+                warn!("RunQuery: no active connection");
+                let _ = self
+                    .tx_event
+                    .send(Event::QueryError("no active connection".to_string()))
+                    .await;
+                return;
+            }
+        };
+
+        let token = CancellationToken::new();
+        self.state.query.set_cancel_token(token.clone());
+        let _ = self.tx_event.send(Event::QueryStarted).await;
+
+        let db = self.db.clone(); // clone required: tokio::spawn needs 'static
+        let tx = self.tx_event.clone(); // clone required: tokio::spawn needs 'static
+        tokio::spawn(async move {
+            match db.execute_with_cancel(&conn_id, &sql, token).await {
+                Ok(result) => {
+                    let _ = tx.send(Event::QueryFinished(result)).await;
+                }
+                Err(DbError::Cancelled) => {
+                    let _ = tx.send(Event::QueryCancelled).await;
+                }
+                Err(e) => {
+                    let _ = tx.send(Event::QueryError(e.to_string())).await;
+                }
+            }
+        });
+    }
+
+    /// Handle a `CancelQuery` command.
+    ///
+    /// Fires the stored [`CancellationToken`] (if any) and immediately sends
+    /// [`Event::QueryCancelled`] to the UI so it can reset its loading state.
+    async fn handle_cancel_query(&self) {
+        info!("handling CancelQuery command");
+        self.state.query.cancel();
+        let _ = self.tx_event.send(Event::QueryCancelled).await;
     }
 }
 
@@ -228,6 +290,71 @@ mod tests {
         assert!(matches!(e1, Event::Connected(_)));
         let e2 = rx_event.recv().await.unwrap();
         assert!(matches!(e2, Event::Disconnected(ref id) if id == "c2"));
+    }
+
+    // ── RunQuery ──────────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn run_query_should_send_query_started_then_finished() {
+        let state = Arc::new(AppState::new());
+        let db = DbService::new();
+        let (controller, tx_cmd, mut rx_event) =
+            AppController::new(state.clone(), db, test_session());
+
+        // Connect first so there is an active connection.
+        tx_cmd
+            .send(Command::Connect(sqlite_conn("q1"), None))
+            .await
+            .unwrap();
+        tx_cmd
+            .send(Command::RunQuery("SELECT 1 AS n".to_string()))
+            .await
+            .unwrap();
+        drop(tx_cmd);
+
+        tokio::spawn(controller.run());
+
+        let e1 = rx_event.recv().await.unwrap();
+        assert!(matches!(e1, Event::Connected(_)));
+        let e2 = rx_event.recv().await.unwrap();
+        assert!(matches!(e2, Event::QueryStarted));
+        let e3 = rx_event.recv().await.unwrap();
+        assert!(matches!(e3, Event::QueryFinished(_)));
+    }
+
+    #[tokio::test]
+    async fn run_query_should_send_query_error_when_no_active_connection() {
+        let state = Arc::new(AppState::new());
+        let db = DbService::new();
+        let (controller, tx_cmd, mut rx_event) =
+            AppController::new(state.clone(), db, test_session());
+
+        tx_cmd
+            .send(Command::RunQuery("SELECT 1".to_string()))
+            .await
+            .unwrap();
+        drop(tx_cmd);
+
+        controller.run().await;
+
+        let event = rx_event.recv().await.unwrap();
+        assert!(matches!(event, Event::QueryError(_)));
+    }
+
+    #[tokio::test]
+    async fn cancel_query_should_send_query_cancelled_event() {
+        let state = Arc::new(AppState::new());
+        let db = DbService::new();
+        let (controller, tx_cmd, mut rx_event) =
+            AppController::new(state.clone(), db, test_session());
+
+        tx_cmd.send(Command::CancelQuery).await.unwrap();
+        drop(tx_cmd);
+
+        controller.run().await;
+
+        let event = rx_event.recv().await.unwrap();
+        assert!(matches!(event, Event::QueryCancelled));
     }
 
     #[tokio::test]
