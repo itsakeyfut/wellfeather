@@ -1,3 +1,139 @@
+import { RowData } from "../globals.slint";
+
+// Result table — column headers + scrollable data rows.
+// Virtual scrolling (T051) and drag-resize split (T020+) come in later milestones.
+//
+// Scroll architecture:
+//   header-scroll (Flickable, interactive: false) + body-scroll (Flickable, H+V).
+//   `changed viewport-x =>` in body-scroll syncs header-scroll so headers
+//   track horizontal scroll without scrolling vertically.
+
 export component ResultTable inherits Rectangle {
     background: #1e1e2e;
+    clip: true;
+    preferred-height: 0;
+    min-height: 0;
+
+    /// Column names from the last QueryResult.
+    in property <[string]>  columns:    [];
+    /// Row data as strings; NULL values are represented as empty strings.
+    in property <[RowData]> rows:       [];
+    /// Total row count (same as rows.length for now; kept explicit for T051).
+    in property <int>       row-count:  0;
+    /// True while a query is executing; shows the "Running…" overlay.
+    in property <bool>      is-loading: false;
+
+    property <length> col-min-width: 120px;
+    property <length> row-height:     28px;
+
+    // ── Loading overlay ───────────────────────────────────────────────────────
+    if root.is-loading: Rectangle {
+        width:  parent.width;
+        height: parent.height;
+        background: #1e1e2e;
+        Text {
+            x: (parent.width  - self.width)  / 2;
+            y: (parent.height - self.height) / 2;
+            text: @tr("Running\u{2026}");
+            color: #cdd6f4;
+            font-size: 13px;
+        }
+    }
+
+    // ── Result content (hidden while loading) ─────────────────────────────────
+    if !root.is-loading: VerticalLayout {
+        width:  parent.width;
+        height: parent.height;
+
+        // ── Header row (horizontal scroll only; synced with body) ───────────
+        header-scroll := Flickable {
+            height: root.row-height;
+            interactive: false;
+            viewport-width: max(root.columns.length * root.col-min-width, root.width);
+
+            HorizontalLayout {
+                spacing: 0;
+                for col in root.columns: Rectangle {
+                    width: root.col-min-width;
+                    height: root.row-height;
+                    background: #313244;
+                    Rectangle {   // right divider
+                        x: parent.width - 1px;
+                        width: 1px;
+                        height: parent.height;
+                        background: #45475a;
+                    }
+                    Text {
+                        x: 8px;
+                        y: (parent.height - self.height) / 2;
+                        text: col;
+                        color: #cdd6f4;
+                        font-size: 12px;
+                        overflow: elide;
+                    }
+                }
+            }
+        }
+
+        // ── Body (horizontal + vertical scroll) ──────────────────────────────
+        body-scroll := Flickable {
+            vertical-stretch: 1;
+            viewport-width:  max(root.columns.length * root.col-min-width, root.width);
+            viewport-height: max(root.row-count * root.row-height, 1px);
+
+            // Sync header horizontal position when body scrolls
+            changed viewport-x => { header-scroll.viewport-x = self.viewport-x; }
+
+            VerticalLayout {
+                spacing: 0;
+
+                // Zero-row placeholder (only when a query returned no rows)
+                if root.row-count == 0 && root.columns.length > 0: Rectangle {
+                    height: 40px;
+                    width:  root.width;
+                    Text {
+                        x: (parent.width  - self.width)  / 2;
+                        y: (parent.height - self.height) / 2;
+                        text: @tr("0 rows");
+                        color: #585b70;
+                        font-size: 13px;
+                    }
+                }
+
+                // Data rows
+                for row[i] in root.rows: Rectangle {
+                    height: root.row-height;
+                    width:  max(root.columns.length * root.col-min-width, root.width);
+                    background: mod(i, 2) == 0 ? #1e1e2e : #181825;
+                    Rectangle {   // bottom border
+                        y: parent.height - 1px;
+                        width: parent.width;
+                        height: 1px;
+                        background: #313244;
+                    }
+                    HorizontalLayout {
+                        spacing: 0;
+                        for cell in row.cells: Rectangle {
+                            width: root.col-min-width;
+                            height: root.row-height;
+                            Rectangle {   // right border
+                                x: parent.width - 1px;
+                                width: 1px;
+                                height: parent.height;
+                                background: #313244;
+                            }
+                            Text {
+                                x: 8px;
+                                y: (parent.height - self.height) / 2;
+                                text: cell;
+                                color: #a6adc8;
+                                font-size: 12px;
+                                overflow: elide;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
