@@ -65,6 +65,7 @@ impl AppController {
         while let Some(cmd) = self.rx_cmd.recv().await {
             match cmd {
                 Command::Connect(conn, pw) => self.handle_connect(conn, pw).await,
+                Command::TestConnection(conn, pw) => self.handle_test_connection(conn, pw).await,
                 Command::Disconnect(id) => self.handle_disconnect(id).await,
                 Command::RunQuery(sql) => self.handle_run_query(sql).await,
                 Command::RunAll(sql) => self.handle_run_query(sql).await,
@@ -104,7 +105,33 @@ impl AppController {
             }
             Err(e) => {
                 warn!(conn_id = %id, error = %e, "connection failed");
-                let _ = self.tx_event.send(Event::QueryError(e.to_string())).await;
+                let _ = self.tx_event.send(Event::ConnectError(e.to_string())).await;
+            }
+        }
+    }
+
+    /// Handle a `TestConnection` command.
+    ///
+    /// Tries to establish a connection, then immediately drops it.
+    /// Does **not** add the connection to [`SharedState`] or the sidebar.
+    /// Sends [`Event::TestConnectionOk`] on success or
+    /// [`Event::TestConnectionFailed`] on failure.
+    async fn handle_test_connection(&self, conn: DbConnection, password: Option<String>) {
+        let id = conn.id.clone();
+        info!(conn_id = %id, "handling TestConnection command");
+        match self.db.connect(&conn, password.as_deref()).await {
+            Ok(()) => {
+                // Drop the temporary pool immediately — do not persist to state.
+                self.db.disconnect(&id);
+                info!(conn_id = %id, "test connection succeeded");
+                let _ = self.tx_event.send(Event::TestConnectionOk).await;
+            }
+            Err(e) => {
+                warn!(conn_id = %id, error = %e, "test connection failed");
+                let _ = self
+                    .tx_event
+                    .send(Event::TestConnectionFailed(e.to_string()))
+                    .await;
             }
         }
     }
@@ -220,6 +247,63 @@ mod tests {
         }
     }
 
+    // ── TestConnection ────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_connection_should_send_ok_and_not_add_to_state() {
+        let state = Arc::new(AppState::new());
+        let db = DbService::new();
+        let (controller, tx_cmd, mut rx_event) =
+            AppController::new(state.clone(), db, test_session());
+
+        tx_cmd
+            .send(Command::TestConnection(sqlite_conn("t1"), None))
+            .await
+            .unwrap();
+        drop(tx_cmd);
+
+        controller.run().await;
+
+        let event = rx_event.recv().await.expect("expected event");
+        assert!(matches!(event, Event::TestConnectionOk));
+        // Must NOT be added to state
+        assert!(state.conn.all().is_empty(), "test conn should not be saved");
+    }
+
+    #[tokio::test]
+    async fn test_connection_should_send_failed_on_invalid_url() {
+        let state = Arc::new(AppState::new());
+        let db = DbService::new();
+        let (controller, tx_cmd, mut rx_event) =
+            AppController::new(state.clone(), db, test_session());
+
+        let bad = DbConnection {
+            id: "tbad".to_string(),
+            name: "tbad".to_string(),
+            db_type: DbType::SQLite,
+            connection_string: Some("sqlite:///no/such/path/???invalid".to_string()),
+            host: None,
+            port: None,
+            user: None,
+            password_encrypted: None,
+            database: None,
+        };
+        tx_cmd
+            .send(Command::TestConnection(bad, None))
+            .await
+            .unwrap();
+        drop(tx_cmd);
+
+        controller.run().await;
+
+        let event = rx_event.recv().await.expect("expected event");
+        assert!(matches!(event, Event::TestConnectionFailed(_)));
+        assert!(
+            state.conn.all().is_empty(),
+            "failed test conn should not be saved"
+        );
+    }
+
     #[tokio::test]
     async fn connect_should_send_connected_event_on_success() {
         let state = Arc::new(AppState::new());
@@ -241,7 +325,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn connect_should_send_query_error_on_invalid_url() {
+    async fn connect_should_send_connect_error_on_invalid_url() {
         let state = Arc::new(AppState::new());
         let db = DbService::new();
         let (controller, tx_cmd, mut rx_event) =
@@ -264,7 +348,7 @@ mod tests {
         controller.run().await;
 
         let event = rx_event.recv().await.expect("expected event");
-        assert!(matches!(event, Event::QueryError(_)));
+        assert!(matches!(event, Event::ConnectError(_)));
     }
 
     #[tokio::test]

@@ -4,7 +4,9 @@ use std::rc::Rc;
 
 use anyhow::Result;
 use slint::ComponentHandle;
+use slint::Model as _;
 use tokio::sync::mpsc;
+use wf_config::crypto;
 use wf_db::models::{DbConnection, DbType};
 
 use crate::{
@@ -21,11 +23,12 @@ impl UI {
         state: SharedState,
         tx_cmd: mpsc::Sender<Command>,
         rx_event: mpsc::Receiver<Event>,
+        enc_key: [u8; 32],
     ) -> Result<Self> {
         let window = crate::AppWindow::new()?;
 
         Self::register_sidebar_callbacks(&window, state.clone(), tx_cmd.clone());
-        Self::register_connection_form_callbacks(&window, tx_cmd.clone());
+        Self::register_connection_form_callbacks(&window, tx_cmd.clone(), enc_key);
         Self::register_editor_callbacks(&window, state.clone(), tx_cmd.clone());
         Self::register_result_callbacks(&window, state.clone());
         Self::register_status_callbacks(&window, state.clone());
@@ -97,6 +100,51 @@ impl UI {
                             ui.set_status_connection(status_conn.into());
                         });
                     }
+                    Event::TestConnectionOk => {
+                        // clone required: invoke_from_event_loop closure must be 'static
+                        let window_weak = window_weak.clone();
+                        let _ = slint::invoke_from_event_loop(move || {
+                            let Some(window) = window_weak.upgrade() else {
+                                return;
+                            };
+                            let ui = window.global::<crate::UiState>();
+                            ui.set_form_testing(false);
+                            ui.set_form_test_ok(true);
+                            ui.set_test_result_ok(true);
+                            ui.set_test_result_message("".into());
+                            ui.set_show_test_result_popup(true);
+                        });
+                    }
+                    Event::TestConnectionFailed(ref msg) => {
+                        let msg = msg.clone();
+                        // clone required: invoke_from_event_loop closure must be 'static
+                        let window_weak = window_weak.clone();
+                        let _ = slint::invoke_from_event_loop(move || {
+                            let Some(window) = window_weak.upgrade() else {
+                                return;
+                            };
+                            let ui = window.global::<crate::UiState>();
+                            ui.set_form_testing(false);
+                            ui.set_form_test_ok(false);
+                            ui.set_test_result_ok(false);
+                            ui.set_test_result_message(msg.into());
+                            ui.set_show_test_result_popup(true);
+                        });
+                    }
+                    Event::ConnectError(ref msg) => {
+                        let msg = msg.clone();
+                        // clone required: invoke_from_event_loop closure must be 'static
+                        let window_weak = window_weak.clone();
+                        let _ = slint::invoke_from_event_loop(move || {
+                            let Some(window) = window_weak.upgrade() else {
+                                return;
+                            };
+                            let ui = window.global::<crate::UiState>();
+                            ui.set_form_testing(false);
+                            ui.set_form_status(msg.clone().into());
+                            ui.set_status_message(format!("Connection failed: {msg}").into());
+                        });
+                    }
                     Event::QueryStarted => {
                         // clone required: invoke_from_event_loop closure must be 'static
                         let window_weak = window_weak.clone();
@@ -107,10 +155,14 @@ impl UI {
                             let ui = window.global::<crate::UiState>();
                             ui.set_is_loading(true);
                             ui.set_error_message("".into());
+                            ui.set_status_message("".into());
+                            // Reveal the result panel if it is currently hidden.
+                            ui.set_result_panel_open(true);
                         });
                     }
                     Event::QueryFinished(result) => {
                         // Build plain (Send) data outside the closure — Rc is not Send.
+                        let col_count = result.columns.len();
                         let columns: Vec<slint::SharedString> =
                             result.columns.iter().map(|c| c.clone().into()).collect();
                         let raw_rows: Vec<Vec<slint::SharedString>> = result
@@ -142,6 +194,14 @@ impl UI {
                                 .collect();
                             ui.set_result_rows(Rc::new(slint::VecModel::from(rows)).into());
                             ui.set_result_row_count(row_count);
+                            // Initialise per-column widths (150 px each).
+                            const DEFAULT_COL_W: f32 = 150.0;
+                            let widths: Vec<f32> = vec![DEFAULT_COL_W; col_count];
+                            let total_w = col_count as f32 * DEFAULT_COL_W;
+                            ui.set_result_col_widths(Rc::new(slint::VecModel::from(widths)).into());
+                            ui.set_result_total_col_width(total_w);
+                            // Reveal the result panel if it is currently hidden.
+                            ui.set_result_panel_open(true);
                         });
                     }
                     Event::QueryCancelled => {
@@ -156,6 +216,14 @@ impl UI {
                     }
                     Event::QueryError(ref msg) => {
                         let msg = msg.clone();
+                        // Short summary: first non-empty line, truncated to 80 chars.
+                        let summary = msg
+                            .lines()
+                            .find(|l| !l.trim().is_empty())
+                            .unwrap_or(&msg)
+                            .chars()
+                            .take(80)
+                            .collect::<String>();
                         // clone required: invoke_from_event_loop closure must be 'static
                         let window_weak = window_weak.clone();
                         let _ = slint::invoke_from_event_loop(move || {
@@ -167,6 +235,9 @@ impl UI {
                             ui.set_form_status(msg.clone().into());
                             ui.set_form_testing(false);
                             ui.set_error_message(msg.into());
+                            ui.set_status_message(format!("Error: {summary}").into());
+                            // Reveal the result panel so the error is visible.
+                            ui.set_result_panel_open(true);
                         });
                     }
                     Event::Disconnected(ref id) => {
@@ -216,6 +287,9 @@ impl UI {
                 ui.set_form_testing(false);
                 ui.set_form_tab_index(0);
                 ui.set_form_db_type(0);
+                ui.set_form_test_ok(false);
+                ui.set_show_test_result_popup(false);
+                ui.set_show_add_confirm_popup(false);
                 ui.set_show_connection_form(true);
             });
         }
@@ -245,6 +319,7 @@ impl UI {
     fn register_connection_form_callbacks(
         window: &crate::AppWindow,
         tx_cmd: mpsc::Sender<Command>,
+        enc_key: [u8; 32],
     ) {
         let ui_state = window.global::<crate::UiState>();
 
@@ -261,7 +336,7 @@ impl UI {
             });
         }
 
-        // test-connection: build DbConnection from form, send Command::Connect
+        // test-connection: probe without saving — sends Command::TestConnection
         {
             let window_weak = window.as_weak();
             // clone required: callback closure needs owned tx_cmd
@@ -273,13 +348,87 @@ impl UI {
                 let ui = window.global::<crate::UiState>();
                 ui.set_form_testing(true);
                 ui.set_form_status("".into());
+                ui.set_form_test_ok(false); // reset stale test state
 
-                let (conn, password) = build_conn_from_form(&ui);
+                let (conn, password) = build_conn_from_form(&ui, &enc_key);
+                // clone required: tokio::spawn requires 'static
+                let tx_cmd = tx_cmd.clone();
+                tokio::spawn(async move {
+                    let _ = tx_cmd.send(Command::TestConnection(conn, password)).await;
+                });
+            });
+        }
+
+        // add-connection: persist if test passed, else show confirm popup
+        {
+            let window_weak = window.as_weak();
+            // clone required: callback closure needs owned tx_cmd
+            let tx_cmd = tx_cmd.clone();
+            ui_state.on_add_connection(move || {
+                let Some(window) = window_weak.upgrade() else {
+                    return;
+                };
+                let ui = window.global::<crate::UiState>();
+                if ui.get_form_test_ok() {
+                    // Test was successful — add directly
+                    ui.set_form_testing(true);
+                    let (conn, password) = build_conn_from_form(&ui, &enc_key);
+                    // clone required: tokio::spawn requires 'static
+                    let tx_cmd = tx_cmd.clone();
+                    tokio::spawn(async move {
+                        let _ = tx_cmd.send(Command::Connect(conn, password)).await;
+                    });
+                } else {
+                    // Not tested or failed — show confirmation first
+                    ui.set_show_add_confirm_popup(true);
+                }
+            });
+        }
+
+        // confirm-add-connection: user chose "Yes" in confirm popup
+        {
+            let window_weak = window.as_weak();
+            // clone required: callback closure needs owned tx_cmd
+            let tx_cmd = tx_cmd.clone();
+            ui_state.on_confirm_add_connection(move || {
+                let Some(window) = window_weak.upgrade() else {
+                    return;
+                };
+                let ui = window.global::<crate::UiState>();
+                ui.set_show_add_confirm_popup(false);
+                ui.set_form_testing(true);
+                let (conn, password) = build_conn_from_form(&ui, &enc_key);
                 // clone required: tokio::spawn requires 'static
                 let tx_cmd = tx_cmd.clone();
                 tokio::spawn(async move {
                     let _ = tx_cmd.send(Command::Connect(conn, password)).await;
                 });
+            });
+        }
+
+        // dismiss-test-popup: close the test-result popup
+        {
+            let window_weak = window.as_weak();
+            ui_state.on_dismiss_test_popup(move || {
+                let Some(window) = window_weak.upgrade() else {
+                    return;
+                };
+                window
+                    .global::<crate::UiState>()
+                    .set_show_test_result_popup(false);
+            });
+        }
+
+        // dismiss-add-confirm: user chose "No" in confirm popup
+        {
+            let window_weak = window.as_weak();
+            ui_state.on_dismiss_add_confirm(move || {
+                let Some(window) = window_weak.upgrade() else {
+                    return;
+                };
+                window
+                    .global::<crate::UiState>()
+                    .set_show_add_confirm_popup(false);
             });
         }
     }
@@ -364,10 +513,28 @@ impl UI {
         }
     }
 
-    // ── Result callbacks (TODO) ───────────────────────────────────────────────
+    // ── Result callbacks ──────────────────────────────────────────────────────
 
-    fn register_result_callbacks(_window: &crate::AppWindow, _state: SharedState) {
-        // TODO: T020+ — copy, export, virtual scroll
+    fn register_result_callbacks(window: &crate::AppWindow, _state: SharedState) {
+        let ui_state = window.global::<crate::UiState>();
+        // clone required: callback closure must be 'static
+        let window_weak = window.as_weak();
+
+        // resize-result-column: update the column width VecModel in place and
+        // recompute the total so viewport-width stays accurate during drag.
+        ui_state.on_resize_result_column(move |i, w| {
+            let Some(window) = window_weak.upgrade() else {
+                return;
+            };
+            let ui = window.global::<crate::UiState>();
+            let model = ui.get_result_col_widths();
+            let n = model.row_count();
+            if (i as usize) < n {
+                model.set_row_data(i as usize, w);
+                let total: f32 = (0..n).filter_map(|j| model.row_data(j)).sum();
+                ui.set_result_total_col_width(total);
+            }
+        });
     }
 
     // ── Status callbacks (TODO) ───────────────────────────────────────────────
@@ -389,8 +556,12 @@ fn db_type_label(dt: &DbType) -> &'static str {
 }
 
 /// Build a `DbConnection` from the current values in the connection form global,
-/// and return the plaintext password separately (to avoid storing it on the model).
-fn build_conn_from_form(ui: &crate::UiState) -> (DbConnection, Option<String>) {
+/// and return the plaintext password separately (for immediate use in the connection URL).
+///
+/// The plaintext password is also AES-256-GCM encrypted with `enc_key` and stored in
+/// `DbConnection.password_encrypted` so the session manager can persist it and
+/// `main.rs` can decrypt it on the next startup for auto-reconnect.
+fn build_conn_from_form(ui: &crate::UiState, enc_key: &[u8; 32]) -> (DbConnection, Option<String>) {
     let db_type = match ui.get_form_db_type() {
         0 => DbType::PostgreSQL,
         1 => DbType::MySQL,
@@ -408,6 +579,10 @@ fn build_conn_from_form(ui: &crate::UiState) -> (DbConnection, Option<String>) {
     } else {
         opt(ui.get_form_password())
     };
+
+    // Encrypt the plaintext password for safe storage in config.toml.
+    // Connection-string mode embeds the password in the URL, so no separate encryption needed.
+    let password_encrypted = password.as_ref().map(|pw| crypto::encrypt(pw, enc_key));
 
     let conn = DbConnection {
         id: uuid::Uuid::new_v4().to_string(),
@@ -433,8 +608,7 @@ fn build_conn_from_form(ui: &crate::UiState) -> (DbConnection, Option<String>) {
         } else {
             opt(ui.get_form_user())
         },
-        // Encryption is wired in T028; password flows via Command::Connect's second field.
-        password_encrypted: None,
+        password_encrypted,
         database: if is_conn_string {
             None
         } else {

@@ -28,6 +28,10 @@ pub enum Command {
     /// (decrypted by the caller); `wf-db` must not depend on `wf-config::crypto`.
     /// Password encryption is wired in T028.
     Connect(DbConnection, Option<String>),
+    /// Test a connection without persisting it to state or the sidebar.
+    /// On success sends [`Event::TestConnectionOk`]; on failure sends
+    /// [`Event::TestConnectionFailed`].
+    TestConnection(DbConnection, Option<String>),
     Disconnect(String),   // connection_id
     RunQuery(String),     // sql
     RunSelection(String), // sql (selected range)

@@ -1,5 +1,16 @@
 // SQL editor component — multi-line TextInput with synchronised line numbers.
 //
+// The line-number gutter is intentionally NOT rendered here.  It lives in
+// app.slint as a shared column that spans the full content height so that the
+// divider and ResultTable below the editor share the same left boundary.
+// This component exposes four `out` properties that the external gutter reads
+// to draw line numbers in sync with the scroll position:
+//
+//   gutter-scroll-y  — Flickable.viewport-y (negative when scrolled down)
+//   gutter-line-h    — pixel height of a single text line
+//   gutter-vis-first — index of the first line currently in the viewport
+//   gutter-vis-count — number of lines to render (+ a small buffer)
+//
 // Scroll architecture:
 //   TextInput is wrapped in a FocusScope inside a Flickable.  The FocusScope
 //   intercepts UP/DOWN arrow key events in the capture phase (before TextInput
@@ -49,6 +60,20 @@ export component Editor inherits Rectangle {
     /// `pos` within `text`, preserving the column position.
     /// Returns the new byte offset.  Implemented in Rust.
     pure callback move-cursor-line(string, int, int) -> int;
+
+    /// Fired when the user presses Ctrl+Enter to run the current SQL.
+    /// Implemented in app.slint by forwarding to UiState.run-query.
+    callback run-query();
+
+    /// Fired when the user presses Ctrl+J to toggle the result panel.
+    /// Implemented in app.slint by toggling UiState.result-panel-open.
+    callback toggle-panel();
+
+    // ── Out properties consumed by the external gutter in app.slint ──────────
+    out property <length> gutter-scroll-y:  editor-scroll.viewport-y;
+    out property <length> gutter-line-h:    root.line-h;
+    out property <int>    gutter-vis-first: root.vis-first;
+    out property <int>    gutter-vis-count: root.vis-count;
 
     // ── Key-hold state for timer-based UP/DOWN navigation ────────────────────
     property <bool> up-held:   false;
@@ -121,7 +146,7 @@ export component Editor inherits Rectangle {
         ? inner-input.preferred-height / root.line-count
         : root.font-size-px * 1px + 5px;
 
-    // ── Virtual scrolling for the gutter ────────────────────────────────────
+    // Visible line range — used by the external gutter via out properties.
     property <int> vis-first: max(0, floor(-editor-scroll.viewport-y / root.line-h) - 1);
     property <int> vis-count: min(
         root.line-count - root.vis-first,
@@ -129,155 +154,144 @@ export component Editor inherits Rectangle {
     );
 
     // ── Current-line highlight ───────────────────────────────────────────────
-    // Rendered first (= behind all other content); placed outside the Flickable
-    // so it does not affect the Flickable's child structure.
+    // Rendered first (= behind all other content).
+    // x=0: the gutter is now outside this component, so the highlight spans
+    // the full editor width from the left edge.
     Rectangle {
-        x: gutter.width;
+        x: 0;
         y: root.current-line * root.line-h + editor-scroll.viewport-y;
-        width: editor-scroll.width;
+        width: root.width;
         height: root.line-h;
         background: #2a2a3e;
     }
 
-    HorizontalLayout {
-        // ── Line numbers gutter ──────────────────────────────────────────────
-        gutter := Rectangle {
-            width: 48px;
-            background: #1e1e2e;
-            clip: true;
+    // ── Scrollable text area ─────────────────────────────────────────────────
+    // Fills the entire Editor rectangle (gutter is an external sibling).
+    editor-scroll := Flickable {
+        x: 0;
+        y: 0;
+        width:  root.width;
+        height: root.height;
+        // interactive: false — Flickable must not consume pointer drags so
+        // TextInput can handle them for text selection.  Mouse-wheel scroll
+        // is unaffected (Slint processes Wheel events regardless).
+        interactive: false;
+        // Extend viewport to at least the visible area so clicks in the
+        // blank space below the last line still reach inner-input.
+        viewport-height: max(inner-input.preferred-height, editor-scroll.height);
+        // Use inner-input.width (explicit width) rather than preferred-width:
+        // Flickable only enables horizontal wheel scroll when viewport-width >
+        // self.width (flickable.rs:528).  inner-input.width == max(preferred-width,
+        // editor-scroll.width) so the condition is reliably satisfied whenever
+        // content overflows.
+        viewport-width: inner-input.width;
 
-            for i in root.vis-count: Text {
-                property <int> line-nr: root.vis-first + i;
-                y: line-nr * root.line-h + editor-scroll.viewport-y;
-                height: root.line-h;
-                width: gutter.width - 8px;
-                text: "\{line-nr + 1}";
-                color: line-nr == root.current-line ? #cdd6f4 : #585b70;
-                font-family: root.font-family;
-                font-size: root.font-size-px * 1px;
-                horizontal-alignment: right;
-                vertical-alignment: center;
-            }
-        }
+        // ── Key-intercept FocusScope ─────────────────────────────────────────
+        // capture-key-pressed fires BEFORE TextInput in Slint's dispatch
+        // chain (root→focused pre-order), so returning EventResult.accept
+        // prevents TextInput from receiving the event.
+        //
+        // Strategy for UP / DOWN (plain, no modifiers):
+        //   • First press  (up-held == false): move cursor once immediately,
+        //     set held flag, accept (block TextInput default).
+        //   • Repeat press (up-held == true):  accept silently; the 50 ms
+        //     timer already provides continuous movement.
+        //   • Key release: clear held flag; let the release bubble.
+        //
+        // All other keys (text, Shift+arrow, Ctrl+arrow, …) are rejected so
+        // TextInput handles them normally.
+        FocusScope {
+            x: 0;
+            y: 0;
+            width:  inner-input.width;
+            // Match inner-input height so clicks in blank space below text are captured.
+            height: max(inner-input.preferred-height, editor-scroll.height);
+            // Do not steal focus on click — TextInput manages its own focus.
+            focus-on-click: false;
 
-        // ── Scrollable text area ─────────────────────────────────────────────
-        editor-scroll := Flickable {
-            horizontal-stretch: 1;
-            // interactive: false — Flickable must not consume pointer drags so
-            // TextInput can handle them for text selection.  Mouse-wheel scroll
-            // is unaffected (Slint processes Wheel events regardless).
-            interactive: false;
-            // Extend viewport to at least the visible area so clicks in the
-            // blank space below the last line still reach inner-input.
-            viewport-height: max(inner-input.preferred-height, editor-scroll.height);
-            // Use inner-input.width (explicit width) rather than preferred-width:
-            // Flickable only enables horizontal wheel scroll when viewport-width >
-            // self.width (flickable.rs:528).  inner-input.width == max(preferred-width,
-            // editor-scroll.width) so the condition is reliably satisfied whenever
-            // content overflows.
-            viewport-width: inner-input.width;
-
-            // ── Key-intercept FocusScope ─────────────────────────────────────
-            // capture-key-pressed fires BEFORE TextInput in Slint's dispatch
-            // chain (root→focused pre-order), so returning EventResult.accept
-            // prevents TextInput from receiving the event.
-            //
-            // Strategy for UP / DOWN (plain, no modifiers):
-            //   • First press  (up-held == false): move cursor once immediately,
-            //     set held flag, accept (block TextInput default).
-            //   • Repeat press (up-held == true):  accept silently; the 50 ms
-            //     timer already provides continuous movement.
-            //   • Key release: clear held flag; let the release bubble.
-            //
-            // All other keys (text, Shift+arrow, Ctrl+arrow, …) are rejected so
-            // TextInput handles them normally.
-            FocusScope {
-                x: 0;
-                y: 0;
-                width:  inner-input.width;
-                // Match inner-input height so clicks in blank space below text are captured.
-                height: max(inner-input.preferred-height, editor-scroll.height);
-                // Do not steal focus on click — TextInput manages its own focus.
-                focus-on-click: false;
-
-                capture-key-pressed(event) => {
-                    if (event.text == Key.UpArrow
-                            && !event.modifiers.shift
-                            && !event.modifiers.control
-                            && !event.modifiers.alt) {
-                        if (!root.up-held) {
-                            // First press: move cursor once right away.
-                            let new-pos = root.move-cursor-line(
-                                inner-input.text,
-                                inner-input.cursor-position-byte-offset,
-                                -1
-                            );
-                            inner-input.set-selection-offsets(new-pos, new-pos);
-                            root.up-held = true;
-                        }
-                        // Consume the event so TextInput never sees it.
-                        EventResult.accept
-                    } else if (event.text == Key.DownArrow
-                            && !event.modifiers.shift
-                            && !event.modifiers.control
-                            && !event.modifiers.alt) {
-                        if (!root.down-held) {
-                            let new-pos = root.move-cursor-line(
-                                inner-input.text,
-                                inner-input.cursor-position-byte-offset,
-                                1
-                            );
-                            inner-input.set-selection-offsets(new-pos, new-pos);
-                            root.down-held = true;
-                        }
-                        EventResult.accept
-                    } else {
-                        EventResult.reject
+            capture-key-pressed(event) => {
+                if (event.text == Key.UpArrow
+                        && !event.modifiers.shift
+                        && !event.modifiers.control
+                        && !event.modifiers.alt) {
+                    if (!root.up-held) {
+                        // First press: move cursor once right away.
+                        let new-pos = root.move-cursor-line(
+                            inner-input.text,
+                            inner-input.cursor-position-byte-offset,
+                            -1
+                        );
+                        inner-input.set-selection-offsets(new-pos, new-pos);
+                        root.up-held = true;
                     }
-                }
-
-                capture-key-released(event) => {
-                    if (event.text == Key.UpArrow)   { root.up-held   = false; }
-                    if (event.text == Key.DownArrow)  { root.down-held = false; }
+                    // Consume the event so TextInput never sees it.
+                    EventResult.accept
+                } else if (event.text == Key.DownArrow
+                        && !event.modifiers.shift
+                        && !event.modifiers.control
+                        && !event.modifiers.alt) {
+                    if (!root.down-held) {
+                        let new-pos = root.move-cursor-line(
+                            inner-input.text,
+                            inner-input.cursor-position-byte-offset,
+                            1
+                        );
+                        inner-input.set-selection-offsets(new-pos, new-pos);
+                        root.down-held = true;
+                    }
+                    EventResult.accept
+                } else if (event.text == Key.Return && event.modifiers.control) {
+                    root.run-query();
+                    EventResult.accept
+                } else if (event.text == "j" && event.modifiers.control) {
+                    root.toggle-panel();
+                    EventResult.accept
+                } else {
                     EventResult.reject
                 }
+            }
 
-                inner-input := TextInput {
-                    x: 0;
-                    y: 0;
-                    width:  max(self.preferred-width, editor-scroll.width);
-                    // Fill at least the visible area so clicks below the last line
-                    // land on TextInput and snap the cursor to the end of text.
-                    height: max(self.preferred-height, editor-scroll.height);
-                    single-line: false;
-                    wrap:        no-wrap;
-                    color:                      #cdd6f4;
-                    selection-background-color: #264f78;
-                    selection-foreground-color: #cdd6f4;
-                    font-family: root.font-family;
-                    font-size:   root.font-size-px * 1px;
+            capture-key-released(event) => {
+                if (event.text == Key.UpArrow)   { root.up-held   = false; }
+                if (event.text == Key.DownArrow)  { root.down-held = false; }
+                EventResult.reject
+            }
 
-                    // Horizontal auto-scroll: keep cursor inside the visible area
-                    // whenever the cursor position changes (typing, keyboard nav,
-                    // or mouse drag).  pos.x is the cursor's x coordinate in
-                    // TextInput content space (independent of scroll offset).
-                    // viewport-x is ≤ 0; visible content spans
-                    //   [-viewport-x, -viewport-x + editor-scroll.width].
-                    cursor-position-changed(pos) => {
-                        let margin    = 40px;
-                        let vis-left  = -editor-scroll.viewport-x;
-                        let vis-right = vis-left + editor-scroll.width;
-                        if (pos.x > vis-right - margin) {
-                            // Cursor near / beyond right edge — scroll right.
-                            editor-scroll.viewport-x = -(pos.x - editor-scroll.width + margin);
-                        } else if (pos.x < vis-left + margin) {
-                            // Cursor near / beyond left edge — scroll left, clamp at 0.
-                            let new-vp = -(pos.x - margin);
-                            if (new-vp < 0px) {
-                                editor-scroll.viewport-x = new-vp;
-                            } else {
-                                editor-scroll.viewport-x = 0px;
-                            }
+            inner-input := TextInput {
+                x: 0;
+                y: 0;
+                width:  max(self.preferred-width, editor-scroll.width);
+                // Fill at least the visible area so clicks below the last line
+                // land on TextInput and snap the cursor to the end of text.
+                height: max(self.preferred-height, editor-scroll.height);
+                single-line: false;
+                wrap:        no-wrap;
+                color:                      #cdd6f4;
+                selection-background-color: #264f78;
+                selection-foreground-color: #cdd6f4;
+                font-family: root.font-family;
+                font-size:   root.font-size-px * 1px;
+
+                // Horizontal auto-scroll: keep cursor inside the visible area
+                // whenever the cursor position changes (typing, keyboard nav,
+                // or mouse drag).  pos.x is the cursor's x coordinate in
+                // TextInput content space (independent of scroll offset).
+                // viewport-x is ≤ 0; visible content spans
+                //   [-viewport-x, -viewport-x + editor-scroll.width].
+                cursor-position-changed(pos) => {
+                    let margin    = 40px;
+                    let vis-left  = -editor-scroll.viewport-x;
+                    let vis-right = vis-left + editor-scroll.width;
+                    if (pos.x > vis-right - margin) {
+                        // Cursor near / beyond right edge — scroll right.
+                        editor-scroll.viewport-x = -(pos.x - editor-scroll.width + margin);
+                    } else if (pos.x < vis-left + margin) {
+                        // Cursor near / beyond left edge — scroll left, clamp at 0.
+                        let new-vp = -(pos.x - margin);
+                        if (new-vp < 0px) {
+                            editor-scroll.viewport-x = new-vp;
+                        } else {
+                            editor-scroll.viewport-x = 0px;
                         }
                     }
                 }

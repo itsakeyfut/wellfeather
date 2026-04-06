@@ -106,9 +106,14 @@ export component ConnectionForm inherits Rectangle {
     in-out property <string> database:    "";
     in-out property <string> status:      "";
     in-out property <bool>   testing:     false;
+    /// Set to true after a successful Test Connection; resets to false when the
+    /// form is opened or a new test is started.  Used to decide whether Add
+    /// shows a confirmation dialog.
+    in property <bool> test-ok: false;
 
     callback cancel();
     callback test-connection();
+    callback add-connection();
 
     // ── Layout ────────────────────────────────────────────────────────────────
     background: #313244;
@@ -265,7 +270,7 @@ export component ConnectionForm inherits Rectangle {
                 background: root.testing ? #585b70 : #89b4fa;
                 border-radius: 4px;
                 Text {
-                    text: root.testing ? @tr("Testing…") : @tr("Test Connection");
+                    text: root.testing ? @tr("Testing\u{2026}") : @tr("Test Connection");
                     color: root.testing ? #a6adc8 : #1e1e2e;
                     horizontal-alignment: center;
                     vertical-alignment: center;
@@ -273,6 +278,26 @@ export component ConnectionForm inherits Rectangle {
                 TouchArea {
                     enabled: !root.testing;
                     clicked => { root.test-connection(); }
+                }
+            }
+
+            // Add — green when test passed, muted when not yet tested / failed
+            Rectangle {
+                width: 80px;
+                height: 32px;
+                background: root.testing ? #585b70
+                          : root.test-ok  ? #a6e3a1
+                          :                 #6c7086;
+                border-radius: 4px;
+                Text {
+                    text: @tr("Add");
+                    color: root.testing ? #a6adc8 : #1e1e2e;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+                TouchArea {
+                    enabled: !root.testing;
+                    clicked => { root.add-connection(); }
                 }
             }
         }

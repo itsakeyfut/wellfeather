@@ -119,29 +119,30 @@ fn cell_to_string(row: &sqlx::postgres::PgRow, i: usize) -> Option<String> {
             .map(|v| v.to_string());
     }
 
-    // Date / time (requires sqlx "chrono" feature)
-    if col_type == "TIMESTAMPTZ" {
+    // Date / time (requires sqlx "chrono" feature).
+    // Use starts_with to tolerate precision suffixes like TIMESTAMP(6) / TIMESTAMPTZ(6).
+    if col_type.starts_with("TIMESTAMPTZ") {
         return row
             .try_get::<Option<chrono::DateTime<chrono::Utc>>, _>(i)
             .ok()
             .flatten()
             .map(|v| v.to_rfc3339());
     }
-    if col_type == "TIMESTAMP" {
+    if col_type.starts_with("TIMESTAMP") {
         return row
             .try_get::<Option<chrono::NaiveDateTime>, _>(i)
             .ok()
             .flatten()
             .map(|v| v.to_string());
     }
-    if col_type == "DATE" {
+    if col_type.starts_with("DATE") {
         return row
             .try_get::<Option<chrono::NaiveDate>, _>(i)
             .ok()
             .flatten()
             .map(|v| v.to_string());
     }
-    if col_type == "TIME" {
+    if col_type == "TIME" || col_type.starts_with("TIME(") {
         return row
             .try_get::<Option<chrono::NaiveTime>, _>(i)
             .ok()
@@ -149,9 +150,16 @@ fn cell_to_string(row: &sqlx::postgres::PgRow, i: usize) -> Option<String> {
             .map(|v| v.to_string());
     }
 
-    // Binary
+    // Binary — try UTF-8 first; emit byte-count tag only for truly binary content.
     if col_type == "BYTEA" {
-        return Some("<BLOB>".to_string());
+        return row
+            .try_get::<Option<Vec<u8>>, _>(i)
+            .ok()
+            .flatten()
+            .map(|bytes| {
+                String::from_utf8(bytes.clone())
+                    .unwrap_or_else(|_| format!("<BLOB: {} bytes>", bytes.len()))
+            });
     }
 
     // Fallback — cascade through numeric types

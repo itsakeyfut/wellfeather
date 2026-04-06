@@ -17,10 +17,17 @@ pub enum StateEvent {
 pub enum Event {
     Connected(String), // connection_id
     Disconnected(String),
+    /// Fired when `Command::Connect` fails. Distinct from `QueryError` so the UI
+    /// can display the message in the status bar / form without touching the result area.
+    ConnectError(String),
     QueryStarted,
     QueryFinished(QueryResult),
     QueryCancelled,
     QueryError(String),
+    /// Fired when `Command::TestConnection` succeeds (connection verified, then dropped).
+    TestConnectionOk,
+    /// Fired when `Command::TestConnection` fails; carries the error message.
+    TestConnectionFailed(String),
     CompletionReady(Vec<CompletionItem>),
     MetadataLoaded(DbMetadata),
     ConfigUpdated,
