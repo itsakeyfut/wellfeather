@@ -1,12 +1,22 @@
 import { RowData } from "../globals.slint";
 
 // Result table — column headers + scrollable data rows.
-// Virtual scrolling (T051) and drag-resize split (T020+) come in later milestones.
+//
+// Features:
+//   • Per-column widths, adjustable by dragging the right-edge divider on each header.
+//   • Overflow text is elided (…) within the cell.
+//   • Clicking a cell highlights its row and shows the full value in the cell-value
+//     strip at the bottom, pre-selected so the user can Ctrl+C to copy.
 //
 // Scroll architecture:
 //   header-scroll (Flickable, interactive: false) + body-scroll (Flickable, H+V).
 //   `changed viewport-x =>` in body-scroll syncs header-scroll so headers
 //   track horizontal scroll without scrolling vertically.
+//
+// Column-width architecture:
+//   col-widths      — [float] of per-column pixel widths (set by Rust on each query)
+//   total-col-width — sum of all col-widths (kept in sync via Rust resize callback)
+//   resize-column   — callback fired by the drag handle; Rust updates the VecModel
 
 export component ResultTable inherits Rectangle {
     background: #1e1e2e;
@@ -22,9 +32,44 @@ export component ResultTable inherits Rectangle {
     in property <int>       row-count:  0;
     /// True while a query is executing; shows the "Running…" overlay.
     in property <bool>      is-loading: false;
+    /// Full error message from Event::QueryError. Non-empty triggers the error panel.
+    in property <string>    error-message: "";
 
-    property <length> col-min-width: 120px;
-    property <length> row-height:     28px;
+    /// Per-column widths in logical pixels as floats. Length == columns.length.
+    /// Populated by Rust on QueryFinished; defaults to default-col-w while empty.
+    in property <[float]> col-widths: [];
+    /// Pre-computed sum of col-widths (maintained by Rust via resize-column).
+    /// Used for viewport-width so the horizontal scroll bar is accurate.
+    in property <float> total-col-width: 0.0;
+    /// Fired when the user drags a column divider.
+    /// i = 0-based column index; w = new width in logical pixels.
+    callback resize-column(int, float);
+
+    property <length> row-height:    28px;
+    property <length> default-col-w: 150px;
+    property <length> min-col-w:     48px;
+
+    // ── Cell selection state ──────────────────────────────────────────────────
+    /// 0-based index of the currently selected row (-1 = none).
+    property <int>    selected-row:        -1;
+    /// Full string value of the last clicked cell (shown in the value strip).
+    property <string> selected-cell-value: "";
+
+    // When a new cell is selected: focus the value strip and select all its text
+    // so the user can immediately Ctrl+C without any extra interaction.
+    changed selected-cell-value => {
+        if (root.selected-cell-value != "") {
+            cell-value-input.focus();
+            cell-value-input.set-selection-offsets(0, 2147483647);
+        }
+    }
+
+    // ── Viewport width helper (used by both Flickables and row rectangles) ────
+    // When total-col-width is available use it for accuracy; fall back to
+    // columns.length × default-col-w before the first query finishes.
+    property <length> vp-w: root.total-col-width > 0
+        ? max(root.total-col-width * 1px, root.width)
+        : max(root.columns.length * root.default-col-w, root.width);
 
     // ── Loading overlay ───────────────────────────────────────────────────────
     if root.is-loading: Rectangle {
@@ -40,36 +85,92 @@ export component ResultTable inherits Rectangle {
         }
     }
 
-    // ── Result content (hidden while loading) ─────────────────────────────────
-    if !root.is-loading: VerticalLayout {
+    // ── Error panel ───────────────────────────────────────────────────────────
+    if !root.is-loading && root.error-message != "": Rectangle {
         width:  parent.width;
         height: parent.height;
+        background: #2d1b1b;
+        VerticalLayout {
+            alignment: start;
+            padding: 16px;
+            spacing: 8px;
+            Text {
+                text: @tr("Query Error");
+                color: #f38ba8;
+                font-size: 13px;
+                font-weight: 700;
+            }
+            Text {
+                text: root.error-message;
+                color: #cdd6f4;
+                font-size: 12px;
+                wrap: word-wrap;
+            }
+        }
+    }
 
-        // ── Header row (horizontal scroll only; synced with body) ───────────
+    // ── Result content ────────────────────────────────────────────────────────
+    if !root.is-loading && root.error-message == "": VerticalLayout {
+        width:  parent.width;
+        // Leave room for the cell-value strip when something is selected.
+        height: parent.height - (root.selected-cell-value != "" ? 28px : 0px);
+
+        // ── Header row ────────────────────────────────────────────────────────
         header-scroll := Flickable {
-            height: root.row-height;
-            interactive: false;
-            viewport-width: max(root.columns.length * root.col-min-width, root.width);
+            height:         root.row-height;
+            interactive:    false;
+            viewport-width: root.vp-w;
 
             HorizontalLayout {
                 spacing: 0;
-                for col in root.columns: Rectangle {
-                    width: root.col-min-width;
+                for col[i] in root.columns: Rectangle {
+                    // Use per-column width when available; fall back to default.
+                    width: root.col-widths.length > i && root.col-widths[i] > 0
+                        ? root.col-widths[i] * 1px
+                        : root.default-col-w;
                     height: root.row-height;
                     background: #313244;
-                    Rectangle {   // right divider
-                        x: parent.width - 1px;
-                        width: 1px;
-                        height: parent.height;
-                        background: #45475a;
-                    }
+                    clip: true;
+
+                    // Column label — always elides to stay within the cell.
                     Text {
                         x: 8px;
                         y: (parent.height - self.height) / 2;
+                        // Leave 4px for the drag handle on the right.
+                        width: parent.width - 12px;
                         text: col;
                         color: #cdd6f4;
                         font-size: 12px;
                         overflow: elide;
+                    }
+
+                    // ── Column resize drag handle (right edge) ────────────────
+                    // 4 px strip; cursor changes to ew-resize on hover.
+                    // Drag formula (same principle as the panel-height drag):
+                    //   width_new = width_current + (mouse-x - pressed-x)
+                    // After the update the handle repositions so that mouse-x
+                    // returns to pressed-x — zero drift, cursor tracks exactly.
+                    Rectangle {
+                        x: parent.width - 4px;
+                        y: 0;
+                        width:  4px;
+                        height: parent.height;
+                        background: col-resize-ta.has-hover || col-resize-ta.pressed
+                            ? #89b4fa : #45475a;
+
+                        col-resize-ta := TouchArea {
+                            mouse-cursor: ew-resize;
+                            moved => {
+                                let cw = root.col-widths.length > i && root.col-widths[i] > 0
+                                    ? root.col-widths[i] * 1px
+                                    : root.default-col-w;
+                                let new-w = max(
+                                    cw + (self.mouse-x - self.pressed-x),
+                                    root.min-col-w
+                                );
+                                root.resize-column(i, new-w / 1px);
+                            }
+                        }
                     }
                 }
             }
@@ -77,17 +178,17 @@ export component ResultTable inherits Rectangle {
 
         // ── Body (horizontal + vertical scroll) ──────────────────────────────
         body-scroll := Flickable {
-            vertical-stretch: 1;
-            viewport-width:  max(root.columns.length * root.col-min-width, root.width);
-            viewport-height: max(root.row-count * root.row-height, 1px);
+            vertical-stretch:  1;
+            viewport-width:    root.vp-w;
+            viewport-height:   max(root.row-count * root.row-height, 1px);
 
-            // Sync header horizontal position when body scrolls
+            // Sync header horizontal position when body scrolls.
             changed viewport-x => { header-scroll.viewport-x = self.viewport-x; }
 
             VerticalLayout {
                 spacing: 0;
 
-                // Zero-row placeholder (only when a query returned no rows)
+                // Zero-row placeholder (only when a query returned no rows).
                 if root.row-count == 0 && root.columns.length > 0: Rectangle {
                     height: 40px;
                     width:  root.width;
@@ -100,40 +201,95 @@ export component ResultTable inherits Rectangle {
                     }
                 }
 
-                // Data rows
+                // Data rows.
                 for row[i] in root.rows: Rectangle {
                     height: root.row-height;
-                    width:  max(root.columns.length * root.col-min-width, root.width);
-                    background: mod(i, 2) == 0 ? #1e1e2e : #181825;
+                    width:  root.vp-w;
+                    // Highlight the selected row; alternate zebra stripe otherwise.
+                    background: i == root.selected-row
+                        ? #264f78
+                        : (mod(i, 2) == 0 ? #1e1e2e : #181825);
+
                     Rectangle {   // bottom border
                         y: parent.height - 1px;
                         width: parent.width;
                         height: 1px;
                         background: #313244;
                     }
+
                     HorizontalLayout {
                         spacing: 0;
-                        for cell in row.cells: Rectangle {
-                            width: root.col-min-width;
+                        for cell[j] in row.cells: Rectangle {
+                            width: root.col-widths.length > j && root.col-widths[j] > 0
+                                ? root.col-widths[j] * 1px
+                                : root.default-col-w;
                             height: root.row-height;
+                            clip: true;
+
                             Rectangle {   // right border
                                 x: parent.width - 1px;
                                 width: 1px;
                                 height: parent.height;
                                 background: #313244;
                             }
+
                             Text {
                                 x: 8px;
                                 y: (parent.height - self.height) / 2;
+                                width: parent.width - 16px;
                                 text: cell;
-                                color: #a6adc8;
+                                color: i == root.selected-row ? #ffffff : #a6adc8;
                                 font-size: 12px;
                                 overflow: elide;
+                            }
+
+                            // Click → select row and show full value in the strip.
+                            TouchArea {
+                                clicked => {
+                                    root.selected-row        = i;
+                                    root.selected-cell-value = cell;
+                                }
                             }
                         }
                     }
                 }
             }
+        }
+    }
+
+    // ── Cell value strip ──────────────────────────────────────────────────────
+    // Always instantiated (so cell-value-input is always reachable from the
+    // `changed selected-cell-value` handler above), but collapses to height 0
+    // when no cell is selected.
+    Rectangle {
+        x: 0;
+        y: root.height - (root.selected-cell-value != "" ? 28px : 0px);
+        width:  root.width;
+        height: root.selected-cell-value != "" ? 28px : 0px;
+        background: #2a2a3e;
+        clip: true;
+
+        // Top separator line.
+        Rectangle {
+            x: 0; y: 0;
+            width: parent.width; height: 1px;
+            background: #45475a;
+        }
+
+        // Read-only TextInput: text is selectable and copyable (Ctrl+C) but
+        // cannot be modified.  The `changed` handler above calls focus() and
+        // set-selection-offsets(0, MAX) so everything is pre-selected on click.
+        cell-value-input := TextInput {
+            x: 8px;
+            y: (parent.height - self.height) / 2;
+            width: parent.width - 16px;
+            text: root.selected-cell-value;
+            read-only: true;
+            single-line: true;
+            color: #cdd6f4;
+            selection-background-color: #264f78;
+            selection-foreground-color: #ffffff;
+            font-size: 12px;
         }
     }
 }

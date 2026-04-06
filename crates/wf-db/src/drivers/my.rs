@@ -119,21 +119,24 @@ fn cell_to_string(row: &sqlx::mysql::MySqlRow, i: usize) -> Option<String> {
             .map(|v| v.to_string());
     }
 
-    // Date / time (requires sqlx "chrono" feature)
-    if col_type == "DATETIME" || col_type == "TIMESTAMP" {
+    // Date / time (requires sqlx "chrono" feature).
+    // Use starts_with to match precision variants like DATETIME(6) / TIMESTAMP(3).
+    // Check DATETIME before DATE so "DATETIME(...)" doesn't fall through to the DATE branch.
+    if col_type.starts_with("DATETIME") || col_type.starts_with("TIMESTAMP") {
         return row
             .try_get::<Option<chrono::NaiveDateTime>, _>(i)
             .ok()
             .flatten()
             .map(|v| v.to_string());
     }
-    if col_type == "DATE" {
+    if col_type.starts_with("DATE") {
         return row
             .try_get::<Option<chrono::NaiveDate>, _>(i)
             .ok()
             .flatten()
             .map(|v| v.to_string());
     }
+    // Check TIME after DATE so "TIMESTAMP" doesn't accidentally match here.
     if col_type == "TIME" {
         return row
             .try_get::<Option<chrono::NaiveTime>, _>(i)
@@ -142,15 +145,27 @@ fn cell_to_string(row: &sqlx::mysql::MySqlRow, i: usize) -> Option<String> {
             .map(|v| v.to_string());
     }
 
-    // Binary types
-    if matches!(
-        col_type,
-        "BLOB" | "MEDIUMBLOB" | "LONGBLOB" | "TINYBLOB" | "BINARY" | "VARBINARY"
-    ) {
-        return Some("<BLOB>".to_string());
+    // YEAR
+    if col_type == "YEAR" {
+        return row
+            .try_get::<Option<i16>, _>(i)
+            .ok()
+            .flatten()
+            .map(|v| v.to_string());
     }
 
-    // Fallback — cascade through numeric types
+    // Binary / blob types — and universal bytes fallback for any other type
+    // (covers BINARY, VARBINARY, BLOB variants, VARBINARY-charset VARCHAR, etc.).
+    // Try to interpret the bytes as UTF-8; only emit the byte-count tag when the
+    // content is genuinely non-textual binary data.
+    if let Ok(Some(bytes)) = row.try_get::<Option<Vec<u8>>, _>(i) {
+        return Some(
+            String::from_utf8(bytes.clone())
+                .unwrap_or_else(|_| format!("<BLOB: {} bytes>", bytes.len())),
+        );
+    }
+
+    // Last-resort numeric cascade for computed expressions / edge-case types.
     row.try_get::<Option<i64>, _>(i)
         .ok()
         .flatten()

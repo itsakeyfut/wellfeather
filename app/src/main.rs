@@ -26,6 +26,7 @@ use std::sync::Arc;
 use app::{controller::AppController, session::SessionManager};
 use state::AppState;
 use ui::UI;
+use wf_config::{crypto, manager::ConfigManager};
 use wf_db::service::DbService;
 
 /// Entry point. Runs on the main OS thread; the Slint event loop must stay here.
@@ -39,6 +40,9 @@ fn main() -> anyhow::Result<()> {
     // calls from Slint callbacks and the event-handler task work without
     // an explicit runtime handle.
     let _guard = runtime.enter();
+
+    // Load (or generate) the AES-256-GCM key used to encrypt stored passwords.
+    let enc_key = crypto::load_or_create_key(&ConfigManager::app_dir())?;
 
     let state = Arc::new(AppState::new());
     let db = DbService::new();
@@ -58,14 +62,21 @@ fn main() -> anyhow::Result<()> {
     tokio::spawn(controller.run());
 
     // Send auto-connect before entering the event loop.
+    // Decrypt the stored password so the controller can build the connection URL.
     if let Some(conn) = restore_conn {
+        let password = conn
+            .password_encrypted
+            .as_ref()
+            .and_then(|enc| crypto::decrypt(enc, &enc_key).ok());
         // clone required: tx_cmd also passed to UI
         let tx = tx_cmd.clone();
         tokio::spawn(async move {
-            let _ = tx.send(app::command::Command::Connect(conn, None)).await;
+            let _ = tx
+                .send(app::command::Command::Connect(conn, password))
+                .await;
         });
     }
 
-    let ui = UI::new(state, tx_cmd, rx_event)?;
+    let ui = UI::new(state, tx_cmd, rx_event, enc_key)?;
     ui.run()
 }

@@ -121,9 +121,16 @@ fn cell_to_string(row: &sqlx::sqlite::SqliteRow, i: usize) -> Option<String> {
             .map(|v| v.to_string());
     }
 
-    if col_type == "BLOB" {
-        // Non-null BLOB — NULLs are already handled by step 1
-        return Some("<BLOB>".to_string());
+    if col_type == "BLOB" || col_type.starts_with("BLOB(") {
+        // Non-null BLOB — try UTF-8 first; emit byte-count tag for truly binary content.
+        return row
+            .try_get::<Option<Vec<u8>>, _>(i)
+            .ok()
+            .flatten()
+            .map(|bytes| {
+                String::from_utf8(bytes.clone())
+                    .unwrap_or_else(|_| format!("<BLOB: {} bytes>", bytes.len()))
+            });
     }
 
     // Step 3 — unknown declared type: cascade numeric fallbacks
