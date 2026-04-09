@@ -58,7 +58,12 @@ fn main() -> anyhow::Result<()> {
         }
     };
 
-    let (controller, tx_cmd, rx_event) = AppController::new(state.clone(), db, session);
+    let (controller, tx_cmd, rx_event) = AppController::new(
+        state.clone(),
+        db,
+        session,
+        ConfigManager::app_dir().join("history.db"),
+    );
     tokio::spawn(controller.run());
 
     // Send auto-connect before entering the event loop.
