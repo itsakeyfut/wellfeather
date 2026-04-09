@@ -155,7 +155,7 @@ impl UI {
                             let ui = window.global::<crate::UiState>();
                             ui.set_is_loading(true);
                             ui.set_error_message("".into());
-                            ui.set_status_message("".into());
+                            ui.set_status_message("Running\u{2026}".into());
                             // Reveal the result panel if it is currently hidden.
                             ui.set_result_panel_open(true);
                         });
@@ -175,6 +175,7 @@ impl UI {
                             })
                             .collect();
                         let row_count = result.row_count as i32;
+                        let exec_ms = result.execution_time_ms;
                         // clone required: invoke_from_event_loop closure must be 'static
                         let window_weak = window_weak.clone();
                         let _ = slint::invoke_from_event_loop(move || {
@@ -200,6 +201,9 @@ impl UI {
                             let total_w = col_count as f32 * DEFAULT_COL_W;
                             ui.set_result_col_widths(Rc::new(slint::VecModel::from(widths)).into());
                             ui.set_result_total_col_width(total_w);
+                            ui.set_status_message(
+                                format!("{exec_ms} ms  ·  {row_count} rows").into(),
+                            );
                             // Reveal the result panel if it is currently hidden.
                             ui.set_result_panel_open(true);
                         });
@@ -211,7 +215,9 @@ impl UI {
                             let Some(window) = window_weak.upgrade() else {
                                 return;
                             };
-                            window.global::<crate::UiState>().set_is_loading(false);
+                            let ui = window.global::<crate::UiState>();
+                            ui.set_is_loading(false);
+                            ui.set_status_message("Cancelled".into());
                         });
                     }
                     Event::QueryError(ref msg) => {
