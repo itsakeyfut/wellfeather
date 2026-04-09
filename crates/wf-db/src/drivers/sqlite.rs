@@ -3,7 +3,7 @@ use std::time::Instant;
 use sqlx::{Column, Row, SqlitePool, TypeInfo};
 
 use crate::error::DbError;
-use crate::models::QueryResult;
+use crate::models::{ColumnInfo, DbMetadata, QueryResult, TableInfo};
 
 /// Connect to a SQLite database at `url`.
 ///
@@ -65,6 +65,85 @@ pub async fn execute(pool: &SqlitePool, sql: &str) -> Result<QueryResult, DbErro
             execution_time_ms: started.elapsed().as_millis(),
         })
     }
+}
+
+/// Fetch schema metadata from the SQLite database:
+/// tables, views, indexes, and per-table columns.
+/// SQLite has no stored procedures — that field is always empty.
+pub async fn fetch_metadata(pool: &SqlitePool) -> Result<DbMetadata, DbError> {
+    use sqlx::Row as _;
+
+    // ── tables ────────────────────────────────────────────────────────────────
+    let table_rows = sqlx::query(
+        "SELECT name FROM sqlite_master \
+         WHERE type = 'table' AND name NOT LIKE 'sqlite_%' \
+         ORDER BY name",
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(DbError::from)?;
+
+    let mut tables = Vec::new();
+    for row in &table_rows {
+        let name: String = row.get("name");
+        let columns = pragma_columns(pool, &name).await?;
+        tables.push(TableInfo { name, columns });
+    }
+
+    // ── views ─────────────────────────────────────────────────────────────────
+    let view_rows = sqlx::query("SELECT name FROM sqlite_master WHERE type = 'view' ORDER BY name")
+        .fetch_all(pool)
+        .await
+        .map_err(DbError::from)?;
+
+    let mut views = Vec::new();
+    for row in &view_rows {
+        let name: String = row.get("name");
+        let columns = pragma_columns(pool, &name).await?;
+        views.push(TableInfo { name, columns });
+    }
+
+    // ── indexes ───────────────────────────────────────────────────────────────
+    let index_rows = sqlx::query(
+        "SELECT name FROM sqlite_master \
+         WHERE type = 'index' AND name NOT LIKE 'sqlite_%' \
+         ORDER BY name",
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(DbError::from)?;
+
+    let indexes: Vec<String> = index_rows.iter().map(|r| r.get("name")).collect();
+
+    Ok(DbMetadata {
+        tables,
+        views,
+        stored_procs: vec![],
+        indexes,
+    })
+}
+
+/// Run `PRAGMA table_info` for `table_name` and return column descriptors.
+async fn pragma_columns(pool: &SqlitePool, table_name: &str) -> Result<Vec<ColumnInfo>, DbError> {
+    use sqlx::Row as _;
+    // Escape double-quotes inside the identifier (SQLite quoting rule).
+    let escaped = table_name.replace('"', "\"\"");
+    let sql = format!("PRAGMA table_info(\"{escaped}\")");
+    let rows = sqlx::query(&sql)
+        .fetch_all(pool)
+        .await
+        .map_err(DbError::from)?;
+
+    let columns = rows
+        .iter()
+        .map(|r| ColumnInfo {
+            name: r.get("name"),
+            data_type: r.get("type"),
+            nullable: r.get::<i32, _>("notnull") == 0,
+        })
+        .collect();
+
+    Ok(columns)
 }
 
 // ---------------------------------------------------------------------------
@@ -309,6 +388,76 @@ mod tests {
         let result = execute(&pool, "DELETE FROM t WHERE id = 1").await.unwrap();
 
         assert_eq!(result.row_count, 1);
+    }
+
+    // ── fetch_metadata ────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn fetch_metadata_should_return_tables_indexes_and_columns() {
+        let pool = connect("sqlite::memory:").await.unwrap();
+
+        sqlx::query("CREATE TABLE users (id INTEGER NOT NULL, name TEXT)")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "CREATE TABLE orders (id INTEGER NOT NULL, user_id INTEGER NOT NULL, total REAL)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query("CREATE INDEX idx_orders_user ON orders (user_id)")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let meta = fetch_metadata(&pool).await.unwrap();
+
+        assert_eq!(meta.tables.len(), 2);
+
+        let users = meta.tables.iter().find(|t| t.name == "users").unwrap();
+        assert_eq!(users.columns.len(), 2);
+        assert_eq!(users.columns[0].name, "id");
+        assert_eq!(users.columns[0].data_type.to_uppercase(), "INTEGER");
+        assert!(!users.columns[0].nullable); // NOT NULL
+        assert_eq!(users.columns[1].name, "name");
+        assert!(users.columns[1].nullable); // no constraint → nullable
+
+        assert_eq!(meta.indexes.len(), 1);
+        assert_eq!(meta.indexes[0], "idx_orders_user");
+
+        assert!(meta.stored_procs.is_empty());
+        assert!(meta.views.is_empty());
+    }
+
+    #[tokio::test]
+    async fn fetch_metadata_should_return_views_with_columns() {
+        let pool = connect("sqlite::memory:").await.unwrap();
+
+        sqlx::query("CREATE TABLE products (id INTEGER NOT NULL, price REAL NOT NULL)")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("CREATE VIEW cheap AS SELECT id, price FROM products WHERE price < 10.0")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let meta = fetch_metadata(&pool).await.unwrap();
+
+        assert_eq!(meta.views.len(), 1);
+        assert_eq!(meta.views[0].name, "cheap");
+        assert_eq!(meta.views[0].columns.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn fetch_metadata_should_return_empty_metadata_for_empty_database() {
+        let pool = connect("sqlite::memory:").await.unwrap();
+        let meta = fetch_metadata(&pool).await.unwrap();
+        assert!(meta.tables.is_empty());
+        assert!(meta.views.is_empty());
+        assert!(meta.indexes.is_empty());
+        assert!(meta.stored_procs.is_empty());
     }
 
     // ── execute — timing ─────────────────────────────────────────────────────

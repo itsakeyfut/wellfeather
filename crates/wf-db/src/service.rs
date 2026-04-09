@@ -4,7 +4,7 @@ use std::sync::{Arc, RwLock};
 use tokio_util::sync::CancellationToken;
 
 use crate::error::DbError;
-use crate::models::{DbConnection, QueryResult};
+use crate::models::{DbConnection, DbMetadata, QueryResult};
 use crate::pool::DbPool;
 
 // ---------------------------------------------------------------------------
@@ -84,6 +84,14 @@ impl DbService {
             result = pool.execute(sql) => result,
             _ = token.cancelled() => Err(DbError::Cancelled),
         }
+    }
+
+    /// Fetch schema metadata for the connection identified by `conn_id`.
+    ///
+    /// Returns `Err(DbError::ConnectionFailed)` if `conn_id` is not connected.
+    pub async fn fetch_metadata(&self, conn_id: &str) -> Result<DbMetadata, DbError> {
+        let pool = self.pool_for(conn_id)?;
+        pool.fetch_metadata().await
     }
 
     /// Returns `true` if a pool for `conn_id` exists in the map.

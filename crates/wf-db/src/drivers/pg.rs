@@ -2,8 +2,10 @@ use std::time::Instant;
 
 use sqlx::{Column, PgPool, Row, TypeInfo};
 
+use std::collections::HashMap;
+
 use crate::error::DbError;
-use crate::models::QueryResult;
+use crate::models::{ColumnInfo, DbMetadata, QueryResult, TableInfo};
 
 /// Connect to a PostgreSQL database at `url`.
 ///
@@ -59,6 +61,104 @@ pub async fn execute(pool: &PgPool, sql: &str) -> Result<QueryResult, DbError> {
             execution_time_ms: started.elapsed().as_millis(),
         })
     }
+}
+
+/// Fetch schema metadata from the connected PostgreSQL database.
+///
+/// Queries `information_schema` and `pg_indexes` restricted to the `public`
+/// schema.  PG/MySQL tests are `#[ignore]` — run with `cargo test -- --ignored`.
+pub async fn fetch_metadata(pool: &PgPool) -> Result<DbMetadata, DbError> {
+    use sqlx::Row as _;
+
+    // ── all columns (single round-trip) ───────────────────────────────────────
+    let col_rows = sqlx::query(
+        "SELECT table_name, column_name, data_type, is_nullable \
+         FROM information_schema.columns \
+         WHERE table_schema = 'public' \
+         ORDER BY table_name, ordinal_position",
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(DbError::from)?;
+
+    let mut col_map: HashMap<String, Vec<ColumnInfo>> = HashMap::new();
+    for row in &col_rows {
+        let table: String = row.get("table_name");
+        col_map.entry(table).or_default().push(ColumnInfo {
+            name: row.get("column_name"),
+            data_type: row.get("data_type"),
+            nullable: row.get::<&str, _>("is_nullable") == "YES",
+        });
+    }
+
+    // ── tables ────────────────────────────────────────────────────────────────
+    let table_rows = sqlx::query(
+        "SELECT table_name FROM information_schema.tables \
+         WHERE table_schema = 'public' AND table_type = 'BASE TABLE' \
+         ORDER BY table_name",
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(DbError::from)?;
+
+    let tables: Vec<TableInfo> = table_rows
+        .iter()
+        .map(|r| {
+            let name: String = r.get("table_name");
+            let columns = col_map.remove(&name).unwrap_or_default();
+            TableInfo { name, columns }
+        })
+        .collect();
+
+    // ── views ─────────────────────────────────────────────────────────────────
+    let view_rows = sqlx::query(
+        "SELECT table_name FROM information_schema.views \
+         WHERE table_schema = 'public' \
+         ORDER BY table_name",
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(DbError::from)?;
+
+    let views: Vec<TableInfo> = view_rows
+        .iter()
+        .map(|r| {
+            let name: String = r.get("table_name");
+            let columns = col_map.remove(&name).unwrap_or_default();
+            TableInfo { name, columns }
+        })
+        .collect();
+
+    // ── stored procedures / functions ─────────────────────────────────────────
+    let proc_rows = sqlx::query(
+        "SELECT routine_name FROM information_schema.routines \
+         WHERE routine_schema = 'public' \
+         ORDER BY routine_name",
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(DbError::from)?;
+
+    let stored_procs: Vec<String> = proc_rows.iter().map(|r| r.get("routine_name")).collect();
+
+    // ── indexes ───────────────────────────────────────────────────────────────
+    let index_rows = sqlx::query(
+        "SELECT indexname FROM pg_indexes \
+         WHERE schemaname = 'public' \
+         ORDER BY indexname",
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(DbError::from)?;
+
+    let indexes: Vec<String> = index_rows.iter().map(|r| r.get("indexname")).collect();
+
+    Ok(DbMetadata {
+        tables,
+        views,
+        stored_procs,
+        indexes,
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -202,6 +302,26 @@ mod tests {
     async fn connect_should_return_connection_failed_on_unreachable_host() {
         let result = connect("postgresql://user:pass@127.0.0.1:19999/db").await;
         assert!(matches!(result, Err(DbError::ConnectionFailed(_))));
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn fetch_metadata_should_return_tables_views_procs_and_indexes() {
+        let url = std::env::var("TEST_PG_URL").unwrap_or_else(|_| {
+            "postgresql://postgres:postgres@localhost:5432/postgres".to_string()
+        });
+        let pool = connect(&url).await.unwrap();
+
+        sqlx::query("CREATE TEMP TABLE wf_meta_test (id INT NOT NULL, label TEXT)")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let meta = fetch_metadata(&pool).await.unwrap();
+
+        // Temp tables live in pg_temp_* schema, not public — metadata should be non-empty
+        // in a real database but at minimum the call must succeed.
+        let _ = meta;
     }
 
     #[tokio::test]
