@@ -13,10 +13,14 @@
 //! Both channels are bounded (`capacity = 64`). The controller task exits cleanly
 //! when all `Sender<Command>` clones are dropped (i.e. when the UI window closes).
 
+use std::path::PathBuf;
+
+use chrono::Utc;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
 use wf_db::{error::DbError, models::DbConnection, service::DbService};
+use wf_history::service::HistoryService;
 
 use crate::{
     app::{command::Command, event::Event, session::SessionManager},
@@ -32,6 +36,10 @@ pub struct AppController {
     state: SharedState,
     db: DbService,
     session: SessionManager,
+    /// Path to `history.db`; opened asynchronously at the start of `run()`.
+    history_path: PathBuf,
+    /// `None` until `run()` opens the database; failures are non-fatal (logged).
+    history: Option<HistoryService>,
     rx_cmd: mpsc::Receiver<Command>,
     tx_event: mpsc::Sender<Event>,
 }
@@ -39,10 +47,14 @@ pub struct AppController {
 impl AppController {
     /// Create the controller and return it together with the two channel endpoints
     /// that `main.rs` distributes: `Sender<Command>` → UI, `Receiver<Event>` → UI.
+    ///
+    /// `history_path` is the filesystem path for `history.db`; the database is
+    /// opened (and the schema migrated) asynchronously at the start of [`Self::run`].
     pub fn new(
         state: SharedState,
         db: DbService,
         session: SessionManager,
+        history_path: PathBuf,
     ) -> (Self, mpsc::Sender<Command>, mpsc::Receiver<Event>) {
         let (tx_cmd, rx_cmd) = mpsc::channel(64);
         let (tx_event, rx_event) = mpsc::channel(64);
@@ -51,6 +63,8 @@ impl AppController {
                 state,
                 db,
                 session,
+                history_path,
+                history: None,
                 rx_cmd,
                 tx_event,
             },
@@ -62,6 +76,18 @@ impl AppController {
     /// Run the command loop as a tokio task (spawn with `tokio::spawn(controller.run())`).
     /// Exits when all `Sender<Command>` clones are dropped.
     pub async fn run(mut self) {
+        // Open history.db at startup — failure is non-fatal (queries still work).
+        self.history = match HistoryService::open(&self.history_path).await {
+            Ok(h) => {
+                info!("history.db opened at {:?}", self.history_path);
+                Some(h)
+            }
+            Err(e) => {
+                warn!("failed to open history.db: {e}");
+                None
+            }
+        };
+
         while let Some(cmd) = self.rx_cmd.recv().await {
             match cmd {
                 Command::Connect(conn, pw) => self.handle_connect(conn, pw).await,
@@ -177,15 +203,47 @@ impl AppController {
 
         let db = self.db.clone(); // clone required: tokio::spawn needs 'static
         let tx = self.tx_event.clone(); // clone required: tokio::spawn needs 'static
+        let history = self.history.clone(); // clone required: tokio::spawn needs 'static
+        let sql_hist = sql.clone(); // clone required: history record needs owned sql
+        let conn_id_hist = conn_id.clone(); // clone required: history record needs owned id
         tokio::spawn(async move {
+            let now = Utc::now().timestamp();
             match db.execute_with_cancel(&conn_id, &sql, token).await {
                 Ok(result) => {
+                    if let Some(ref h) = history {
+                        let exec = wf_db::models::QueryExecution {
+                            id: 0,
+                            sql: sql_hist,
+                            duration_ms: result.execution_time_ms,
+                            success: true,
+                            error_message: None,
+                            timestamp: now,
+                            connection_id: conn_id_hist,
+                        };
+                        if let Err(e) = h.insert(&exec).await {
+                            warn!("failed to save history: {e}");
+                        }
+                    }
                     let _ = tx.send(Event::QueryFinished(result)).await;
                 }
                 Err(DbError::Cancelled) => {
                     let _ = tx.send(Event::QueryCancelled).await;
                 }
                 Err(e) => {
+                    if let Some(ref h) = history {
+                        let exec = wf_db::models::QueryExecution {
+                            id: 0,
+                            sql: sql_hist,
+                            duration_ms: 0,
+                            success: false,
+                            error_message: Some(e.to_string()),
+                            timestamp: now,
+                            connection_id: conn_id_hist,
+                        };
+                        if let Err(he) = h.insert(&exec).await {
+                            warn!("failed to save history: {he}");
+                        }
+                    }
                     let _ = tx.send(Event::QueryError(e.to_string())).await;
                 }
             }
@@ -209,7 +267,7 @@ impl AppController {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
+    use std::{path::PathBuf, sync::Arc};
 
     use tempfile::tempdir;
     use wf_config::manager::ConfigManager;
@@ -233,6 +291,12 @@ mod tests {
         SessionManager::with_config_manager(ConfigManager::with_path(path))
     }
 
+    /// Return a path to a temporary `history.db` (file created lazily by the controller).
+    fn test_history_path() -> PathBuf {
+        let dir = tempdir().unwrap();
+        dir.keep().join("history.db")
+    }
+
     fn sqlite_conn(id: &str) -> DbConnection {
         DbConnection {
             id: id.to_string(),
@@ -254,7 +318,7 @@ mod tests {
         let state = Arc::new(AppState::new());
         let db = DbService::new();
         let (controller, tx_cmd, mut rx_event) =
-            AppController::new(state.clone(), db, test_session());
+            AppController::new(state.clone(), db, test_session(), test_history_path());
 
         tx_cmd
             .send(Command::TestConnection(sqlite_conn("t1"), None))
@@ -275,7 +339,7 @@ mod tests {
         let state = Arc::new(AppState::new());
         let db = DbService::new();
         let (controller, tx_cmd, mut rx_event) =
-            AppController::new(state.clone(), db, test_session());
+            AppController::new(state.clone(), db, test_session(), test_history_path());
 
         let bad = DbConnection {
             id: "tbad".to_string(),
@@ -309,7 +373,7 @@ mod tests {
         let state = Arc::new(AppState::new());
         let db = DbService::new();
         let (controller, tx_cmd, mut rx_event) =
-            AppController::new(state.clone(), db, test_session());
+            AppController::new(state.clone(), db, test_session(), test_history_path());
 
         tx_cmd
             .send(Command::Connect(sqlite_conn("c1"), None))
@@ -329,7 +393,7 @@ mod tests {
         let state = Arc::new(AppState::new());
         let db = DbService::new();
         let (controller, tx_cmd, mut rx_event) =
-            AppController::new(state.clone(), db, test_session());
+            AppController::new(state.clone(), db, test_session(), test_history_path());
 
         let bad = DbConnection {
             id: "bad".to_string(),
@@ -356,7 +420,7 @@ mod tests {
         let state = Arc::new(AppState::new());
         let db = DbService::new();
         let (controller, tx_cmd, mut rx_event) =
-            AppController::new(state.clone(), db, test_session());
+            AppController::new(state.clone(), db, test_session(), test_history_path());
 
         tx_cmd
             .send(Command::Connect(sqlite_conn("c2"), None))
@@ -383,7 +447,7 @@ mod tests {
         let state = Arc::new(AppState::new());
         let db = DbService::new();
         let (controller, tx_cmd, mut rx_event) =
-            AppController::new(state.clone(), db, test_session());
+            AppController::new(state.clone(), db, test_session(), test_history_path());
 
         // Connect first so there is an active connection.
         tx_cmd
@@ -411,7 +475,7 @@ mod tests {
         let state = Arc::new(AppState::new());
         let db = DbService::new();
         let (controller, tx_cmd, mut rx_event) =
-            AppController::new(state.clone(), db, test_session());
+            AppController::new(state.clone(), db, test_session(), test_history_path());
 
         tx_cmd
             .send(Command::RunQuery("SELECT 1".to_string()))
@@ -430,7 +494,7 @@ mod tests {
         let state = Arc::new(AppState::new());
         let db = DbService::new();
         let (controller, tx_cmd, mut rx_event) =
-            AppController::new(state.clone(), db, test_session());
+            AppController::new(state.clone(), db, test_session(), test_history_path());
 
         tx_cmd.send(Command::CancelQuery).await.unwrap();
         drop(tx_cmd);
@@ -446,7 +510,7 @@ mod tests {
         let state = Arc::new(AppState::new());
         let db = DbService::new();
         let (controller, tx_cmd, mut rx_event) =
-            AppController::new(state.clone(), db, test_session());
+            AppController::new(state.clone(), db, test_session(), test_history_path());
 
         tx_cmd
             .send(Command::Connect(sqlite_conn("c3"), None))

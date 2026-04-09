@@ -6406,6 +6406,7 @@ name = "wellfeather"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "chrono",
  "slint",
  "slint-build",
  "tempfile",
@@ -6474,6 +6475,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "uuid",
+ "wf-db",
 ]
 
 [[package]]

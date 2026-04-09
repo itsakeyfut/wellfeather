@@ -11,6 +11,7 @@ repository.workspace = true
 authors.workspace = true
 
 [dependencies]
+wf-db     = { path = "../wf-db" }
 sqlx      = { workspace = true }
 tokio     = { workspace = true }
 anyhow    = { workspace = true }
