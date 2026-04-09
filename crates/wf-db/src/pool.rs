@@ -2,7 +2,7 @@ use sqlx::{MySqlPool, PgPool, SqlitePool};
 
 use crate::drivers;
 use crate::error::DbError;
-use crate::models::{DbConnection, DbKind, DbType, QueryResult};
+use crate::models::{DbConnection, DbKind, DbMetadata, DbType, QueryResult};
 
 // ---------------------------------------------------------------------------
 // DbPool
@@ -57,6 +57,15 @@ impl DbPool {
             DbPool::Pg(p) => drivers::pg::execute(p, sql).await,
             DbPool::My(p) => drivers::my::execute(p, sql).await,
             DbPool::Sqlite(p) => drivers::sqlite::execute(p, sql).await,
+        }
+    }
+
+    /// Fetch schema metadata (tables, views, stored procs, indexes) for this pool.
+    pub async fn fetch_metadata(&self) -> Result<DbMetadata, DbError> {
+        match self {
+            DbPool::Pg(p) => drivers::pg::fetch_metadata(p).await,
+            DbPool::My(p) => drivers::my::fetch_metadata(p).await,
+            DbPool::Sqlite(p) => drivers::sqlite::fetch_metadata(p).await,
         }
     }
 
