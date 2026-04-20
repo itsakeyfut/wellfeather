@@ -36,6 +36,7 @@ fn build_sidebar_tree(
     for conn in connections {
         let conn_node_id = format!("conn:{}", conn.id);
         let is_conn_expanded = expanded.contains(&conn_node_id);
+        let conn_idx = nodes.len() as i32;
         nodes.push(crate::SidebarNode {
             id: conn_node_id.clone().into(),
             label: conn.name.clone().into(),
@@ -44,6 +45,7 @@ fn build_sidebar_tree(
             is_expanded: is_conn_expanded,
             is_active: conn.id == active_id,
             node_kind: "connection".into(),
+            parent_index: -1,
         });
         if !is_conn_expanded {
             continue;
@@ -53,15 +55,25 @@ fn build_sidebar_tree(
         };
         push_tableinfo_category(
             &mut nodes,
+            conn_idx,
             &conn.id,
             "Tables",
             &meta.tables,
             "table",
             expanded,
         );
-        push_tableinfo_category(&mut nodes, &conn.id, "Views", &meta.views, "view", expanded);
+        push_tableinfo_category(
+            &mut nodes,
+            conn_idx,
+            &conn.id,
+            "Views",
+            &meta.views,
+            "view",
+            expanded,
+        );
         push_string_category(
             &mut nodes,
+            conn_idx,
             &conn.id,
             "Stored Procedures",
             &meta.stored_procs,
@@ -70,6 +82,7 @@ fn build_sidebar_tree(
         );
         push_string_category(
             &mut nodes,
+            conn_idx,
             &conn.id,
             "Indexes",
             &meta.indexes,
@@ -82,6 +95,7 @@ fn build_sidebar_tree(
 
 fn push_tableinfo_category(
     nodes: &mut Vec<crate::SidebarNode>,
+    conn_idx: i32,
     conn_id: &str,
     name: &str,
     items: &[TableInfo],
@@ -90,6 +104,7 @@ fn push_tableinfo_category(
 ) {
     let cat_id = format!("cat:{}:{}", conn_id, name);
     let is_exp = expanded.contains(&cat_id);
+    let cat_idx = nodes.len() as i32;
     nodes.push(crate::SidebarNode {
         id: cat_id.into(),
         label: name.into(),
@@ -98,6 +113,7 @@ fn push_tableinfo_category(
         is_expanded: is_exp,
         is_active: false,
         node_kind: "category".into(),
+        parent_index: conn_idx,
     });
     if is_exp {
         for item in items {
@@ -109,6 +125,7 @@ fn push_tableinfo_category(
                 is_expanded: false,
                 is_active: false,
                 node_kind: kind.into(),
+                parent_index: cat_idx,
             });
         }
     }
@@ -116,6 +133,7 @@ fn push_tableinfo_category(
 
 fn push_string_category(
     nodes: &mut Vec<crate::SidebarNode>,
+    conn_idx: i32,
     conn_id: &str,
     name: &str,
     items: &[String],
@@ -124,6 +142,7 @@ fn push_string_category(
 ) {
     let cat_id = format!("cat:{}:{}", conn_id, name);
     let is_exp = expanded.contains(&cat_id);
+    let cat_idx = nodes.len() as i32;
     nodes.push(crate::SidebarNode {
         id: cat_id.into(),
         label: name.into(),
@@ -132,6 +151,7 @@ fn push_string_category(
         is_expanded: is_exp,
         is_active: false,
         node_kind: "category".into(),
+        parent_index: conn_idx,
     });
     if is_exp {
         for item in items {
@@ -143,6 +163,7 @@ fn push_string_category(
                 is_expanded: false,
                 is_active: false,
                 node_kind: kind.into(),
+                parent_index: cat_idx,
             });
         }
     }
@@ -173,6 +194,7 @@ impl UI {
             state.clone(),
             tx_cmd.clone(),
             Arc::clone(&sidebar_state),
+            enc_key,
         );
         Self::register_connection_form_callbacks(&window, tx_cmd.clone(), enc_key);
         Self::register_editor_callbacks(&window, state.clone(), tx_cmd.clone());
@@ -306,6 +328,7 @@ impl UI {
                             ui.set_form_testing(false);
                             ui.set_form_status(msg.clone().into());
                             ui.set_status_message(format!("Connection failed: {msg}").into());
+                            ui.set_sidebar_loading(false);
                         });
                     }
                     Event::QueryStarted => {
@@ -491,6 +514,7 @@ impl UI {
         state: SharedState,
         tx_cmd: mpsc::Sender<Command>,
         sidebar_state: Arc<Mutex<SidebarUiState>>,
+        enc_key: [u8; 32],
     ) {
         let ui_state = window.global::<crate::UiState>();
 
@@ -534,10 +558,14 @@ impl UI {
                 if let Some(conn_id) = id.strip_prefix("conn:") {
                     let conn = state.conn.all().into_iter().find(|c| c.id == conn_id);
                     if let Some(conn) = conn {
+                        let password = conn
+                            .password_encrypted
+                            .as_ref()
+                            .and_then(|enc| crypto::decrypt(enc, &enc_key).ok());
                         // clone required: tokio::spawn requires 'static
                         let tx_cmd = tx_cmd.clone();
                         tokio::spawn(async move {
-                            let _ = tx_cmd.send(Command::Connect(conn, None)).await;
+                            let _ = tx_cmd.send(Command::Connect(conn, password)).await;
                         });
                     }
                 }
@@ -570,9 +598,12 @@ impl UI {
             });
         }
 
-        // table-double-clicked: append SELECT * FROM <name> to the editor
+        // table-double-clicked: insert SELECT * FROM <name> into the editor
+        // and immediately execute it so the result appears without a manual
+        // Ctrl+Enter.  tx_cmd is cloned here because the closure is 'static.
         {
             let window_weak = window.as_weak();
+            let tx_cmd = tx_cmd.clone(); // clone required: callback closure needs owned tx_cmd
             ui_state.on_table_double_clicked(move |name| {
                 let sql = format!("SELECT * FROM {}", name);
                 let Some(window) = window_weak.upgrade() else {
@@ -581,6 +612,12 @@ impl UI {
                 let ui = window.global::<crate::UiState>();
                 let current = ui.get_editor_text().to_string();
                 ui.set_editor_text(append_editor_text(&current, &sql).into());
+                // Auto-execute so the result is visible immediately.
+                let tx_cmd = tx_cmd.clone(); // clone required: tokio::spawn requires 'static
+                let sql_run = sql.clone();
+                tokio::spawn(async move {
+                    let _ = tx_cmd.send(Command::RunQuery(sql_run)).await;
+                });
             });
         }
     }

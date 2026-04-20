@@ -138,9 +138,19 @@ export component AppWindow inherits Window {
     // defined inside the FocusScope child below.
     property <bool> _editor-active: editor-inst.editor-focused;
     changed _editor-active => {
-        if (root._editor-active) {
-            root.focused-pane = 1;
-        }
+        if (root._editor-active) { root.focused-pane = 1; }
+    }
+
+    // Sync focused-pane when the sidebar gains focus by mouse click.
+    property <bool> _sidebar-active: sidebar-inst.sidebar-focused;
+    changed _sidebar-active => {
+        if (root._sidebar-active) { root.focused-pane = 0; }
+    }
+
+    // Sync focused-pane when the result FocusScope gains focus by Alt+Down.
+    property <bool> _result-active: result-focus.has-focus;
+    changed _result-active => {
+        if (root._result-active) { root.focused-pane = 2; }
     }
 
     // ── Root key-intercept FocusScope ─────────────────────────────────────────
@@ -172,11 +182,13 @@ export component AppWindow inherits Window {
                 } else if (event.text == Key.LeftArrow) {
                     if (root.focused-pane == 1) {
                         root.focused-pane = 0;
+                        sidebar-inst.grab-focus();
                     }
                     EventResult.accept
                 } else if (event.text == Key.DownArrow) {
-                    if (root.focused-pane == 1) {
+                    if (root.focused-pane == 1 && UiState.result-panel-open) {
                         root.focused-pane = 2;
+                        result-focus.focus();
                     }
                     EventResult.accept
                 } else if (event.text == Key.UpArrow) {
@@ -194,7 +206,7 @@ export component AppWindow inherits Window {
         }
 
         // ── Sidebar ───────────────────────────────────────────────────────────
-        Sidebar {
+        sidebar-inst := Sidebar {
             x: 0;
             y: 0;
             width:  sidebar-width;
@@ -377,6 +389,21 @@ export component AppWindow inherits Window {
                     resize-column(i, w) => { UiState.resize-result-column(i, w); }
                 }
             }
+        }
+
+        // ── Result-panel focus absorber ───────────────────────────────────────
+        // Always present (so it can be referenced by Alt+Down handler) but
+        // sized to 0 when the panel is closed.  focus-on-click: false so it
+        // does not intercept pointer events to the ResultTable below.
+        // When focused (via Alt+Down), key-pressed absorbs all keys to prevent
+        // them from leaking back to the editor's TextInput.
+        result-focus := FocusScope {
+            x: sidebar-width;
+            y: content-height - root.panel-height;
+            width:  main-width;
+            height: UiState.result-panel-open ? root.panel-height : 0;
+            focus-on-click: false;
+            key-pressed(event) => { EventResult.accept }
         }
 
         // ── Status bar ────────────────────────────────────────────────────────
