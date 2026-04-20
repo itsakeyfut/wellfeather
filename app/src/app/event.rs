@@ -31,6 +31,8 @@ pub enum Event {
     CompletionReady(Vec<CompletionItem>),
     MetadataLoaded(String, DbMetadata), // conn_id, metadata
     MetadataFetchFailed(String),
+    /// Insert text into the SQL editor (append after existing content).
+    InsertText(String),
     ConfigUpdated,
     StateChanged(StateEvent),
 }
