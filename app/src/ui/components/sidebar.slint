@@ -9,113 +9,226 @@ export component Sidebar inherits Rectangle {
     callback table-double-clicked(string);
     callback add-connection();
 
-    VerticalLayout {
-        // ── Schema tree ───────────────────────────────────────────────────────
-        for node in root.tree : Rectangle {
-            height: 32px;
-            clip: true;
+    /// True while this sidebar holds keyboard focus (used by app.slint to sync focused-pane).
+    out property <bool> sidebar-focused: sidebar-fs.has-focus;
+    /// Programmatic focus: called by app.slint when Alt+Left navigates to the sidebar.
+    public function grab-focus() {
+        sidebar-fs.focus();
+        if (root.kb-focus < 0 && root.tree.length > 0) {
+            root.kb-focus = 0;
+        }
+    }
 
-            background: node.is-active && node.level == 0 ? #313244 : transparent;
+    /// Keyboard-navigation cursor (-1 = none selected).
+    property <int> kb-focus: -1;
 
-            ta := TouchArea {
-                width: parent.width;
-                height: parent.height;
-                clicked => { root.toggle-node(node.id); }
-                double-clicked => {
-                    if node.node-kind == "table" || node.node-kind == "view" {
-                        root.table-double-clicked(node.label);
+    // Clamp kb-focus when the tree model is replaced (e.g. after toggle-node).
+    changed tree => {
+        if (root.kb-focus >= root.tree.length) {
+            root.kb-focus = root.tree.length > 0 ? root.tree.length - 1 : -1;
+        }
+    }
+
+    // Auto-scroll: keep the kb-focused row visible in the Flickable viewport.
+    // viewport-y is 0 at top and negative as content scrolls down.
+    changed kb-focus => {
+        if (root.kb-focus >= 0) {
+            let row-top = root.kb-focus * 32px;
+            let row-bot = row-top + 32px;
+            if (row-top < -sidebar-scroll.viewport-y) {
+                sidebar-scroll.viewport-y = -row-top;
+            } else if (row-bot > -sidebar-scroll.viewport-y + sidebar-scroll.height) {
+                sidebar-scroll.viewport-y = -(row-bot - sidebar-scroll.height);
+            }
+        }
+    }
+
+    sidebar-fs := FocusScope {
+        x: 0; y: 0;
+        width: parent.width; height: parent.height;
+        focus-on-click: true;
+
+        key-pressed(event) => {
+            if (event.text == Key.UpArrow) {
+                if (root.kb-focus <= 0) {
+                    root.kb-focus = 0;
+                } else {
+                    root.kb-focus -= 1;
+                }
+                EventResult.accept
+            } else if (event.text == Key.DownArrow) {
+                if (root.kb-focus < 0) {
+                    root.kb-focus = 0;
+                } else if (root.kb-focus < root.tree.length - 1) {
+                    root.kb-focus += 1;
+                }
+                EventResult.accept
+            } else if (event.text == Key.RightArrow) {
+                if (root.kb-focus >= 0 && root.tree.length > 0) {
+                    let node = root.tree[root.kb-focus];
+                    if (node.level < 2) {
+                        if (!node.is-expanded) {
+                            root.toggle-node(node.id);
+                        } else if (root.kb-focus + 1 < root.tree.length) {
+                            root.kb-focus += 1;
+                        }
                     }
                 }
-            }
-
-            // Hover overlay (skipped for the active connection row)
-            Rectangle {
-                background: ta.has-hover && !(node.is-active && node.level == 0)
-                    ? #ffffff0d : transparent;
-                width: parent.width;
-                height: parent.height;
-            }
-
-            HorizontalLayout {
-                x: 0; y: 0;
-                width: parent.width;
-                height: parent.height;
-                padding-left: (8 + node.level * 14) * 1px;
-                padding-right: 8px;
-                spacing: 4px;
-
-                // Expand/collapse toggle icon for connection and category nodes
-                if node.level < 2 : Text {
-                    text: node.is-expanded ? "▼" : "▶";
-                    color: #585b70;
-                    font-size: 9px;
-                    vertical-alignment: center;
-                    width: 14px;
+                EventResult.accept
+            } else if (event.text == Key.LeftArrow) {
+                if (root.kb-focus >= 0 && root.tree.length > 0) {
+                    let node = root.tree[root.kb-focus];
+                    if (node.is-expanded && node.level < 2) {
+                        root.toggle-node(node.id);
+                    } else if (node.parent-index >= 0) {
+                        root.kb-focus = node.parent-index;
+                    }
                 }
-                // Spacer for item nodes
-                if node.level >= 2 : Rectangle { width: 14px; }
-
-                // Main label
-                Text {
-                    text: node.label;
-                    color: node.level == 0
-                        ? (node.is-active ? #cdd6f4 : #bac2de)
-                        : (node.level == 1 ? #7f849c : #a6adc8);
-                    font-size: node.level == 0 ? 13px : 12px;
-                    vertical-alignment: center;
-                    overflow: elide;
-                    horizontal-stretch: 1;
+                EventResult.accept
+            } else if (event.text == Key.Return) {
+                if (root.kb-focus >= 0 && root.tree.length > 0) {
+                    let node = root.tree[root.kb-focus];
+                    if (node.node-kind == "table" || node.node-kind == "view") {
+                        root.table-double-clicked(node.label);
+                    } else if (node.level < 2) {
+                        root.toggle-node(node.id);
+                    }
                 }
-
-                // Sub-label badge (db-type for connection nodes)
-                if node.sub-label != "" : Text {
-                    text: node.sub-label;
-                    color: #585b70;
-                    font-size: 10px;
-                    vertical-alignment: center;
-                }
+                EventResult.accept
+            } else {
+                EventResult.reject
             }
         }
 
-        // ── Metadata loading indicator ────────────────────────────────────────
-        if root.is-loading : Rectangle {
-            height: 28px;
-            HorizontalLayout {
-                padding-left: 24px;
-                Text {
-                    text: @tr("Loading\u{2026}");
-                    color: #585b70;
-                    font-size: 11px;
-                    vertical-alignment: center;
-                    font-italic: true;
+        sidebar-scroll := Flickable {
+            x: 0; y: 0;
+            width: parent.width; height: parent.height;
+            interactive: true;
+            viewport-height: max(sidebar-content.preferred-height, self.height);
+
+            sidebar-content := VerticalLayout {
+                // ── Schema tree ───────────────────────────────────────────────────────
+                for node[i] in root.tree : Rectangle {
+                    height: 32px;
+                    clip: true;
+
+                    background: i == root.kb-focus
+                        ? #3d3d5c
+                        : (node.is-active && node.level == 0 ? #313244 : transparent);
+
+                    ta := TouchArea {
+                        width: parent.width;
+                        height: parent.height;
+                        clicked => {
+                            root.kb-focus = i;
+                            // Level-2 items (tables, views, etc.) have no children to
+                            // expand, so skip toggle-node to avoid rebuilding the VecModel
+                            // on the first click — a rebuild would destroy the element and
+                            // prevent Slint from recognising the second click as a
+                            // double-click.
+                            if (node.level < 2) {
+                                root.toggle-node(node.id);
+                            }
+                        }
+                        double-clicked => {
+                            if node.node-kind == "table" || node.node-kind == "view" {
+                                root.table-double-clicked(node.label);
+                            }
+                        }
+                    }
+
+                    // Hover overlay (skipped for kb-focused and active-connection rows)
+                    Rectangle {
+                        background: ta.has-hover
+                            && i != root.kb-focus
+                            && !(node.is-active && node.level == 0)
+                            ? #ffffff0d : transparent;
+                        width: parent.width;
+                        height: parent.height;
+                    }
+
+                    HorizontalLayout {
+                        x: 0; y: 0;
+                        width: parent.width;
+                        height: parent.height;
+                        padding-left: (8 + node.level * 14) * 1px;
+                        padding-right: 8px;
+                        spacing: 4px;
+
+                        // Expand/collapse toggle icon for connection and category nodes
+                        if node.level < 2 : Text {
+                            text: node.is-expanded ? "▼" : "▶";
+                            color: #585b70;
+                            font-size: 9px;
+                            vertical-alignment: center;
+                            width: 14px;
+                        }
+                        // Spacer for item nodes
+                        if node.level >= 2 : Rectangle { width: 14px; }
+
+                        // Main label
+                        Text {
+                            text: node.label;
+                            color: node.level == 0
+                                ? (node.is-active ? #cdd6f4 : #bac2de)
+                                : (node.level == 1 ? #7f849c : #a6adc8);
+                            font-size: node.level == 0 ? 13px : 12px;
+                            vertical-alignment: center;
+                            overflow: elide;
+                            horizontal-stretch: 1;
+                        }
+
+                        // Sub-label badge (db-type for connection nodes)
+                        if node.sub-label != "" : Text {
+                            text: node.sub-label;
+                            color: #585b70;
+                            font-size: 10px;
+                            vertical-alignment: center;
+                        }
+                    }
                 }
-            }
-        }
 
-        // ── Divider ───────────────────────────────────────────────────────────
-        Rectangle {
-            height: 1px;
-            background: #313244;
-        }
-
-        // ── Add connection button ─────────────────────────────────────────────
-        Rectangle {
-            height: 36px;
-            background: transparent;
-
-            HorizontalLayout {
-                padding-left: 12px;
-                Text {
-                    text: @tr("＋ Add connection");
-                    color: #89b4fa;
-                    vertical-alignment: center;
+                // ── Metadata loading indicator ────────────────────────────────────────
+                if root.is-loading : Rectangle {
+                    height: 28px;
+                    HorizontalLayout {
+                        padding-left: 24px;
+                        Text {
+                            text: @tr("Loading\u{2026}");
+                            color: #585b70;
+                            font-size: 11px;
+                            vertical-alignment: center;
+                            font-italic: true;
+                        }
+                    }
                 }
-            }
 
-            TouchArea {
-                width: parent.width;
-                height: parent.height;
-                clicked => { root.add-connection(); }
+                // ── Divider ───────────────────────────────────────────────────────────
+                Rectangle {
+                    height: 1px;
+                    background: #313244;
+                }
+
+                // ── Add connection button ─────────────────────────────────────────────
+                Rectangle {
+                    height: 36px;
+                    background: transparent;
+
+                    HorizontalLayout {
+                        padding-left: 12px;
+                        Text {
+                            text: @tr("＋ Add connection");
+                            color: #89b4fa;
+                            vertical-alignment: center;
+                        }
+                    }
+
+                    TouchArea {
+                        width: parent.width;
+                        height: parent.height;
+                        clicked => { root.add-connection(); }
+                    }
+                }
             }
         }
     }

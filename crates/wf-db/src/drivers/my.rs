@@ -68,8 +68,6 @@ pub async fn execute(pool: &MySqlPool, sql: &str) -> Result<QueryResult, DbError
 /// Queries `information_schema` restricted to the current schema (`DATABASE()`).
 /// PG/MySQL tests are `#[ignore]` — run with `cargo test -- --ignored`.
 pub async fn fetch_metadata(pool: &MySqlPool) -> Result<DbMetadata, DbError> {
-    use sqlx::Row as _;
-
     // ── all columns (single round-trip) ───────────────────────────────────────
     let col_rows = sqlx::query(
         "SELECT table_name, column_name, data_type, is_nullable \
@@ -83,11 +81,11 @@ pub async fn fetch_metadata(pool: &MySqlPool) -> Result<DbMetadata, DbError> {
 
     let mut col_map: HashMap<String, Vec<ColumnInfo>> = HashMap::new();
     for row in &col_rows {
-        let table: String = row.get("table_name");
+        let table = get_meta_str(row, 0);
         col_map.entry(table).or_default().push(ColumnInfo {
-            name: row.get("column_name"),
-            data_type: row.get("data_type"),
-            nullable: row.get::<&str, _>("is_nullable") == "YES",
+            name: get_meta_str(row, 1),
+            data_type: get_meta_str(row, 2),
+            nullable: get_meta_str(row, 3) == "YES",
         });
     }
 
@@ -104,7 +102,7 @@ pub async fn fetch_metadata(pool: &MySqlPool) -> Result<DbMetadata, DbError> {
     let tables: Vec<TableInfo> = table_rows
         .iter()
         .map(|r| {
-            let name: String = r.get("table_name");
+            let name = get_meta_str(r, 0);
             let columns = col_map.remove(&name).unwrap_or_default();
             TableInfo { name, columns }
         })
@@ -123,7 +121,7 @@ pub async fn fetch_metadata(pool: &MySqlPool) -> Result<DbMetadata, DbError> {
     let views: Vec<TableInfo> = view_rows
         .iter()
         .map(|r| {
-            let name: String = r.get("table_name");
+            let name = get_meta_str(r, 0);
             let columns = col_map.remove(&name).unwrap_or_default();
             TableInfo { name, columns }
         })
@@ -139,7 +137,7 @@ pub async fn fetch_metadata(pool: &MySqlPool) -> Result<DbMetadata, DbError> {
     .await
     .map_err(DbError::from)?;
 
-    let stored_procs: Vec<String> = proc_rows.iter().map(|r| r.get("routine_name")).collect();
+    let stored_procs: Vec<String> = proc_rows.iter().map(|r| get_meta_str(r, 0)).collect();
 
     // ── indexes ───────────────────────────────────────────────────────────────
     let index_rows = sqlx::query(
@@ -151,13 +149,31 @@ pub async fn fetch_metadata(pool: &MySqlPool) -> Result<DbMetadata, DbError> {
     .await
     .map_err(DbError::from)?;
 
-    let indexes: Vec<String> = index_rows.iter().map(|r| r.get("index_name")).collect();
+    let indexes: Vec<String> = index_rows.iter().map(|r| get_meta_str(r, 0)).collect();
 
     Ok(DbMetadata {
         tables,
         views,
         stored_procs,
         indexes,
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Metadata string decoding
+// ---------------------------------------------------------------------------
+
+/// Read a string column from a metadata query row by position.
+///
+/// MySQL's `information_schema` returns column names as `VARCHAR` on some
+/// server versions and as `VARBINARY` on others (e.g. 8.0 with certain
+/// `character_set_server` settings).  Try `String` first; fall back to
+/// decoding raw bytes as UTF-8.
+fn get_meta_str(row: &sqlx::mysql::MySqlRow, i: usize) -> String {
+    row.try_get::<String, _>(i).unwrap_or_else(|_| {
+        row.try_get::<Vec<u8>, _>(i)
+            .map(|b| String::from_utf8_lossy(&b).into_owned())
+            .unwrap_or_default()
     })
 }
 
