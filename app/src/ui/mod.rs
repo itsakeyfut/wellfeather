@@ -465,6 +465,19 @@ impl UI {
                             ui.set_status_message(format!("Metadata unavailable: {msg}").into());
                         });
                     }
+                    Event::InsertText(ref text) => {
+                        let text = text.clone();
+                        // clone required: invoke_from_event_loop closure must be 'static
+                        let window_weak = window_weak.clone();
+                        let _ = slint::invoke_from_event_loop(move || {
+                            let Some(window) = window_weak.upgrade() else {
+                                return;
+                            };
+                            let ui = window.global::<crate::UiState>();
+                            let current = ui.get_editor_text().to_string();
+                            ui.set_editor_text(append_editor_text(&current, &text).into());
+                        });
+                    }
                     _ => {}
                 }
             }
@@ -557,10 +570,17 @@ impl UI {
             });
         }
 
-        // table-double-clicked: stub for T045 (insert SELECT * FROM {name})
+        // table-double-clicked: append SELECT * FROM <name> to the editor
         {
-            ui_state.on_table_double_clicked(move |_name| {
-                // T045: insert SELECT * FROM {name} into editor
+            let window_weak = window.as_weak();
+            ui_state.on_table_double_clicked(move |name| {
+                let sql = format!("SELECT * FROM {}", name);
+                let Some(window) = window_weak.upgrade() else {
+                    return;
+                };
+                let ui = window.global::<crate::UiState>();
+                let current = ui.get_editor_text().to_string();
+                ui.set_editor_text(append_editor_text(&current, &sql).into());
             });
         }
     }
@@ -806,6 +826,19 @@ fn db_type_label(dt: &DbType) -> &'static str {
     }
 }
 
+/// Append `text` to `current` editor content with a newline separator.
+/// If `current` is empty the text is used as-is.
+/// If `current` already ends with `\n` the text is appended directly.
+fn append_editor_text(current: &str, text: &str) -> String {
+    if current.is_empty() {
+        text.to_string()
+    } else if current.ends_with('\n') {
+        format!("{}{}", current, text)
+    } else {
+        format!("{}\n{}", current, text)
+    }
+}
+
 /// Build a `DbConnection` from the current values in the connection form global,
 /// and return the plaintext password separately (for immediate use in the connection URL).
 ///
@@ -965,5 +998,26 @@ mod tests {
         let nodes = build_sidebar_tree(&conns, "b", &HashMap::new(), &HashSet::new());
         assert!(!nodes[0].is_active);
         assert!(nodes[1].is_active);
+    }
+
+    #[test]
+    fn append_editor_text_should_set_text_when_editor_is_empty() {
+        assert_eq!(append_editor_text("", "SELECT * FROM t"), "SELECT * FROM t");
+    }
+
+    #[test]
+    fn append_editor_text_should_prepend_newline_when_content_exists() {
+        assert_eq!(
+            append_editor_text("SELECT 1", "SELECT * FROM t"),
+            "SELECT 1\nSELECT * FROM t"
+        );
+    }
+
+    #[test]
+    fn append_editor_text_should_not_double_newline_when_content_ends_with_newline() {
+        assert_eq!(
+            append_editor_text("SELECT 1\n", "SELECT * FROM t"),
+            "SELECT 1\nSELECT * FROM t"
+        );
     }
 }
