@@ -30,6 +30,7 @@ pub enum Event {
     TestConnectionFailed(String),
     CompletionReady(Vec<CompletionItem>),
     MetadataLoaded(DbMetadata),
+    MetadataFetchFailed(String),
     ConfigUpdated,
     StateChanged(StateEvent),
 }

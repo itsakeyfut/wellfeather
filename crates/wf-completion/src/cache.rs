@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::RwLock;
+use std::sync::{Arc, RwLock};
 
 use anyhow::Result;
 use sqlx::SqlitePool;
@@ -15,8 +15,9 @@ use wf_db::models::DbMetadata;
 ///
 /// Memory is the primary store; SQLite is used for across-session durability.
 /// `new()` is synchronous — the SQLite file is opened lazily on first use.
+#[derive(Clone)]
 pub struct MetadataCache {
-    memory: RwLock<HashMap<String, DbMetadata>>,
+    memory: Arc<RwLock<HashMap<String, DbMetadata>>>,
     db_path: PathBuf,
 }
 
@@ -25,7 +26,7 @@ impl MetadataCache {
     /// The file is created on first write if it does not exist.
     pub fn new(db_path: PathBuf) -> Self {
         Self {
-            memory: RwLock::new(HashMap::new()),
+            memory: Arc::new(RwLock::new(HashMap::new())),
             db_path,
         }
     }

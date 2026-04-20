@@ -19,6 +19,7 @@ use chrono::Utc;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
+use wf_completion::cache::MetadataCache;
 use wf_db::{error::DbError, models::DbConnection, service::DbService};
 use wf_history::service::HistoryService;
 
@@ -40,6 +41,10 @@ pub struct AppController {
     history_path: PathBuf,
     /// `None` until `run()` opens the database; failures are non-fatal (logged).
     history: Option<HistoryService>,
+    /// Path to `metadata.db`; opened asynchronously at the start of `run()`.
+    metadata_cache_path: PathBuf,
+    /// `None` until `run()` initialises the cache.
+    metadata_cache: Option<MetadataCache>,
     rx_cmd: mpsc::Receiver<Command>,
     tx_event: mpsc::Sender<Event>,
 }
@@ -50,11 +55,13 @@ impl AppController {
     ///
     /// `history_path` is the filesystem path for `history.db`; the database is
     /// opened (and the schema migrated) asynchronously at the start of [`Self::run`].
+    /// `metadata_cache_path` is the filesystem path for `metadata.db`.
     pub fn new(
         state: SharedState,
         db: DbService,
         session: SessionManager,
         history_path: PathBuf,
+        metadata_cache_path: PathBuf,
     ) -> (Self, mpsc::Sender<Command>, mpsc::Receiver<Event>) {
         let (tx_cmd, rx_cmd) = mpsc::channel(64);
         let (tx_event, rx_event) = mpsc::channel(64);
@@ -65,6 +72,8 @@ impl AppController {
                 session,
                 history_path,
                 history: None,
+                metadata_cache_path,
+                metadata_cache: None,
                 rx_cmd,
                 tx_event,
             },
@@ -87,6 +96,13 @@ impl AppController {
                 None
             }
         };
+
+        // Open metadata cache at startup — failure is non-fatal.
+        let cache = MetadataCache::new(self.metadata_cache_path.clone());
+        if let Err(e) = cache.preload_from_disk().await {
+            warn!("failed to preload metadata cache: {e}");
+        }
+        self.metadata_cache = Some(cache);
 
         while let Some(cmd) = self.rx_cmd.recv().await {
             match cmd {
@@ -127,7 +143,28 @@ impl AppController {
                 }
                 self.state.conn.set_active(&id);
                 info!(conn_id = %id, "connected successfully");
-                let _ = self.tx_event.send(Event::Connected(id)).await;
+                let _ = self.tx_event.send(Event::Connected(id.clone())).await;
+
+                let db = self.db.clone(); // clone required: tokio::spawn needs 'static
+                let tx = self.tx_event.clone(); // clone required: tokio::spawn needs 'static
+                let cache = self.metadata_cache.clone(); // clone required: tokio::spawn needs 'static
+                let fetch_id = id.clone(); // clone required: owned id for async block
+                tokio::spawn(async move {
+                    match db.fetch_metadata(&fetch_id).await {
+                        Ok(meta) => {
+                            if let Some(ref c) = cache
+                                && let Err(e) = c.store(&fetch_id, meta.clone()).await
+                            {
+                                warn!(conn_id = %fetch_id, error = %e, "failed to store metadata");
+                            }
+                            let _ = tx.send(Event::MetadataLoaded(meta)).await;
+                        }
+                        Err(e) => {
+                            warn!(conn_id = %fetch_id, error = %e, "metadata fetch failed");
+                            let _ = tx.send(Event::MetadataFetchFailed(e.to_string())).await;
+                        }
+                    }
+                });
             }
             Err(e) => {
                 warn!(conn_id = %id, error = %e, "connection failed");
@@ -297,6 +334,12 @@ mod tests {
         dir.keep().join("history.db")
     }
 
+    /// Return a path to a temporary `metadata.db` (file created lazily by the controller).
+    fn test_metadata_path() -> PathBuf {
+        let dir = tempdir().unwrap();
+        dir.keep().join("metadata.db")
+    }
+
     fn sqlite_conn(id: &str) -> DbConnection {
         DbConnection {
             id: id.to_string(),
@@ -317,8 +360,13 @@ mod tests {
     async fn test_connection_should_send_ok_and_not_add_to_state() {
         let state = Arc::new(AppState::new());
         let db = DbService::new();
-        let (controller, tx_cmd, mut rx_event) =
-            AppController::new(state.clone(), db, test_session(), test_history_path());
+        let (controller, tx_cmd, mut rx_event) = AppController::new(
+            state.clone(),
+            db,
+            test_session(),
+            test_history_path(),
+            test_metadata_path(),
+        );
 
         tx_cmd
             .send(Command::TestConnection(sqlite_conn("t1"), None))
@@ -338,8 +386,13 @@ mod tests {
     async fn test_connection_should_send_failed_on_invalid_url() {
         let state = Arc::new(AppState::new());
         let db = DbService::new();
-        let (controller, tx_cmd, mut rx_event) =
-            AppController::new(state.clone(), db, test_session(), test_history_path());
+        let (controller, tx_cmd, mut rx_event) = AppController::new(
+            state.clone(),
+            db,
+            test_session(),
+            test_history_path(),
+            test_metadata_path(),
+        );
 
         let bad = DbConnection {
             id: "tbad".to_string(),
@@ -372,8 +425,13 @@ mod tests {
     async fn connect_should_send_connected_event_on_success() {
         let state = Arc::new(AppState::new());
         let db = DbService::new();
-        let (controller, tx_cmd, mut rx_event) =
-            AppController::new(state.clone(), db, test_session(), test_history_path());
+        let (controller, tx_cmd, mut rx_event) = AppController::new(
+            state.clone(),
+            db,
+            test_session(),
+            test_history_path(),
+            test_metadata_path(),
+        );
 
         tx_cmd
             .send(Command::Connect(sqlite_conn("c1"), None))
@@ -392,8 +450,13 @@ mod tests {
     async fn connect_should_send_connect_error_on_invalid_url() {
         let state = Arc::new(AppState::new());
         let db = DbService::new();
-        let (controller, tx_cmd, mut rx_event) =
-            AppController::new(state.clone(), db, test_session(), test_history_path());
+        let (controller, tx_cmd, mut rx_event) = AppController::new(
+            state.clone(),
+            db,
+            test_session(),
+            test_history_path(),
+            test_metadata_path(),
+        );
 
         let bad = DbConnection {
             id: "bad".to_string(),
@@ -419,8 +482,13 @@ mod tests {
     async fn disconnect_should_send_disconnected_event() {
         let state = Arc::new(AppState::new());
         let db = DbService::new();
-        let (controller, tx_cmd, mut rx_event) =
-            AppController::new(state.clone(), db, test_session(), test_history_path());
+        let (controller, tx_cmd, mut rx_event) = AppController::new(
+            state.clone(),
+            db,
+            test_session(),
+            test_history_path(),
+            test_metadata_path(),
+        );
 
         tx_cmd
             .send(Command::Connect(sqlite_conn("c2"), None))
@@ -432,11 +500,17 @@ mod tests {
             .unwrap();
         drop(tx_cmd);
 
-        controller.run().await;
+        tokio::spawn(controller.run());
 
         let e1 = rx_event.recv().await.unwrap();
         assert!(matches!(e1, Event::Connected(_)));
-        let e2 = rx_event.recv().await.unwrap();
+        // Drain any MetadataLoaded/MetadataFetchFailed from the background fetch.
+        let e2 = loop {
+            match rx_event.recv().await.unwrap() {
+                Event::MetadataLoaded(_) | Event::MetadataFetchFailed(_) => continue,
+                e => break e,
+            }
+        };
         assert!(matches!(e2, Event::Disconnected(ref id) if id == "c2"));
     }
 
@@ -446,8 +520,13 @@ mod tests {
     async fn run_query_should_send_query_started_then_finished() {
         let state = Arc::new(AppState::new());
         let db = DbService::new();
-        let (controller, tx_cmd, mut rx_event) =
-            AppController::new(state.clone(), db, test_session(), test_history_path());
+        let (controller, tx_cmd, mut rx_event) = AppController::new(
+            state.clone(),
+            db,
+            test_session(),
+            test_history_path(),
+            test_metadata_path(),
+        );
 
         // Connect first so there is an active connection.
         tx_cmd
@@ -464,7 +543,13 @@ mod tests {
 
         let e1 = rx_event.recv().await.unwrap();
         assert!(matches!(e1, Event::Connected(_)));
-        let e2 = rx_event.recv().await.unwrap();
+        // Drain any MetadataLoaded/MetadataFetchFailed before QueryStarted.
+        let e2 = loop {
+            match rx_event.recv().await.unwrap() {
+                Event::MetadataLoaded(_) | Event::MetadataFetchFailed(_) => continue,
+                e => break e,
+            }
+        };
         assert!(matches!(e2, Event::QueryStarted));
         let e3 = rx_event.recv().await.unwrap();
         assert!(matches!(e3, Event::QueryFinished(_)));
@@ -474,8 +559,13 @@ mod tests {
     async fn run_query_should_send_query_error_when_no_active_connection() {
         let state = Arc::new(AppState::new());
         let db = DbService::new();
-        let (controller, tx_cmd, mut rx_event) =
-            AppController::new(state.clone(), db, test_session(), test_history_path());
+        let (controller, tx_cmd, mut rx_event) = AppController::new(
+            state.clone(),
+            db,
+            test_session(),
+            test_history_path(),
+            test_metadata_path(),
+        );
 
         tx_cmd
             .send(Command::RunQuery("SELECT 1".to_string()))
@@ -493,8 +583,13 @@ mod tests {
     async fn cancel_query_should_send_query_cancelled_event() {
         let state = Arc::new(AppState::new());
         let db = DbService::new();
-        let (controller, tx_cmd, mut rx_event) =
-            AppController::new(state.clone(), db, test_session(), test_history_path());
+        let (controller, tx_cmd, mut rx_event) = AppController::new(
+            state.clone(),
+            db,
+            test_session(),
+            test_history_path(),
+            test_metadata_path(),
+        );
 
         tx_cmd.send(Command::CancelQuery).await.unwrap();
         drop(tx_cmd);
@@ -506,11 +601,45 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn connect_should_send_metadata_loaded_after_connected() {
+        let state = Arc::new(AppState::new());
+        let db = DbService::new();
+        let (controller, tx_cmd, mut rx_event) = AppController::new(
+            state.clone(),
+            db,
+            test_session(),
+            test_history_path(),
+            test_metadata_path(),
+        );
+
+        tx_cmd
+            .send(Command::Connect(sqlite_conn("meta-1"), None))
+            .await
+            .unwrap();
+        drop(tx_cmd);
+
+        tokio::spawn(controller.run());
+
+        let e1 = rx_event.recv().await.unwrap();
+        assert!(matches!(e1, Event::Connected(_)));
+        let e2 = rx_event.recv().await.unwrap();
+        assert!(
+            matches!(e2, Event::MetadataLoaded(_) | Event::MetadataFetchFailed(_)),
+            "expected MetadataLoaded or MetadataFetchFailed, got {e2:?}"
+        );
+    }
+
+    #[tokio::test]
     async fn connect_twice_should_not_duplicate_in_state() {
         let state = Arc::new(AppState::new());
         let db = DbService::new();
-        let (controller, tx_cmd, mut rx_event) =
-            AppController::new(state.clone(), db, test_session(), test_history_path());
+        let (controller, tx_cmd, mut rx_event) = AppController::new(
+            state.clone(),
+            db,
+            test_session(),
+            test_history_path(),
+            test_metadata_path(),
+        );
 
         tx_cmd
             .send(Command::Connect(sqlite_conn("c3"), None))
@@ -522,11 +651,17 @@ mod tests {
             .unwrap();
         drop(tx_cmd);
 
-        controller.run().await;
+        tokio::spawn(controller.run());
 
-        // drain events
-        rx_event.recv().await.unwrap();
-        rx_event.recv().await.unwrap();
+        // Drain the 2 Connected events plus any MetadataLoaded/MetadataFetchFailed events.
+        let mut connected_count = 0;
+        while connected_count < 2 {
+            match rx_event.recv().await.unwrap() {
+                Event::Connected(_) => connected_count += 1,
+                Event::MetadataLoaded(_) | Event::MetadataFetchFailed(_) => {}
+                _ => {}
+            }
+        }
 
         assert_eq!(state.conn.all().len(), 1, "conn should not be duplicated");
     }
