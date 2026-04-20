@@ -129,373 +129,475 @@ export component AppWindow inherits Window {
     // Height of the tab-bar strip at the top of the panel (below the drag handle).
     property <length> panel-header-height: 28px;
 
-    // ── Sidebar ───────────────────────────────────────────────────────────────
-    Sidebar {
-        x: 0;
-        y: 0;
-        width:  sidebar-width;
-        height: content-height;
-        tree:       UiState.sidebar-tree;
-        is-loading: UiState.sidebar-loading;
-        toggle-node(id) => { UiState.toggle-sidebar-node(id); }
-        table-double-clicked(name) => { UiState.table-double-clicked(name); }
-        add-connection => { UiState.open-connection-form(); }
+    // ── Pane focus tracking ───────────────────────────────────────────────────
+    // 0=sidebar  1=editor  2=result
+    property <int> focused-pane: 1;
+
+    // Sync focused-pane when the editor gains focus by mouse click.
+    // editor-inst is a named element so it is accessible here even though it is
+    // defined inside the FocusScope child below.
+    property <bool> _editor-active: editor-inst.editor-focused;
+    changed _editor-active => {
+        if (root._editor-active) {
+            root.focused-pane = 1;
+        }
     }
 
-    // ── Main content panel ────────────────────────────────────────────────────
-    // Single container for all content right of the sidebar.
-    // Layout within the container:
-    //
-    //   x=0 .. gutter-col-width   : shared gutter column (spans full height)
-    //   x=gutter-col-width .. end : editor text area / divider / result table
-    //
-    // The gutter column renders line numbers by reading out-properties from
-    // editor-inst.  All three panels (editor, divider, result) start at the same
-    // x and share the same width, so they are always perfectly aligned.
-    Rectangle {
-        x: sidebar-width;
+    // ── Root key-intercept FocusScope ─────────────────────────────────────────
+    // Wraps all content so that capture-key-pressed fires whenever any descendant
+    // (e.g. the editor's TextInput) has keyboard focus.  focus-on-click: false
+    // prevents the FocusScope from stealing focus from its children on click.
+    FocusScope {
+        x: 0;
         y: 0;
-        width:  main-width;
-        height: content-height;
-        clip: true;
+        width:  root.width;
+        height: root.height;
+        focus-on-click: false;
 
-        // ── Shared gutter column ──────────────────────────────────────────────
-        // Spans the full content height so the gutter visually extends through
-        // the divider and result area, giving a consistent left anchor.
-        Rectangle {
-            x: 0;
-            y: 0;
-            width:  root.gutter-col-width;
-            height: parent.height;
-            background: #1e1e2e;
-            clip: true;
-
-            for i in editor-inst.gutter-vis-count: Text {
-                property <int> line-nr: editor-inst.gutter-vis-first + i;
-                y:      line-nr * editor-inst.gutter-line-h + editor-inst.gutter-scroll-y;
-                height: editor-inst.gutter-line-h;
-                width:  root.gutter-col-width - 8px;
-                text:   "\{line-nr + 1}";
-                color:  line-nr == editor-inst.current-line ? #cdd6f4 : #585b70;
-                font-family: UiState.font-family;
-                font-size:   UiState.font-size * 1px;
-                horizontal-alignment: right;
-                vertical-alignment:   center;
+        capture-key-pressed(event) => {
+            // Don't intercept while a modal overlay is open.
+            if (UiState.show-connection-form
+                    || UiState.show-test-result-popup
+                    || UiState.show-add-confirm-popup) {
+                EventResult.reject
+            } else if (event.modifiers.alt
+                    && !event.modifiers.shift
+                    && !event.modifiers.control) {
+                if (event.text == Key.RightArrow) {
+                    if (root.focused-pane == 0) {
+                        root.focused-pane = 1;
+                        editor-inst.grab-focus();
+                    }
+                    EventResult.accept
+                } else if (event.text == Key.LeftArrow) {
+                    if (root.focused-pane == 1) {
+                        root.focused-pane = 0;
+                    }
+                    EventResult.accept
+                } else if (event.text == Key.DownArrow) {
+                    if (root.focused-pane == 1) {
+                        root.focused-pane = 2;
+                    }
+                    EventResult.accept
+                } else if (event.text == Key.UpArrow) {
+                    if (root.focused-pane == 2) {
+                        root.focused-pane = 1;
+                        editor-inst.grab-focus();
+                    }
+                    EventResult.accept
+                } else {
+                    EventResult.reject
+                }
+            } else {
+                EventResult.reject
             }
         }
 
-        // ── SQL editor (text area only — gutter is the sibling above) ─────────
-        // Always fills the full content height; the result panel overlays it.
-        editor-inst := Editor {
-            x: root.gutter-col-width;
+        // ── Sidebar ───────────────────────────────────────────────────────────
+        Sidebar {
+            x: 0;
             y: 0;
-            width:  parent.width - root.gutter-col-width;
-            height: parent.height;
-            text         <=> UiState.editor-text;
-            font-family:     UiState.font-family;
-            font-size-px:    UiState.font-size;
-            line-count:      UiState.count-lines(UiState.editor-text);
-            cursor-line(text, pos) => { UiState.cursor-line(text, pos); }
-            move-cursor-line(text, pos, delta) => { UiState.move-cursor-line(text, pos, delta); }
-            run-query => { UiState.run-query(UiState.editor-text); }
-            toggle-panel => { UiState.result-panel-open = !UiState.result-panel-open; }
+            width:  sidebar-width;
+            height: content-height;
+            tree:       UiState.sidebar-tree;
+            is-loading: UiState.sidebar-loading;
+            toggle-node(id) => { UiState.toggle-sidebar-node(id); }
+            table-double-clicked(name) => { UiState.table-double-clicked(name); }
+            add-connection => { UiState.open-connection-form(); }
         }
 
-        // ── Result / error overlay panel ──────────────────────────────────────
-        // Overlays the editor from the bottom (VSCode-style).
-        // Visible only when UiState.result-panel-open is true.
-        if UiState.result-panel-open: Rectangle {
-            x: root.gutter-col-width;
-            y: parent.height - root.panel-height;
-            width:  parent.width - root.gutter-col-width;
-            height: root.panel-height;
-            background: #1e1e2e;
+        // ── Main content panel ────────────────────────────────────────────────
+        // Single container for all content right of the sidebar.
+        // Layout within the container:
+        //
+        //   x=0 .. gutter-col-width   : shared gutter column (spans full height)
+        //   x=gutter-col-width .. end : editor text area / divider / result table
+        //
+        // The gutter column renders line numbers by reading out-properties from
+        // editor-inst.  All three panels (editor, divider, result) start at the same
+        // x and share the same width, so they are always perfectly aligned.
+        Rectangle {
+            x: sidebar-width;
+            y: 0;
+            width:  main-width;
+            height: content-height;
             clip: true;
 
-            // ── Top drag handle ───────────────────────────────────────────────
-            // Dragging this edge adjusts panel-height (panel grows/shrinks upward).
+            // ── Shared gutter column ──────────────────────────────────────────
+            // Spans the full content height so the gutter visually extends through
+            // the divider and result area, giving a consistent left anchor.
             Rectangle {
                 x: 0;
                 y: 0;
-                width:  parent.width;
-                height: root.divider-thickness;
-                background: #313244;
+                width:  root.gutter-col-width;
+                height: parent.height;
+                background: #1e1e2e;
+                clip: true;
 
-                states [
-                    active when panel-drag-ta.has-hover || panel-drag-ta.pressed: {
-                        background: #585b70;
-                    }
-                ]
-
-                panel-drag-ta := TouchArea {
-                    mouse-cursor: ns-resize;
-
-                    // Each `moved` event: mouse-y is relative to the current element
-                    // position, which itself moves as panel-height changes.  Using the
-                    // snapshot-and-delta approach would accumulate drift.  Instead we
-                    // compute the incremental correction each frame:
-                    //
-                    //   cursor_abs = (container_height - ph) + mouse_y_rel
-                    //   desired panel_top = cursor_abs - pressed_y
-                    //   → ph_new = ph_current + (pressed_y - mouse_y_rel)
-                    //
-                    // After the update the element repositions so that mouse_y_rel
-                    // equals pressed_y when the cursor is stationary — zero drift.
-                    moved => {
-                        root.panel-height = clamp(
-                            root.panel-height + (self.pressed-y - self.mouse-y),
-                            80px,
-                            root.content-height - 40px
-                        );
-                    }
+                for i in editor-inst.gutter-vis-count: Text {
+                    property <int> line-nr: editor-inst.gutter-vis-first + i;
+                    y:      line-nr * editor-inst.gutter-line-h + editor-inst.gutter-scroll-y;
+                    height: editor-inst.gutter-line-h;
+                    width:  root.gutter-col-width - 8px;
+                    text:   "\{line-nr + 1}";
+                    color:  line-nr == editor-inst.current-line ? #cdd6f4 : #585b70;
+                    font-family: UiState.font-family;
+                    font-size:   UiState.font-size * 1px;
+                    horizontal-alignment: right;
+                    vertical-alignment:   center;
                 }
             }
 
-            // ── Panel header (tab label + close button) ───────────────────────
-            Rectangle {
-                x: 0;
-                y: root.divider-thickness;
-                width:  parent.width;
-                height: root.panel-header-height;
-                background: #313244;
+            // ── SQL editor (text area only — gutter is the sibling above) ─────────
+            // Always fills the full content height; the result panel overlays it.
+            editor-inst := Editor {
+                x: root.gutter-col-width;
+                y: 0;
+                width:  parent.width - root.gutter-col-width;
+                height: parent.height;
+                text         <=> UiState.editor-text;
+                font-family:     UiState.font-family;
+                font-size-px:    UiState.font-size;
+                line-count:      UiState.count-lines(UiState.editor-text);
+                cursor-line(text, pos) => { UiState.cursor-line(text, pos); }
+                move-cursor-line(text, pos, delta) => { UiState.move-cursor-line(text, pos, delta); }
+                run-query => { UiState.run-query(UiState.editor-text); }
+                toggle-panel => { UiState.result-panel-open = !UiState.result-panel-open; }
+            }
 
-                // Tab label
-                Text {
-                    x: 12px;
-                    y: (parent.height - self.height) / 2;
-                    text: UiState.error-message != "" ? @tr("Error") : @tr("Results");
-                    color: UiState.error-message != "" ? #f38ba8 : #cdd6f4;
-                    font-size: 12px;
-                    font-weight: 600;
-                }
+            // ── Result / error overlay panel ──────────────────────────────────
+            // Overlays the editor from the bottom (VSCode-style).
+            // Visible only when UiState.result-panel-open is true.
+            if UiState.result-panel-open: Rectangle {
+                x: root.gutter-col-width;
+                y: parent.height - root.panel-height;
+                width:  parent.width - root.gutter-col-width;
+                height: root.panel-height;
+                background: #1e1e2e;
+                clip: true;
 
-                // Close button
+                // ── Top drag handle ───────────────────────────────────────────
+                // Dragging this edge adjusts panel-height (panel grows/shrinks upward).
                 Rectangle {
-                    x: parent.width - root.panel-header-height;
+                    x: 0;
                     y: 0;
-                    width:  root.panel-header-height;
-                    height: root.panel-header-height;
-                    border-radius: 2px;
+                    width:  parent.width;
+                    height: root.divider-thickness;
+                    background: #313244;
 
                     states [
-                        hovered when close-ta.has-hover: {
-                            background: #45475a;
+                        active when panel-drag-ta.has-hover || panel-drag-ta.pressed: {
+                            background: #585b70;
                         }
                     ]
 
+                    panel-drag-ta := TouchArea {
+                        mouse-cursor: ns-resize;
+
+                        // Each `moved` event: mouse-y is relative to the current element
+                        // position, which itself moves as panel-height changes.  Using the
+                        // snapshot-and-delta approach would accumulate drift.  Instead we
+                        // compute the incremental correction each frame:
+                        //
+                        //   cursor_abs = (container_height - ph) + mouse_y_rel
+                        //   desired panel_top = cursor_abs - pressed_y
+                        //   → ph_new = ph_current + (pressed_y - mouse_y_rel)
+                        //
+                        // After the update the element repositions so that mouse_y_rel
+                        // equals pressed_y when the cursor is stationary — zero drift.
+                        moved => {
+                            root.panel-height = clamp(
+                                root.panel-height + (self.pressed-y - self.mouse-y),
+                                80px,
+                                root.content-height - 40px
+                            );
+                        }
+                    }
+                }
+
+                // ── Panel header (tab label + close button) ───────────────────
+                Rectangle {
+                    x: 0;
+                    y: root.divider-thickness;
+                    width:  parent.width;
+                    height: root.panel-header-height;
+                    background: #313244;
+
+                    // Tab label
                     Text {
-                        text: "×";
-                        color: #585b70;
-                        font-size: 16px;
-                        horizontal-alignment: center;
-                        vertical-alignment:   center;
+                        x: 12px;
+                        y: (parent.height - self.height) / 2;
+                        text: UiState.error-message != "" ? @tr("Error") : @tr("Results");
+                        color: UiState.error-message != "" ? #f38ba8 : #cdd6f4;
+                        font-size: 12px;
+                        font-weight: 600;
                     }
 
-                    close-ta := TouchArea {
-                        clicked => { UiState.result-panel-open = false; }
-                    }
-                }
-            }
+                    // Close button
+                    Rectangle {
+                        x: parent.width - root.panel-header-height;
+                        y: 0;
+                        width:  root.panel-header-height;
+                        height: root.panel-header-height;
+                        border-radius: 2px;
 
-            // ── Result table content ──────────────────────────────────────────
-            ResultTable {
-                x: 0;
-                y: root.divider-thickness + root.panel-header-height;
-                width:  parent.width;
-                height: root.panel-height - root.divider-thickness - root.panel-header-height;
-                columns:          UiState.result-columns;
-                rows:             UiState.result-rows;
-                row-count:        UiState.result-row-count;
-                is-loading:       UiState.is-loading;
-                error-message:    UiState.error-message;
-                col-widths:       UiState.result-col-widths;
-                total-col-width:  UiState.result-total-col-width;
-                resize-column(i, w) => { UiState.resize-result-column(i, w); }
-            }
-        }
-    }
-
-    // ── Status bar ────────────────────────────────────────────────────────────
-    StatusBar {
-        x: 0;
-        y: content-height;
-        width:  root.width;
-        height: 24px;
-        connection-text: UiState.status-connection;
-        query-status:    UiState.status-message;
-    }
-
-    // ── Connection form modal overlay ─────────────────────────────────────────
-    // Rendered last so it appears above everything else.
-    if UiState.show-connection-form: Rectangle {
-        x: 0;
-        y: 0;
-        width:  root.width;
-        height: root.height;
-        background: #00000088;
-
-        ConnectionForm {
-            x: (parent.width  - self.width)  / 2;
-            y: (parent.height - self.height) / 2;
-
-            tab-index   <=> UiState.form-tab-index;
-            db-type     <=> UiState.form-db-type;
-            name        <=> UiState.form-name;
-            conn-string <=> UiState.form-conn-string;
-            host        <=> UiState.form-host;
-            port        <=> UiState.form-port;
-            user        <=> UiState.form-user;
-            password    <=> UiState.form-password;
-            database    <=> UiState.form-database;
-            status      <=> UiState.form-status;
-            testing     <=> UiState.form-testing;
-
-            cancel => { UiState.close-connection-form(); }
-            test-connection => { UiState.test-connection(); }
-            add-connection => { UiState.add-connection(); }
-            test-ok: UiState.form-test-ok;
-        }
-    }
-
-    // ── Test-result popup ─────────────────────────────────────────────────────
-    // Shown after Test Connection completes (success or failure).
-    // Rendered after the connection-form overlay so it appears on top.
-    if UiState.show-test-result-popup: Rectangle {
-        x: 0;
-        y: 0;
-        width:  root.width;
-        height: root.height;
-        background: #00000099;
-
-        VerticalLayout {
-            alignment: center;
-            HorizontalLayout {
-                alignment: center;
-                Rectangle {
-                    width: 360px;
-                    background: #313244;
-                    border-radius: 8px;
-                    border-width: 1px;
-                    border-color: #585b70;
-                    drop-shadow-blur: 20px;
-                    drop-shadow-color: #00000088;
-
-                    VerticalLayout {
-                        padding: 24px;
-                        spacing: 16px;
-                        alignment: start;
-
-                        Text {
-                            text: UiState.test-result-ok
-                                ? @tr("Connection Successful")
-                                : @tr("Connection Failed");
-                            color: UiState.test-result-ok ? #a6e3a1 : #f38ba8;
-                            font-size: 15px;
-                            font-weight: 700;
-                            horizontal-alignment: center;
-                        }
-
-                        if !UiState.test-result-ok: Text {
-                            text: UiState.test-result-message;
-                            color: #cdd6f4;
-                            font-size: 12px;
-                            wrap: word-wrap;
-                            horizontal-alignment: center;
-                        }
-
-                        HorizontalLayout {
-                            alignment: center;
-                            Rectangle {
-                                width: 80px;
-                                height: 32px;
-                                background: #89b4fa;
-                                border-radius: 4px;
-                                Text {
-                                    text: @tr("OK");
-                                    color: #1e1e2e;
-                                    horizontal-alignment: center;
-                                    vertical-alignment: center;
-                                }
-                                TouchArea { clicked => { UiState.dismiss-test-popup(); } }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    // ── Add-without-test confirmation popup ───────────────────────────────────
-    // Shown when the user clicks Add before a successful Test Connection.
-    if UiState.show-add-confirm-popup: Rectangle {
-        x: 0;
-        y: 0;
-        width:  root.width;
-        height: root.height;
-        background: #00000099;
-
-        VerticalLayout {
-            alignment: center;
-            HorizontalLayout {
-                alignment: center;
-                Rectangle {
-                    width: 360px;
-                    background: #313244;
-                    border-radius: 8px;
-                    border-width: 1px;
-                    border-color: #585b70;
-                    drop-shadow-blur: 20px;
-                    drop-shadow-color: #00000088;
-
-                    VerticalLayout {
-                        padding: 24px;
-                        spacing: 16px;
-                        alignment: start;
-
-                        Text {
-                            text: @tr("Warning");
-                            color: #f9e2af;
-                            font-size: 15px;
-                            font-weight: 700;
-                        }
-
-                        Text {
-                            text: @tr("Connection test was not successful. Add anyway?");
-                            color: #cdd6f4;
-                            font-size: 13px;
-                            wrap: word-wrap;
-                        }
-
-                        HorizontalLayout {
-                            spacing: 8px;
-                            alignment: end;
-
-                            Rectangle {
-                                width: 80px;
-                                height: 32px;
+                        states [
+                            hovered when close-ta.has-hover: {
                                 background: #45475a;
-                                border-radius: 4px;
-                                Text {
-                                    text: @tr("No");
-                                    color: #cdd6f4;
-                                    horizontal-alignment: center;
-                                    vertical-alignment: center;
-                                }
-                                TouchArea { clicked => { UiState.dismiss-add-confirm(); } }
+                            }
+                        ]
+
+                        Text {
+                            text: "×";
+                            color: #585b70;
+                            font-size: 16px;
+                            horizontal-alignment: center;
+                            vertical-alignment:   center;
+                        }
+
+                        close-ta := TouchArea {
+                            clicked => { UiState.result-panel-open = false; }
+                        }
+                    }
+                }
+
+                // ── Result table content ──────────────────────────────────────
+                ResultTable {
+                    x: 0;
+                    y: root.divider-thickness + root.panel-header-height;
+                    width:  parent.width;
+                    height: root.panel-height - root.divider-thickness - root.panel-header-height;
+                    columns:          UiState.result-columns;
+                    rows:             UiState.result-rows;
+                    row-count:        UiState.result-row-count;
+                    is-loading:       UiState.is-loading;
+                    error-message:    UiState.error-message;
+                    col-widths:       UiState.result-col-widths;
+                    total-col-width:  UiState.result-total-col-width;
+                    resize-column(i, w) => { UiState.resize-result-column(i, w); }
+                }
+            }
+        }
+
+        // ── Status bar ────────────────────────────────────────────────────────
+        StatusBar {
+            x: 0;
+            y: content-height;
+            width:  root.width;
+            height: 24px;
+            connection-text: UiState.status-connection;
+            query-status:    UiState.status-message;
+        }
+
+        // ── Pane focus border indicators ──────────────────────────────────────
+        // Rendered after the main content so they appear on top of the panes,
+        // but before the modal overlays so modals cover the borders.
+
+        // Sidebar focus border
+        if root.focused-pane == 0: Rectangle {
+            x: 0;
+            y: 0;
+            width:  sidebar-width;
+            height: content-height;
+            border-width: 2px;
+            border-color: #89b4fa;
+            background: transparent;
+        }
+
+        // Editor / main-content pane focus border
+        if root.focused-pane == 1: Rectangle {
+            x: sidebar-width;
+            y: 0;
+            width:  main-width;
+            height: content-height;
+            border-width: 2px;
+            border-color: #89b4fa;
+            background: transparent;
+        }
+
+        // Result-table pane focus border (only visible when the panel is open)
+        if root.focused-pane == 2 && UiState.result-panel-open: Rectangle {
+            x: sidebar-width;
+            y: content-height - panel-height;
+            width:  main-width;
+            height: panel-height;
+            border-width: 2px;
+            border-color: #89b4fa;
+            background: transparent;
+        }
+
+        // ── Connection form modal overlay ─────────────────────────────────────
+        // Rendered last so it appears above everything else.
+        if UiState.show-connection-form: Rectangle {
+            x: 0;
+            y: 0;
+            width:  root.width;
+            height: root.height;
+            background: #00000088;
+
+            ConnectionForm {
+                x: (parent.width  - self.width)  / 2;
+                y: (parent.height - self.height) / 2;
+
+                tab-index   <=> UiState.form-tab-index;
+                db-type     <=> UiState.form-db-type;
+                name        <=> UiState.form-name;
+                conn-string <=> UiState.form-conn-string;
+                host        <=> UiState.form-host;
+                port        <=> UiState.form-port;
+                user        <=> UiState.form-user;
+                password    <=> UiState.form-password;
+                database    <=> UiState.form-database;
+                status      <=> UiState.form-status;
+                testing     <=> UiState.form-testing;
+
+                cancel => { UiState.close-connection-form(); }
+                test-connection => { UiState.test-connection(); }
+                add-connection => { UiState.add-connection(); }
+                test-ok: UiState.form-test-ok;
+            }
+        }
+
+        // ── Test-result popup ─────────────────────────────────────────────────
+        // Shown after Test Connection completes (success or failure).
+        // Rendered after the connection-form overlay so it appears on top.
+        if UiState.show-test-result-popup: Rectangle {
+            x: 0;
+            y: 0;
+            width:  root.width;
+            height: root.height;
+            background: #00000099;
+
+            VerticalLayout {
+                alignment: center;
+                HorizontalLayout {
+                    alignment: center;
+                    Rectangle {
+                        width: 360px;
+                        background: #313244;
+                        border-radius: 8px;
+                        border-width: 1px;
+                        border-color: #585b70;
+                        drop-shadow-blur: 20px;
+                        drop-shadow-color: #00000088;
+
+                        VerticalLayout {
+                            padding: 24px;
+                            spacing: 16px;
+                            alignment: start;
+
+                            Text {
+                                text: UiState.test-result-ok
+                                    ? @tr("Connection Successful")
+                                    : @tr("Connection Failed");
+                                color: UiState.test-result-ok ? #a6e3a1 : #f38ba8;
+                                font-size: 15px;
+                                font-weight: 700;
+                                horizontal-alignment: center;
                             }
 
-                            Rectangle {
-                                width: 80px;
-                                height: 32px;
-                                background: #f38ba8;
-                                border-radius: 4px;
-                                Text {
-                                    text: @tr("Yes");
-                                    color: #1e1e2e;
-                                    horizontal-alignment: center;
-                                    vertical-alignment: center;
+                            if !UiState.test-result-ok: Text {
+                                text: UiState.test-result-message;
+                                color: #cdd6f4;
+                                font-size: 12px;
+                                wrap: word-wrap;
+                                horizontal-alignment: center;
+                            }
+
+                            HorizontalLayout {
+                                alignment: center;
+                                Rectangle {
+                                    width: 80px;
+                                    height: 32px;
+                                    background: #89b4fa;
+                                    border-radius: 4px;
+                                    Text {
+                                        text: @tr("OK");
+                                        color: #1e1e2e;
+                                        horizontal-alignment: center;
+                                        vertical-alignment: center;
+                                    }
+                                    TouchArea { clicked => { UiState.dismiss-test-popup(); } }
                                 }
-                                TouchArea { clicked => { UiState.confirm-add-connection(); } }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // ── Add-without-test confirmation popup ───────────────────────────────
+        // Shown when the user clicks Add before a successful Test Connection.
+        if UiState.show-add-confirm-popup: Rectangle {
+            x: 0;
+            y: 0;
+            width:  root.width;
+            height: root.height;
+            background: #00000099;
+
+            VerticalLayout {
+                alignment: center;
+                HorizontalLayout {
+                    alignment: center;
+                    Rectangle {
+                        width: 360px;
+                        background: #313244;
+                        border-radius: 8px;
+                        border-width: 1px;
+                        border-color: #585b70;
+                        drop-shadow-blur: 20px;
+                        drop-shadow-color: #00000088;
+
+                        VerticalLayout {
+                            padding: 24px;
+                            spacing: 16px;
+                            alignment: start;
+
+                            Text {
+                                text: @tr("Warning");
+                                color: #f9e2af;
+                                font-size: 15px;
+                                font-weight: 700;
+                            }
+
+                            Text {
+                                text: @tr("Connection test was not successful. Add anyway?");
+                                color: #cdd6f4;
+                                font-size: 13px;
+                                wrap: word-wrap;
+                            }
+
+                            HorizontalLayout {
+                                spacing: 8px;
+                                alignment: end;
+
+                                Rectangle {
+                                    width: 80px;
+                                    height: 32px;
+                                    background: #45475a;
+                                    border-radius: 4px;
+                                    Text {
+                                        text: @tr("No");
+                                        color: #cdd6f4;
+                                        horizontal-alignment: center;
+                                        vertical-alignment: center;
+                                    }
+                                    TouchArea { clicked => { UiState.dismiss-add-confirm(); } }
+                                }
+
+                                Rectangle {
+                                    width: 80px;
+                                    height: 32px;
+                                    background: #f38ba8;
+                                    border-radius: 4px;
+                                    Text {
+                                        text: @tr("Yes");
+                                        color: #1e1e2e;
+                                        horizontal-alignment: center;
+                                        vertical-alignment: center;
+                                    }
+                                    TouchArea { clicked => { UiState.confirm-add-connection(); } }
+                                }
                             }
                         }
                     }

@@ -85,6 +85,12 @@ export component Editor inherits Rectangle {
     // not stall behind our property computations.
     in-out property <int> current-line: 0;
 
+    /// Exposes TextInput focus state so app.slint can sync its focused-pane property.
+    out property <bool> editor-focused: inner-input.has-focus;
+
+    /// Programmatic focus: called by app.slint when Alt+Arrow navigates to the editor.
+    public function grab-focus() { inner-input.focus(); }
+
     Timer {
         interval: 16ms;
         running: inner-input.has-focus;
