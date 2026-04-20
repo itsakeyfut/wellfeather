@@ -1,4 +1,4 @@
-import { ConnectionEntry, RowData } from "globals.slint";
+import { ConnectionEntry, RowData, SidebarNode } from "globals.slint";
 import { ConnectionForm }  from "components/connection_form.slint";
 import { Sidebar }         from "components/sidebar.slint";
 import { Editor }          from "components/editor.slint";
@@ -43,6 +43,7 @@ export global UiState {
     // ── Connection list (sidebar) ─────────────────────────────────────────────
     in-out property <[ConnectionEntry]> connection-list:      [];
     in-out property <string>            active-connection-id: "";
+    in-out property <[SidebarNode]>     sidebar-tree:         [];
 
     // ── Connection form state ─────────────────────────────────────────────────
     in-out property <bool>   show-connection-form: false;
@@ -86,8 +87,10 @@ export global UiState {
     callback close-connection-form();
     /// Sends Command::TestConnection — verifies the connection without saving it.
     callback test-connection();
-    /// Re-connects an existing saved connection by id.
-    callback switch-connection(string);
+    /// Sidebar node click: expand/collapse + switch active connection for level-0 nodes.
+    callback toggle-sidebar-node(string);
+    /// Table/view item double-click; carries the item name (T045).
+    callback table-double-clicked(string);
     /// "Add" button: persists the connection if test passed, else shows confirm popup.
     callback add-connection();
     /// "Yes" in the add-without-test confirm popup.
@@ -132,8 +135,10 @@ export component AppWindow inherits Window {
         y: 0;
         width:  sidebar-width;
         height: content-height;
-        connections: UiState.connection-list;
-        switch-connection(id) => { UiState.switch-connection(id); }
+        tree:       UiState.sidebar-tree;
+        is-loading: UiState.sidebar-loading;
+        toggle-node(id) => { UiState.toggle-sidebar-node(id); }
+        table-double-clicked(name) => { UiState.table-double-clicked(name); }
         add-connection => { UiState.open-connection-form(); }
     }
 

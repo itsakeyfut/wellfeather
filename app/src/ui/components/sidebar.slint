@@ -1,42 +1,94 @@
-import { ConnectionEntry } from "../globals.slint";
+import { SidebarNode } from "../globals.slint";
 
 export component Sidebar inherits Rectangle {
     background: #1e1e2e;
 
-    in property <[ConnectionEntry]> connections: [];
-    callback switch-connection(string);
+    in property <[SidebarNode]> tree: [];
+    in property <bool> is-loading: false;
+    callback toggle-node(string);
+    callback table-double-clicked(string);
     callback add-connection();
 
     VerticalLayout {
-        // ── Connection list ───────────────────────────────────────────────────
-        for conn in root.connections: Rectangle {
-            height: 36px;
-            background: conn.is-active ? #313244 : transparent;
+        // ── Schema tree ───────────────────────────────────────────────────────
+        for node in root.tree : Rectangle {
+            height: 32px;
+            clip: true;
+
+            background: node.is-active && node.level == 0 ? #313244 : transparent;
+
+            ta := TouchArea {
+                width: parent.width;
+                height: parent.height;
+                clicked => { root.toggle-node(node.id); }
+                double-clicked => {
+                    if node.node-kind == "table" || node.node-kind == "view" {
+                        root.table-double-clicked(node.label);
+                    }
+                }
+            }
+
+            // Hover overlay (skipped for the active connection row)
+            Rectangle {
+                background: ta.has-hover && !(node.is-active && node.level == 0)
+                    ? #ffffff0d : transparent;
+                width: parent.width;
+                height: parent.height;
+            }
 
             HorizontalLayout {
-                padding-left: 12px;
+                x: 0; y: 0;
+                width: parent.width;
+                height: parent.height;
+                padding-left: (8 + node.level * 14) * 1px;
                 padding-right: 8px;
-                spacing: 6px;
+                spacing: 4px;
+
+                // Expand/collapse toggle icon for connection and category nodes
+                if node.level < 2 : Text {
+                    text: node.is-expanded ? "▼" : "▶";
+                    color: #585b70;
+                    font-size: 9px;
+                    vertical-alignment: center;
+                    width: 14px;
+                }
+                // Spacer for item nodes
+                if node.level >= 2 : Rectangle { width: 14px; }
+
+                // Main label
                 Text {
-                    text: conn.name;
-                    color: conn.is-active ? #cdd6f4 : #a6adc8;
+                    text: node.label;
+                    color: node.level == 0
+                        ? (node.is-active ? #cdd6f4 : #bac2de)
+                        : (node.level == 1 ? #7f849c : #a6adc8);
+                    font-size: node.level == 0 ? 13px : 12px;
                     vertical-alignment: center;
                     overflow: elide;
                     horizontal-stretch: 1;
                 }
-                Text {
-                    text: conn.db-type;
+
+                // Sub-label badge (db-type for connection nodes)
+                if node.sub-label != "" : Text {
+                    text: node.sub-label;
                     color: #585b70;
-                    font-size: 11px;
+                    font-size: 10px;
                     vertical-alignment: center;
                 }
             }
+        }
 
-            // Click area on top to intercept pointer events
-            TouchArea {
-                width: parent.width;
-                height: parent.height;
-                clicked => { root.switch-connection(conn.id); }
+        // ── Metadata loading indicator ────────────────────────────────────────
+        if root.is-loading : Rectangle {
+            height: 28px;
+            HorizontalLayout {
+                padding-left: 24px;
+                Text {
+                    text: @tr("Loading\u{2026}");
+                    color: #585b70;
+                    font-size: 11px;
+                    vertical-alignment: center;
+                    font-italic: true;
+                }
             }
         }
 

@@ -12,3 +12,13 @@ export struct ConnectionEntry {
 export struct RowData {
     cells: [string],
 }
+
+export struct SidebarNode {
+    id: string,         // "conn:{id}" | "cat:{id}:{name}" | "item:{id}:{kind}:{name}"
+    label: string,
+    sub-label: string,  // db-type badge for connections; "" otherwise
+    level: int,         // 0=connection, 1=category, 2=item
+    is-expanded: bool,
+    is-active: bool,    // true for the active connection (level 0 only)
+    node-kind: string,  // "connection" | "category" | "table" | "view" | "proc" | "index"
+}
