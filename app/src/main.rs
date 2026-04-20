@@ -63,6 +63,7 @@ fn main() -> anyhow::Result<()> {
         db,
         session,
         ConfigManager::app_dir().join("history.db"),
+        ConfigManager::app_dir().join("metadata.db"),
     );
     tokio::spawn(controller.run());
 

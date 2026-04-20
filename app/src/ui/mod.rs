@@ -98,6 +98,7 @@ impl UI {
                             ui.set_form_status("".into());
                             ui.set_error_message("".into());
                             ui.set_status_connection(status_conn.into());
+                            ui.set_sidebar_loading(true);
                         });
                     }
                     Event::TestConnectionOk => {
@@ -257,6 +258,29 @@ impl UI {
                             let ui = window.global::<crate::UiState>();
                             ui.set_status_message(format!("Disconnected: {id}").into());
                             ui.set_status_connection("Not connected".into());
+                        });
+                    }
+                    Event::MetadataLoaded(_) => {
+                        // clone required: invoke_from_event_loop closure must be 'static
+                        let window_weak = window_weak.clone();
+                        let _ = slint::invoke_from_event_loop(move || {
+                            let Some(window) = window_weak.upgrade() else {
+                                return;
+                            };
+                            window.global::<crate::UiState>().set_sidebar_loading(false);
+                        });
+                    }
+                    Event::MetadataFetchFailed(ref msg) => {
+                        let msg = msg.clone();
+                        // clone required: invoke_from_event_loop closure must be 'static
+                        let window_weak = window_weak.clone();
+                        let _ = slint::invoke_from_event_loop(move || {
+                            let Some(window) = window_weak.upgrade() else {
+                                return;
+                            };
+                            let ui = window.global::<crate::UiState>();
+                            ui.set_sidebar_loading(false);
+                            ui.set_status_message(format!("Metadata unavailable: {msg}").into());
                         });
                     }
                     _ => {}
