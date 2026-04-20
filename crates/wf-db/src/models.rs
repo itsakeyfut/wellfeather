@@ -1,3 +1,5 @@
+use serde::{Deserialize, Serialize};
+
 // ---------------------------------------------------------------------------
 // DbType / DbKind
 // ---------------------------------------------------------------------------
@@ -86,7 +88,7 @@ pub struct QueryExecution {
 // ---------------------------------------------------------------------------
 
 /// Schema metadata for a single column.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ColumnInfo {
     pub name: String,
     pub data_type: String,
@@ -94,7 +96,7 @@ pub struct ColumnInfo {
 }
 
 /// Schema metadata for a table or view.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TableInfo {
     pub name: String,
     pub columns: Vec<ColumnInfo>,
@@ -102,7 +104,7 @@ pub struct TableInfo {
 
 /// All schema objects retrieved from a connected database.
 /// Populated by `DbService::fetch_metadata` and cached in `MetadataCache`.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DbMetadata {
     pub tables: Vec<TableInfo>,
     pub views: Vec<TableInfo>,

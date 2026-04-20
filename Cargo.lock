@@ -6427,11 +6427,15 @@ name = "wf-completion"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "serde",
+ "serde_json",
  "sqlx",
+ "tempfile",
  "thiserror 2.0.18",
  "tokio",
  "tokio-util",
  "tracing",
+ "wf-db",
 ]
 
 [[package]]
