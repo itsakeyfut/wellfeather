@@ -1,18 +1,156 @@
 #![allow(dead_code)]
 
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
+use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
 use slint::ComponentHandle;
 use slint::Model as _;
 use tokio::sync::mpsc;
 use wf_config::crypto;
-use wf_db::models::{DbConnection, DbType};
+use wf_db::models::{DbConnection, DbMetadata, DbType, TableInfo};
 
 use crate::{
     app::{command::Command, event::Event},
     state::SharedState,
 };
+
+// ---------------------------------------------------------------------------
+// Sidebar tree state
+// ---------------------------------------------------------------------------
+
+#[derive(Default)]
+struct SidebarUiState {
+    metadata: HashMap<String, DbMetadata>,
+    expanded: HashSet<String>,
+}
+
+fn build_sidebar_tree(
+    connections: &[DbConnection],
+    active_id: &str,
+    metadata: &HashMap<String, DbMetadata>,
+    expanded: &HashSet<String>,
+) -> Vec<crate::SidebarNode> {
+    let mut nodes = vec![];
+    for conn in connections {
+        let conn_node_id = format!("conn:{}", conn.id);
+        let is_conn_expanded = expanded.contains(&conn_node_id);
+        nodes.push(crate::SidebarNode {
+            id: conn_node_id.clone().into(),
+            label: conn.name.clone().into(),
+            sub_label: db_type_label(&conn.db_type).into(),
+            level: 0,
+            is_expanded: is_conn_expanded,
+            is_active: conn.id == active_id,
+            node_kind: "connection".into(),
+        });
+        if !is_conn_expanded {
+            continue;
+        }
+        let Some(meta) = metadata.get(&conn.id) else {
+            continue;
+        };
+        push_tableinfo_category(
+            &mut nodes,
+            &conn.id,
+            "Tables",
+            &meta.tables,
+            "table",
+            expanded,
+        );
+        push_tableinfo_category(&mut nodes, &conn.id, "Views", &meta.views, "view", expanded);
+        push_string_category(
+            &mut nodes,
+            &conn.id,
+            "Stored Procedures",
+            &meta.stored_procs,
+            "proc",
+            expanded,
+        );
+        push_string_category(
+            &mut nodes,
+            &conn.id,
+            "Indexes",
+            &meta.indexes,
+            "index",
+            expanded,
+        );
+    }
+    nodes
+}
+
+fn push_tableinfo_category(
+    nodes: &mut Vec<crate::SidebarNode>,
+    conn_id: &str,
+    name: &str,
+    items: &[TableInfo],
+    kind: &str,
+    expanded: &HashSet<String>,
+) {
+    let cat_id = format!("cat:{}:{}", conn_id, name);
+    let is_exp = expanded.contains(&cat_id);
+    nodes.push(crate::SidebarNode {
+        id: cat_id.into(),
+        label: name.into(),
+        sub_label: "".into(),
+        level: 1,
+        is_expanded: is_exp,
+        is_active: false,
+        node_kind: "category".into(),
+    });
+    if is_exp {
+        for item in items {
+            nodes.push(crate::SidebarNode {
+                id: format!("item:{}:{}:{}", conn_id, kind, item.name).into(),
+                label: item.name.clone().into(),
+                sub_label: "".into(),
+                level: 2,
+                is_expanded: false,
+                is_active: false,
+                node_kind: kind.into(),
+            });
+        }
+    }
+}
+
+fn push_string_category(
+    nodes: &mut Vec<crate::SidebarNode>,
+    conn_id: &str,
+    name: &str,
+    items: &[String],
+    kind: &str,
+    expanded: &HashSet<String>,
+) {
+    let cat_id = format!("cat:{}:{}", conn_id, name);
+    let is_exp = expanded.contains(&cat_id);
+    nodes.push(crate::SidebarNode {
+        id: cat_id.into(),
+        label: name.into(),
+        sub_label: "".into(),
+        level: 1,
+        is_expanded: is_exp,
+        is_active: false,
+        node_kind: "category".into(),
+    });
+    if is_exp {
+        for item in items {
+            nodes.push(crate::SidebarNode {
+                id: format!("item:{}:{}:{}", conn_id, kind, item).into(),
+                label: item.clone().into(),
+                sub_label: "".into(),
+                level: 2,
+                is_expanded: false,
+                is_active: false,
+                node_kind: kind.into(),
+            });
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// UI
+// ---------------------------------------------------------------------------
 
 pub struct UI {
     window: crate::AppWindow,
@@ -27,12 +165,20 @@ impl UI {
     ) -> Result<Self> {
         let window = crate::AppWindow::new()?;
 
-        Self::register_sidebar_callbacks(&window, state.clone(), tx_cmd.clone());
+        let sidebar_state: Arc<Mutex<SidebarUiState>> =
+            Arc::new(Mutex::new(SidebarUiState::default()));
+
+        Self::register_sidebar_callbacks(
+            &window,
+            state.clone(),
+            tx_cmd.clone(),
+            Arc::clone(&sidebar_state),
+        );
         Self::register_connection_form_callbacks(&window, tx_cmd.clone(), enc_key);
         Self::register_editor_callbacks(&window, state.clone(), tx_cmd.clone());
         Self::register_result_callbacks(&window, state.clone());
         Self::register_status_callbacks(&window, state.clone());
-        Self::spawn_event_handler(&window, rx_event, state);
+        Self::spawn_event_handler(&window, rx_event, state, Arc::clone(&sidebar_state));
 
         Ok(Self { window })
     }
@@ -48,6 +194,7 @@ impl UI {
         window: &crate::AppWindow,
         mut rx_event: mpsc::Receiver<Event>,
         state: SharedState,
+        sidebar_state: Arc<Mutex<SidebarUiState>>,
     ) {
         let window_weak = window.as_weak();
         tokio::spawn(async move {
@@ -81,6 +228,18 @@ impl UI {
                             })
                             .unwrap_or_else(|| active_id.clone());
 
+                        // Auto-expand the newly connected node
+                        {
+                            let mut sb = sidebar_state.lock().unwrap_or_else(|p| p.into_inner());
+                            sb.expanded.insert(format!("conn:{}", active_id));
+                        }
+                        // Build sidebar tree (Vec<SidebarNode> is Send)
+                        let sidebar_nodes = {
+                            let sb = sidebar_state.lock().unwrap_or_else(|p| p.into_inner());
+                            let connections = state.conn.all();
+                            build_sidebar_tree(&connections, &active_id, &sb.metadata, &sb.expanded)
+                        };
+
                         // clone required: invoke_from_event_loop closure must be 'static
                         let window_weak = window_weak.clone();
                         let active_id = active_id.clone();
@@ -98,6 +257,9 @@ impl UI {
                             ui.set_form_status("".into());
                             ui.set_error_message("".into());
                             ui.set_status_connection(status_conn.into());
+                            ui.set_sidebar_tree(
+                                Rc::new(slint::VecModel::from(sidebar_nodes)).into(),
+                            );
                             ui.set_sidebar_loading(true);
                         });
                     }
@@ -260,14 +422,34 @@ impl UI {
                             ui.set_status_connection("Not connected".into());
                         });
                     }
-                    Event::MetadataLoaded(_) => {
+                    Event::MetadataLoaded(ref conn_id, ref meta) => {
+                        let conn_id = conn_id.clone();
+                        let meta = meta.clone(); // clone required: moved into sidebar_state
+                        // Store metadata in shared state
+                        {
+                            let mut sb = sidebar_state.lock().unwrap_or_else(|p| p.into_inner());
+                            sb.metadata.insert(conn_id.clone(), meta);
+                        }
+                        // Build updated tree outside invoke_from_event_loop (Vec is Send)
+                        let nodes = {
+                            let sb = sidebar_state.lock().unwrap_or_else(|p| p.into_inner());
+                            let connections = state.conn.all();
+                            let active_id = state
+                                .conn
+                                .active()
+                                .map(|c| c.id.clone())
+                                .unwrap_or_default();
+                            build_sidebar_tree(&connections, &active_id, &sb.metadata, &sb.expanded)
+                        };
                         // clone required: invoke_from_event_loop closure must be 'static
                         let window_weak = window_weak.clone();
                         let _ = slint::invoke_from_event_loop(move || {
                             let Some(window) = window_weak.upgrade() else {
                                 return;
                             };
-                            window.global::<crate::UiState>().set_sidebar_loading(false);
+                            let ui = window.global::<crate::UiState>();
+                            ui.set_sidebar_tree(Rc::new(slint::VecModel::from(nodes)).into());
+                            ui.set_sidebar_loading(false);
                         });
                     }
                     Event::MetadataFetchFailed(ref msg) => {
@@ -295,6 +477,7 @@ impl UI {
         window: &crate::AppWindow,
         state: SharedState,
         tx_cmd: mpsc::Sender<Command>,
+        sidebar_state: Arc<Mutex<SidebarUiState>>,
     ) {
         let ui_state = window.global::<crate::UiState>();
 
@@ -324,22 +507,60 @@ impl UI {
             });
         }
 
-        // switch-connection: look up the saved conn by id and re-connect
+        // toggle-sidebar-node: expand/collapse a tree node; also switches active
+        // connection when a level-0 (connection) node is clicked.
         {
-            // clone required: callback closure needs owned tx_cmd
+            // clone required: callback closure needs owned captures
             let tx_cmd = tx_cmd.clone();
-            // clone required: callback closure needs owned state
             let state = state.clone();
-            ui_state.on_switch_connection(move |id| {
+            let sidebar_state = Arc::clone(&sidebar_state);
+            let window_weak = window.as_weak();
+            ui_state.on_toggle_sidebar_node(move |id| {
                 let id = id.to_string();
-                let conn = state.conn.all().into_iter().find(|c| c.id == id);
-                if let Some(conn) = conn {
-                    // clone required: tokio::spawn requires 'static
-                    let tx_cmd = tx_cmd.clone();
-                    tokio::spawn(async move {
-                        let _ = tx_cmd.send(Command::Connect(conn, None)).await;
-                    });
+                // If this is a connection node, send a Connect command.
+                if let Some(conn_id) = id.strip_prefix("conn:") {
+                    let conn = state.conn.all().into_iter().find(|c| c.id == conn_id);
+                    if let Some(conn) = conn {
+                        // clone required: tokio::spawn requires 'static
+                        let tx_cmd = tx_cmd.clone();
+                        tokio::spawn(async move {
+                            let _ = tx_cmd.send(Command::Connect(conn, None)).await;
+                        });
+                    }
                 }
+                // Toggle expanded state
+                {
+                    let mut sb = sidebar_state.lock().unwrap_or_else(|p| p.into_inner());
+                    if sb.expanded.contains(&id) {
+                        sb.expanded.remove(&id);
+                    } else {
+                        sb.expanded.insert(id.clone());
+                    }
+                }
+                // Rebuild and push the updated tree (already on UI thread)
+                let nodes = {
+                    let sb = sidebar_state.lock().unwrap_or_else(|p| p.into_inner());
+                    let connections = state.conn.all();
+                    let active_id = state
+                        .conn
+                        .active()
+                        .map(|c| c.id.clone())
+                        .unwrap_or_default();
+                    build_sidebar_tree(&connections, &active_id, &sb.metadata, &sb.expanded)
+                };
+                let Some(window) = window_weak.upgrade() else {
+                    return;
+                };
+                window
+                    .global::<crate::UiState>()
+                    .set_sidebar_tree(Rc::new(slint::VecModel::from(nodes)).into());
+            });
+        }
+
+        // table-double-clicked: stub for T045 (insert SELECT * FROM {name})
+        {
+            ui_state.on_table_double_clicked(move |_name| {
+                // T045: insert SELECT * FROM {name} into editor
             });
         }
     }
@@ -647,4 +868,102 @@ fn build_conn_from_form(ui: &crate::UiState, enc_key: &[u8; 32]) -> (DbConnectio
     };
 
     (conn, password)
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use wf_db::models::{DbMetadata, DbType, TableInfo};
+
+    fn make_conn(id: &str, name: &str) -> DbConnection {
+        DbConnection {
+            id: id.to_string(),
+            name: name.to_string(),
+            db_type: DbType::SQLite,
+            connection_string: None,
+            host: None,
+            port: None,
+            user: None,
+            password_encrypted: None,
+            database: None,
+        }
+    }
+
+    fn make_meta(tables: &[&str]) -> DbMetadata {
+        DbMetadata {
+            tables: tables
+                .iter()
+                .map(|n| TableInfo {
+                    name: n.to_string(),
+                    columns: vec![],
+                })
+                .collect(),
+            views: vec![],
+            stored_procs: vec![],
+            indexes: vec![],
+        }
+    }
+
+    #[test]
+    fn build_sidebar_tree_should_render_connection_nodes() {
+        let conns = vec![make_conn("a", "Alpha"), make_conn("b", "Beta")];
+        let nodes = build_sidebar_tree(&conns, "", &HashMap::new(), &HashSet::new());
+        assert_eq!(nodes.len(), 2);
+        assert_eq!(nodes[0].label.as_str(), "Alpha");
+        assert_eq!(nodes[0].level, 0);
+        assert_eq!(nodes[0].node_kind.as_str(), "connection");
+        assert_eq!(nodes[1].label.as_str(), "Beta");
+    }
+
+    #[test]
+    fn build_sidebar_tree_should_show_categories_when_connection_expanded() {
+        let conns = vec![make_conn("a", "Alpha")];
+        let mut expanded = HashSet::new();
+        expanded.insert("conn:a".to_string());
+        let mut metadata = HashMap::new();
+        metadata.insert("a".to_string(), make_meta(&["users"]));
+        let nodes = build_sidebar_tree(&conns, "a", &metadata, &expanded);
+        // conn + Tables + Views + Stored Procedures + Indexes = 5 nodes
+        assert_eq!(nodes.len(), 5);
+        assert_eq!(nodes[1].label.as_str(), "Tables");
+        assert_eq!(nodes[1].level, 1);
+        assert_eq!(nodes[1].node_kind.as_str(), "category");
+    }
+
+    #[test]
+    fn build_sidebar_tree_should_show_items_when_category_expanded() {
+        let conns = vec![make_conn("a", "Alpha")];
+        let mut expanded = HashSet::new();
+        expanded.insert("conn:a".to_string());
+        expanded.insert("cat:a:Tables".to_string());
+        let mut metadata = HashMap::new();
+        metadata.insert("a".to_string(), make_meta(&["users", "orders"]));
+        let nodes = build_sidebar_tree(&conns, "a", &metadata, &expanded);
+        // conn + Tables + users + orders + Views + Stored Procedures + Indexes = 7
+        assert_eq!(nodes.len(), 7);
+        assert_eq!(nodes[2].label.as_str(), "users");
+        assert_eq!(nodes[2].level, 2);
+        assert_eq!(nodes[2].node_kind.as_str(), "table");
+        assert_eq!(nodes[3].label.as_str(), "orders");
+    }
+
+    #[test]
+    fn build_sidebar_tree_should_hide_children_when_collapsed() {
+        let conns = vec![make_conn("a", "Alpha")];
+        let nodes = build_sidebar_tree(&conns, "a", &HashMap::new(), &HashSet::new());
+        assert_eq!(nodes.len(), 1);
+        assert_eq!(nodes[0].level, 0);
+    }
+
+    #[test]
+    fn build_sidebar_tree_should_mark_active_connection() {
+        let conns = vec![make_conn("a", "Alpha"), make_conn("b", "Beta")];
+        let nodes = build_sidebar_tree(&conns, "b", &HashMap::new(), &HashSet::new());
+        assert!(!nodes[0].is_active);
+        assert!(nodes[1].is_active);
+    }
 }

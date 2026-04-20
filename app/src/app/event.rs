@@ -29,7 +29,7 @@ pub enum Event {
     /// Fired when `Command::TestConnection` fails; carries the error message.
     TestConnectionFailed(String),
     CompletionReady(Vec<CompletionItem>),
-    MetadataLoaded(DbMetadata),
+    MetadataLoaded(String, DbMetadata), // conn_id, metadata
     MetadataFetchFailed(String),
     ConfigUpdated,
     StateChanged(StateEvent),

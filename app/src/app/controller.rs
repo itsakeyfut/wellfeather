@@ -157,7 +157,7 @@ impl AppController {
                             {
                                 warn!(conn_id = %fetch_id, error = %e, "failed to store metadata");
                             }
-                            let _ = tx.send(Event::MetadataLoaded(meta)).await;
+                            let _ = tx.send(Event::MetadataLoaded(fetch_id.clone(), meta)).await;
                         }
                         Err(e) => {
                             warn!(conn_id = %fetch_id, error = %e, "metadata fetch failed");
@@ -507,7 +507,7 @@ mod tests {
         // Drain any MetadataLoaded/MetadataFetchFailed from the background fetch.
         let e2 = loop {
             match rx_event.recv().await.unwrap() {
-                Event::MetadataLoaded(_) | Event::MetadataFetchFailed(_) => continue,
+                Event::MetadataLoaded(_, _) | Event::MetadataFetchFailed(_) => continue,
                 e => break e,
             }
         };
@@ -546,7 +546,7 @@ mod tests {
         // Drain any MetadataLoaded/MetadataFetchFailed before QueryStarted.
         let e2 = loop {
             match rx_event.recv().await.unwrap() {
-                Event::MetadataLoaded(_) | Event::MetadataFetchFailed(_) => continue,
+                Event::MetadataLoaded(_, _) | Event::MetadataFetchFailed(_) => continue,
                 e => break e,
             }
         };
@@ -624,7 +624,10 @@ mod tests {
         assert!(matches!(e1, Event::Connected(_)));
         let e2 = rx_event.recv().await.unwrap();
         assert!(
-            matches!(e2, Event::MetadataLoaded(_) | Event::MetadataFetchFailed(_)),
+            matches!(
+                e2,
+                Event::MetadataLoaded(_, _) | Event::MetadataFetchFailed(_)
+            ),
             "expected MetadataLoaded or MetadataFetchFailed, got {e2:?}"
         );
     }
@@ -658,7 +661,7 @@ mod tests {
         while connected_count < 2 {
             match rx_event.recv().await.unwrap() {
                 Event::Connected(_) => connected_count += 1,
-                Event::MetadataLoaded(_) | Event::MetadataFetchFailed(_) => {}
+                Event::MetadataLoaded(_, _) | Event::MetadataFetchFailed(_) => {}
                 _ => {}
             }
         }
