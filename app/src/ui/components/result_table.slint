@@ -65,6 +65,14 @@ export component ResultTable inherits Rectangle {
     /// Returns cumulative x-offset (logical px as float) of column j.
     /// Implemented in Rust; used for horizontal auto-scroll in cell mode.
     pure callback col-x-offset(int) -> float;
+    /// Fired when a column header is clicked; Rust toggles sort direction and re-renders.
+    callback sort-col-clicked(int);
+
+    // ── Sort state (driven from Rust via in properties) ───────────────────────
+    /// -1 = no active sort; ≥0 = index of the currently sorted column.
+    in property <int>  sort-col: -1;
+    /// true = ascending (▲), false = descending (▼).
+    in property <bool> sort-asc: true;
 
     // ── Style constants ───────────────────────────────────────────────────────
     property <length> row-height:    28px;
@@ -332,17 +340,37 @@ export component ResultTable inherits Rectangle {
                             ? root.col-widths[i] * 1px
                             : root.default-col-w;
                         height: root.row-height;
-                        background: #313244;
+                        background: sort-hdr-ta.has-hover ? #383850 : #313244;
                         clip: true;
+
+                        // Sort click area — covers the full cell except the 4px resize handle.
+                        sort-hdr-ta := TouchArea {
+                            width: parent.width - 4px;
+                            height: parent.height;
+                            mouse-cursor: pointer;
+                            clicked => { root.sort-col-clicked(i); }
+                        }
 
                         Text {
                             x: 8px;
                             y: (parent.height - self.height) / 2;
-                            width: parent.width - 12px;
+                            // Shrink right margin when the sort indicator is visible.
+                            width: root.sort-col == i
+                                ? parent.width - 28px
+                                : parent.width - 12px;
                             text: col;
                             color: #cdd6f4;
                             font-size: 12px;
                             overflow: elide;
+                        }
+
+                        // ▲/▼ sort direction indicator for the active sort column.
+                        if root.sort-col == i: Text {
+                            x: parent.width - 20px;
+                            y: (parent.height - self.height) / 2;
+                            text: root.sort-asc ? "▲" : "▼";
+                            color: #89b4fa;
+                            font-size: 10px;
                         }
 
                         // ── Column resize drag handle ─────────────────────────
