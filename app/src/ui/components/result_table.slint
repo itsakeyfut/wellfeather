@@ -6,8 +6,8 @@ import { RowData } from "../globals.slint";
 // Features:
 //   • Per-column widths, adjustable by dragging the right-edge divider on each header.
 //   • Overflow text is elided (…) within the cell.
-//   • Clicking a cell highlights its row and shows the full value in the cell-value
-//     strip at the bottom, pre-selected so the user can Ctrl+C to copy.
+//   • Three navigation modes: row (default), cell (Enter), search (F).
+//   • Client-side row filtering via search bar; active-filter banner shows applied filter.
 //
 // Scroll architecture:
 //   header-scroll (Flickable, interactive: false) + body-scroll (ListView, H+V).
@@ -15,10 +15,16 @@ import { RowData } from "../globals.slint";
 //   `changed viewport-x =>` in body-scroll syncs header-scroll so headers
 //   track horizontal scroll without scrolling vertically.
 //
-// Column-width architecture:
-//   col-widths      — [float] of per-column pixel widths (set by Rust on each query)
-//   total-col-width — sum of all col-widths (kept in sync via Rust resize callback)
-//   resize-column   — callback fired by the drag handle; Rust updates the VecModel
+// Keyboard navigation:
+//   Row mode:  ↑↓ Home End PgUp PgDn — move selected row
+//              Enter — enter cell mode at column 0
+//              F     — enter search mode
+//              Esc   — clear filter (if active) or deselect row
+//              Ctrl+C — copy selected cell value to clipboard
+//   Cell mode: ←→ Home End — move selected column within current row
+//              Esc  — return to row mode
+//              Ctrl+C — copy current cell value to clipboard
+//   Search:    type to build query; Enter — apply; Esc — cancel
 
 export component ResultTable inherits Rectangle {
     background: #1e1e2e;
@@ -26,219 +32,340 @@ export component ResultTable inherits Rectangle {
     preferred-height: 0;
     min-height: 0;
 
-    /// Column names from the last QueryResult.
-    in property <[string]>  columns:    [];
-    /// Row data as strings; NULL values are represented as empty strings.
-    in property <[RowData]> rows:       [];
-    /// Total row count (same as rows.length for now; kept explicit for T051).
-    in property <int>       row-count:  0;
-    /// True while a query is executing; shows the "Running…" overlay.
-    in property <bool>      is-loading: false;
-    /// Full error message from Event::QueryError. Non-empty triggers the error panel.
+    // ── In properties ─────────────────────────────────────────────────────────
+    in property <[string]>  columns:       [];
+    in property <[RowData]> rows:          [];
+    in property <int>       row-count:     0;
+    in property <bool>      is-loading:    false;
     in property <string>    error-message: "";
+    in property <[float]>   col-widths:    [];
+    in property <float>     total-col-width: 0.0;
+    /// Currently active filter text (empty = no filter). Set by Rust after filter-rows fires.
+    in property <string>    active-filter: "";
 
-    /// Per-column widths in logical pixels as floats. Length == columns.length.
-    /// Populated by Rust on QueryFinished; defaults to default-col-w while empty.
-    in property <[float]> col-widths: [];
-    /// Pre-computed sum of col-widths (maintained by Rust via resize-column).
-    /// Used for viewport-width so the horizontal scroll bar is accurate.
-    in property <float> total-col-width: 0.0;
-    /// Fired when the user drags a column divider.
-    /// i = 0-based column index; w = new width in logical pixels.
+    // ── Focus API ─────────────────────────────────────────────────────────────
+    /// True when this table (or its search / cell-value inputs) holds focus.
+    out property <bool> result-focused:
+        table-fs.has-focus
+        || (root.nav-mode == 2 && search-input.has-focus)
+        || cell-value-input.has-focus;
+
+    public function grab-focus() {
+        table-fs.focus();
+        if (root.selected-row < 0 && root.row-count > 0) {
+            root.selected-row = 0;
+        }
+    }
+
+    // ── Callbacks ─────────────────────────────────────────────────────────────
     callback resize-column(int, float);
+    callback filter-rows(string);
+    callback clear-filter();
+    callback copy-cell(string);
+    /// Returns cumulative x-offset (logical px as float) of column j.
+    /// Implemented in Rust; used for horizontal auto-scroll in cell mode.
+    pure callback col-x-offset(int) -> float;
 
+    // ── Style constants ───────────────────────────────────────────────────────
     property <length> row-height:    28px;
     property <length> default-col-w: 150px;
     property <length> min-col-w:     48px;
 
-    // ── Cell selection state ──────────────────────────────────────────────────
-    /// 0-based index of the currently selected row (-1 = none).
+    // ── Selection / nav state ─────────────────────────────────────────────────
     property <int>    selected-row:        -1;
-    /// Full string value of the last clicked cell (shown in the value strip).
     property <string> selected-cell-value: "";
+    property <int>    selected-col:        -1;
+    /// 0 = row mode  1 = cell mode  2 = search mode
+    property <int>    nav-mode:    0;
+    property <string> search-query: "";
 
-    // When a new cell is selected: focus the value strip and select all its text
-    // so the user can immediately Ctrl+C without any extra interaction.
-    changed selected-cell-value => {
-        if (root.selected-cell-value != "") {
-            cell-value-input.focus();
-            cell-value-input.set-selection-offsets(0, 2147483647);
-        }
-    }
+    // ── Bottom strip heights ──────────────────────────────────────────────────
+    property <length> cell-strip-h:    root.selected-cell-value != "" ? 28px : 0px;
+    property <length> filter-banner-h: root.active-filter != "" ? 24px : 0px;
+    property <length> search-bar-h:    root.nav-mode == 2 ? 32px : 0px;
+    property <length> bottom-total:
+        root.cell-strip-h + root.filter-banner-h + root.search-bar-h;
 
-    // ── Viewport width helper (used by both Flickables and row rectangles) ────
-    // When total-col-width is available use it for accuracy; fall back to
-    // columns.length × default-col-w before the first query finishes.
+    // ── Viewport width ────────────────────────────────────────────────────────
     property <length> vp-w: root.total-col-width > 0
         ? max(root.total-col-width * 1px, root.width)
         : max(root.columns.length * root.default-col-w, root.width);
 
-    // ── Loading overlay ───────────────────────────────────────────────────────
-    if root.is-loading: Rectangle {
-        width:  parent.width;
-        height: parent.height;
-        background: #1e1e2e;
-        Text {
-            x: (parent.width  - self.width)  / 2;
-            y: (parent.height - self.height) / 2;
-            text: @tr("Running\u{2026}");
-            color: #cdd6f4;
-            font-size: 13px;
-        }
+    // ── Page size for Page Up/Down ────────────────────────────────────────────
+    property <int> page-rows: max(1,
+        (root.height - root.row-height - root.bottom-total) / root.row-height);
+
+    // ── Body viewport state ───────────────────────────────────────────────────
+    // Mirrored at component level so `changed` handlers can update them without
+    // referencing body-scroll (which lives inside a conditional if-block).
+    // Two-way bound to body-scroll.viewport-y/x inside the if-block.
+    property <length> body-vp-y: 0;
+    property <length> body-vp-x: 0;
+    // Visible body height (full height minus header row and collapsed strips).
+    property <length> body-h: max(1px, root.height - root.bottom-total - root.row-height);
+
+    // Reset selection and nav state when a new query result arrives.
+    changed rows => {
+        root.selected-row        = -1;
+        root.selected-col        = -1;
+        root.nav-mode            = 0;
+        root.selected-cell-value = "";
+        root.body-vp-y           = 0;
+        root.body-vp-x           = 0;
     }
 
-    // ── Error panel ───────────────────────────────────────────────────────────
-    if !root.is-loading && root.error-message != "": Rectangle {
-        width:  parent.width;
-        height: parent.height;
-        background: #2d1b1b;
-        VerticalLayout {
-            alignment: start;
-            padding: 16px;
-            spacing: 8px;
-            Text {
-                text: @tr("Query Error");
-                color: #f38ba8;
-                font-size: 13px;
-                font-weight: 700;
-            }
-            Text {
-                text: root.error-message;
-                color: #cdd6f4;
-                font-size: 12px;
-                wrap: word-wrap;
+    // ── Auto-scroll: keep selected row visible ────────────────────────────────
+    changed selected-row => {
+        if (root.selected-row >= 0) {
+            let row-top = root.selected-row * root.row-height;
+            let row-bot = row-top + root.row-height;
+            if (row-top < -root.body-vp-y) {
+                root.body-vp-y = -row-top;
+            } else if (row-bot > -root.body-vp-y + root.body-h) {
+                root.body-vp-y = -(row-bot - root.body-h);
             }
         }
     }
 
-    // ── Result content ────────────────────────────────────────────────────────
-    if !root.is-loading && root.error-message == "": VerticalLayout {
-        width:  parent.width;
-        // Leave room for the cell-value strip when something is selected.
-        height: parent.height - (root.selected-cell-value != "" ? 28px : 0px);
+    // ── Auto-scroll: keep selected column visible ─────────────────────────────
+    changed selected-col => {
+        if (root.selected-col >= 0) {
+            let col-left  = root.col-x-offset(root.selected-col) * 1px;
+            let col-w     = root.col-widths.length > root.selected-col
+                            && root.col-widths[root.selected-col] > 0
+                ? root.col-widths[root.selected-col] * 1px
+                : root.default-col-w;
+            let col-right = col-left + col-w;
+            if (col-left < -root.body-vp-x) {
+                root.body-vp-x = -col-left;
+            } else if (col-right > -root.body-vp-x + root.width) {
+                root.body-vp-x = -(col-right - root.width);
+            }
+        }
+    }
 
-        // ── Header row ────────────────────────────────────────────────────────
-        header-scroll := Flickable {
-            height:         root.row-height;
-            interactive:    false;
-            viewport-width: root.vp-w;
+    // ── Root FocusScope ───────────────────────────────────────────────────────
+    // capture-key-pressed fires root→focused so it intercepts keys regardless
+    // of which child (search-input, cell-value-input) currently holds focus.
+    table-fs := FocusScope {
+        x: 0; y: 0;
+        width: parent.width; height: parent.height;
+        focus-on-click: true;
 
-            HorizontalLayout {
-                spacing: 0;
-                for col[i] in root.columns: Rectangle {
-                    // Use per-column width when available; fall back to default.
-                    width: root.col-widths.length > i && root.col-widths[i] > 0
-                        ? root.col-widths[i] * 1px
-                        : root.default-col-w;
-                    height: root.row-height;
-                    background: #313244;
-                    clip: true;
-
-                    // Column label — always elides to stay within the cell.
-                    Text {
-                        x: 8px;
-                        y: (parent.height - self.height) / 2;
-                        // Leave 4px for the drag handle on the right.
-                        width: parent.width - 12px;
-                        text: col;
-                        color: #cdd6f4;
-                        font-size: 12px;
-                        overflow: elide;
+        capture-key-pressed(event) => {
+            if (root.is-loading || root.error-message != "" || root.columns.length == 0) {
+                EventResult.reject
+            } else if (root.nav-mode == 2) {
+                // Search mode: intercept Enter and Esc; reject all other keys so
+                // search-input receives them for editing.
+                if (event.text == Key.Return) {
+                    root.filter-rows(root.search-query);
+                    root.nav-mode = 0;
+                    table-fs.focus();
+                    EventResult.accept
+                } else if (event.text == Key.Escape) {
+                    root.nav-mode = 0;
+                    table-fs.focus();
+                    EventResult.accept
+                } else {
+                    EventResult.reject
+                }
+            } else if (root.nav-mode == 1) {
+                // Cell mode
+                if (event.text == Key.LeftArrow) {
+                    if (root.selected-col > 0) { root.selected-col -= 1; }
+                    EventResult.accept
+                } else if (event.text == Key.RightArrow) {
+                    if (root.selected-col < root.columns.length - 1) {
+                        root.selected-col += 1;
                     }
-
-                    // ── Column resize drag handle (right edge) ────────────────
-                    // 4 px strip; cursor changes to ew-resize on hover.
-                    // Drag formula (same principle as the panel-height drag):
-                    //   width_new = width_current + (mouse-x - pressed-x)
-                    // After the update the handle repositions so that mouse-x
-                    // returns to pressed-x — zero drift, cursor tracks exactly.
-                    Rectangle {
-                        x: parent.width - 4px;
-                        y: 0;
-                        width:  4px;
-                        height: parent.height;
-                        background: col-resize-ta.has-hover || col-resize-ta.pressed
-                            ? #89b4fa : #45475a;
-
-                        col-resize-ta := TouchArea {
-                            mouse-cursor: ew-resize;
-                            moved => {
-                                let cw = root.col-widths.length > i && root.col-widths[i] > 0
-                                    ? root.col-widths[i] * 1px
-                                    : root.default-col-w;
-                                let new-w = max(
-                                    cw + (self.mouse-x - self.pressed-x),
-                                    root.min-col-w
-                                );
-                                root.resize-column(i, new-w / 1px);
-                            }
-                        }
+                    EventResult.accept
+                } else if (event.text == Key.Home) {
+                    root.selected-col = 0;
+                    EventResult.accept
+                } else if (event.text == Key.End) {
+                    if (root.columns.length > 0) {
+                        root.selected-col = root.columns.length - 1;
                     }
+                    EventResult.accept
+                } else if (event.text == Key.Escape) {
+                    root.nav-mode = 0;
+                    root.selected-col = -1;
+                    EventResult.accept
+                } else if (event.text == "c" && event.modifiers.control) {
+                    if (root.selected-row >= 0 && root.selected-col >= 0
+                            && root.selected-row < root.rows.length
+                            && root.selected-col < root.rows[root.selected-row].cells.length) {
+                        root.copy-cell(root.rows[root.selected-row].cells[root.selected-col]);
+                    }
+                    EventResult.accept
+                } else {
+                    EventResult.reject
+                }
+            } else {
+                // Row mode
+                if (event.text == Key.UpArrow) {
+                    root.selected-cell-value = "";
+                    if (root.selected-row > 0) {
+                        root.selected-row -= 1;
+                    } else if (root.row-count > 0) {
+                        root.selected-row = 0;
+                    }
+                    EventResult.accept
+                } else if (event.text == Key.DownArrow) {
+                    root.selected-cell-value = "";
+                    if (root.selected-row < 0 && root.row-count > 0) {
+                        root.selected-row = 0;
+                    } else if (root.selected-row < root.row-count - 1) {
+                        root.selected-row += 1;
+                    }
+                    EventResult.accept
+                } else if (event.text == Key.Home) {
+                    root.selected-cell-value = "";
+                    if (root.row-count > 0) { root.selected-row = 0; }
+                    EventResult.accept
+                } else if (event.text == Key.End) {
+                    root.selected-cell-value = "";
+                    if (root.row-count > 0) { root.selected-row = root.row-count - 1; }
+                    EventResult.accept
+                } else if (event.text == Key.PageUp) {
+                    root.selected-cell-value = "";
+                    if (root.selected-row > 0) {
+                        root.selected-row = max(0, root.selected-row - root.page-rows);
+                    }
+                    EventResult.accept
+                } else if (event.text == Key.PageDown) {
+                    root.selected-cell-value = "";
+                    if (root.selected-row < root.row-count - 1) {
+                        root.selected-row = min(
+                            root.row-count - 1, root.selected-row + root.page-rows);
+                    }
+                    EventResult.accept
+                } else if (event.text == Key.Return) {
+                    if (root.selected-row >= 0 && root.columns.length > 0) {
+                        root.nav-mode = 1;
+                        root.selected-col = 0;
+                    }
+                    EventResult.accept
+                } else if (event.text == "f"
+                        && !event.modifiers.control
+                        && !event.modifiers.alt
+                        && !event.modifiers.shift) {
+                    root.search-query = "";
+                    root.nav-mode = 2;
+                    search-input.focus();
+                    EventResult.accept
+                } else if (event.text == Key.Escape) {
+                    if (root.active-filter != "") {
+                        root.clear-filter();
+                    } else {
+                        root.selected-row        = -1;
+                        root.selected-cell-value = "";
+                    }
+                    EventResult.accept
+                } else if (event.text == "c" && event.modifiers.control) {
+                    if (root.selected-cell-value != "") {
+                        root.copy-cell(root.selected-cell-value);
+                    }
+                    EventResult.accept
+                } else {
+                    EventResult.reject
                 }
             }
         }
 
-        // ── Body (horizontal + vertical virtual scroll via ListView) ─────────
-        // ListView only instantiates visible rows, keeping scroll smooth with
-        // large result sets.
-        Rectangle {
-            vertical-stretch: 1;
-            clip: true;
+        // ── Loading overlay ───────────────────────────────────────────────────
+        if root.is-loading: Rectangle {
+            width:  parent.width;
+            height: parent.height;
+            background: #1e1e2e;
+            Text {
+                x: (parent.width  - self.width)  / 2;
+                y: (parent.height - self.height) / 2;
+                text: @tr("Running\u{2026}");
+                color: #cdd6f4;
+                font-size: 13px;
+            }
+        }
 
-            body-scroll := ListView {
-                width:          parent.width;
-                height:         parent.height;
+        // ── Error panel ───────────────────────────────────────────────────────
+        if !root.is-loading && root.error-message != "": Rectangle {
+            width:  parent.width;
+            height: parent.height;
+            background: #2d1b1b;
+            VerticalLayout {
+                alignment: start;
+                padding: 16px;
+                spacing: 8px;
+                Text {
+                    text: @tr("Query Error");
+                    color: #f38ba8;
+                    font-size: 13px;
+                    font-weight: 700;
+                }
+                Text {
+                    text: root.error-message;
+                    color: #cdd6f4;
+                    font-size: 12px;
+                    wrap: word-wrap;
+                }
+            }
+        }
+
+        // ── Result content ────────────────────────────────────────────────────
+        if !root.is-loading && root.error-message == "": VerticalLayout {
+            width:  parent.width;
+            height: parent.height - root.bottom-total;
+
+            // ── Header row ────────────────────────────────────────────────────
+            header-scroll := Flickable {
+                height:         root.row-height;
+                interactive:    false;
                 viewport-width: root.vp-w;
+                // One-way bind: follows body-vp-x so header tracks horizontal scroll.
+                viewport-x:     root.body-vp-x;
 
-                // Sync header horizontal position when body scrolls.
-                changed viewport-x => { header-scroll.viewport-x = self.viewport-x; }
-
-                for row[i] in root.rows: Rectangle {
-                    height: root.row-height;
-                    width:  root.vp-w;
-                    // Highlight the selected row; alternate zebra stripe otherwise.
-                    background: i == root.selected-row
-                        ? #264f78
-                        : (mod(i, 2) == 0 ? #1e1e2e : #181825);
-
-                    Rectangle {   // bottom border
-                        y: parent.height - 1px;
-                        width: parent.width;
-                        height: 1px;
+                HorizontalLayout {
+                    spacing: 0;
+                    for col[i] in root.columns: Rectangle {
+                        width: root.col-widths.length > i && root.col-widths[i] > 0
+                            ? root.col-widths[i] * 1px
+                            : root.default-col-w;
+                        height: root.row-height;
                         background: #313244;
-                    }
+                        clip: true;
 
-                    HorizontalLayout {
-                        spacing: 0;
-                        for cell[j] in row.cells: Rectangle {
-                            width: root.col-widths.length > j && root.col-widths[j] > 0
-                                ? root.col-widths[j] * 1px
-                                : root.default-col-w;
-                            height: root.row-height;
-                            clip: true;
+                        Text {
+                            x: 8px;
+                            y: (parent.height - self.height) / 2;
+                            width: parent.width - 12px;
+                            text: col;
+                            color: #cdd6f4;
+                            font-size: 12px;
+                            overflow: elide;
+                        }
 
-                            Rectangle {   // right border
-                                x: parent.width - 1px;
-                                width: 1px;
-                                height: parent.height;
-                                background: #313244;
-                            }
+                        // ── Column resize drag handle ─────────────────────────
+                        Rectangle {
+                            x: parent.width - 4px;
+                            y: 0;
+                            width:  4px;
+                            height: parent.height;
+                            background: col-resize-ta.has-hover || col-resize-ta.pressed
+                                ? #89b4fa : #45475a;
 
-                            Text {
-                                x: 8px;
-                                y: (parent.height - self.height) / 2;
-                                width: parent.width - 16px;
-                                text: cell;
-                                color: i == root.selected-row ? #ffffff : #a6adc8;
-                                font-size: 12px;
-                                overflow: elide;
-                            }
-
-                            // Click → select row and show full value in the strip.
-                            TouchArea {
-                                clicked => {
-                                    root.selected-row        = i;
-                                    root.selected-cell-value = cell;
+                            col-resize-ta := TouchArea {
+                                mouse-cursor: ew-resize;
+                                moved => {
+                                    let cw = root.col-widths.length > i
+                                             && root.col-widths[i] > 0
+                                        ? root.col-widths[i] * 1px
+                                        : root.default-col-w;
+                                    let new-w = max(
+                                        cw + (self.mouse-x - self.pressed-x),
+                                        root.min-col-w
+                                    );
+                                    root.resize-column(i, new-w / 1px);
                                 }
                             }
                         }
@@ -246,55 +373,210 @@ export component ResultTable inherits Rectangle {
                 }
             }
 
-            // Zero-row placeholder (only when a query returned no rows).
-            if root.row-count == 0 && root.columns.length > 0: Rectangle {
-                x: 0; y: 0;
-                width:  parent.width;
-                height: parent.height;
-                Text {
-                    x: (parent.width  - self.width)  / 2;
-                    y: (parent.height - self.height) / 2;
-                    text: @tr("0 rows");
-                    color: #585b70;
-                    font-size: 13px;
+            // ── Body (ListView for virtual scrolling) ─────────────────────────
+            Rectangle {
+                vertical-stretch: 1;
+                clip: true;
+
+                body-scroll := ListView {
+                    width:          parent.width;
+                    height:         parent.height;
+                    viewport-width: root.vp-w;
+                    // Two-way bindings: user scroll gestures update root.body-vp-y/x;
+                    // programmatic scroll (changed selected-row/col) flows the other way.
+                    viewport-y <=> root.body-vp-y;
+                    viewport-x <=> root.body-vp-x;
+
+                    for row[i] in root.rows: Rectangle {
+                        height: root.row-height;
+                        width:  root.vp-w;
+                        background: i == root.selected-row
+                            ? #264f78
+                            : (mod(i, 2) == 0 ? #1e1e2e : #181825);
+
+                        Rectangle {   // bottom border
+                            y: parent.height - 1px;
+                            width: parent.width;
+                            height: 1px;
+                            background: #313244;
+                        }
+
+                        HorizontalLayout {
+                            spacing: 0;
+                            for cell[j] in row.cells: Rectangle {
+                                width: root.col-widths.length > j
+                                       && root.col-widths[j] > 0
+                                    ? root.col-widths[j] * 1px
+                                    : root.default-col-w;
+                                height: root.row-height;
+                                clip: true;
+
+                                // Cell-mode highlight: distinct tint on the focused column.
+                                if i == root.selected-row && j == root.selected-col
+                                        && root.nav-mode == 1: Rectangle {
+                                    width:  parent.width;
+                                    height: parent.height;
+                                    background: #89b4fa44;
+                                }
+
+                                Rectangle {   // right border
+                                    x: parent.width - 1px;
+                                    width: 1px;
+                                    height: parent.height;
+                                    background: #313244;
+                                }
+
+                                Text {
+                                    x: 8px;
+                                    y: (parent.height - self.height) / 2;
+                                    width: parent.width - 16px;
+                                    text: cell;
+                                    color: i == root.selected-row ? #ffffff : #a6adc8;
+                                    font-size: 12px;
+                                    overflow: elide;
+                                }
+
+                                TouchArea {
+                                    clicked => {
+                                        root.selected-row        = i;
+                                        root.selected-cell-value = cell;
+                                        cell-value-input.focus();
+                                        cell-value-input.set-selection-offsets(0, 2147483647);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Zero-row placeholder
+                if root.row-count == 0 && root.columns.length > 0: Rectangle {
+                    x: 0; y: 0;
+                    width:  parent.width;
+                    height: parent.height;
+                    Text {
+                        x: (parent.width  - self.width)  / 2;
+                        y: (parent.height - self.height) / 2;
+                        text: @tr("0 rows");
+                        color: #585b70;
+                        font-size: 13px;
+                    }
                 }
             }
         }
-    }
 
-    // ── Cell value strip ──────────────────────────────────────────────────────
-    // Always instantiated (so cell-value-input is always reachable from the
-    // `changed selected-cell-value` handler above), but collapses to height 0
-    // when no cell is selected.
-    Rectangle {
-        x: 0;
-        y: root.height - (root.selected-cell-value != "" ? 28px : 0px);
-        width:  root.width;
-        height: root.selected-cell-value != "" ? 28px : 0px;
-        background: #2a2a3e;
-        clip: true;
-
-        // Top separator line.
+        // ── Search bar ────────────────────────────────────────────────────────
+        // Always in the tree (so search-input is always reachable) but
+        // clipped to height 0 when not in search mode.
         Rectangle {
-            x: 0; y: 0;
-            width: parent.width; height: 1px;
-            background: #45475a;
+            x: 0;
+            y: root.height - root.cell-strip-h - root.filter-banner-h - root.search-bar-h;
+            width:  root.width;
+            height: root.search-bar-h;
+            background: #1e1e2e;
+            clip: true;
+
+            Rectangle {   // top separator
+                x: 0; y: 0;
+                width: parent.width; height: 1px;
+                background: #45475a;
+            }
+
+            Text {
+                x: 10px;
+                y: (parent.height - self.height) / 2;
+                text: "/";
+                color: #89b4fa;
+                font-size: 13px;
+                font-weight: 700;
+            }
+
+            search-input := TextInput {
+                x: 26px;
+                y: (parent.height - self.height) / 2;
+                width: parent.width - 34px;
+                text <=> root.search-query;
+                single-line: true;
+                color: #cdd6f4;
+                selection-background-color: #264f78;
+                selection-foreground-color: #ffffff;
+                font-size: 12px;
+            }
         }
 
-        // Read-only TextInput: text is selectable and copyable (Ctrl+C) but
-        // cannot be modified.  The `changed` handler above calls focus() and
-        // set-selection-offsets(0, MAX) so everything is pre-selected on click.
-        cell-value-input := TextInput {
-            x: 8px;
-            y: (parent.height - self.height) / 2;
-            width: parent.width - 16px;
-            text: root.selected-cell-value;
-            read-only: true;
-            single-line: true;
-            color: #cdd6f4;
-            selection-background-color: #264f78;
-            selection-foreground-color: #ffffff;
-            font-size: 12px;
+        // ── Filter indicator banner ───────────────────────────────────────────
+        // Shown below the search bar when a filter is active.
+        Rectangle {
+            x: 0;
+            y: root.height - root.cell-strip-h - root.filter-banner-h;
+            width:  root.width;
+            height: root.filter-banner-h;
+            background: #1e3a5f;
+            clip: true;
+
+            Rectangle {   // top separator
+                x: 0; y: 0;
+                width: parent.width; height: 1px;
+                background: #2a5298;
+            }
+
+            HorizontalLayout {
+                padding-left: 10px;
+                padding-right: 10px;
+                spacing: 6px;
+
+                Text {
+                    text: @tr("Filter:");
+                    color: #89b4fa;
+                    font-size: 11px;
+                    font-weight: 700;
+                    vertical-alignment: center;
+                }
+                Text {
+                    text: root.active-filter;
+                    color: #cdd6f4;
+                    font-size: 11px;
+                    vertical-alignment: center;
+                    overflow: elide;
+                    horizontal-stretch: 1;
+                }
+                Text {
+                    text: @tr("[Esc to clear]");
+                    color: #585b70;
+                    font-size: 11px;
+                    vertical-alignment: center;
+                }
+            }
+        }
+
+        // ── Cell value strip ──────────────────────────────────────────────────
+        // Always in the tree; collapses to height 0 when no cell is selected.
+        Rectangle {
+            x: 0;
+            y: root.height - root.cell-strip-h;
+            width:  root.width;
+            height: root.cell-strip-h;
+            background: #2a2a3e;
+            clip: true;
+
+            Rectangle {   // top separator
+                x: 0; y: 0;
+                width: parent.width; height: 1px;
+                background: #45475a;
+            }
+
+            cell-value-input := TextInput {
+                x: 8px;
+                y: (parent.height - self.height) / 2;
+                width: parent.width - 16px;
+                text: root.selected-cell-value;
+                read-only: true;
+                single-line: true;
+                color: #cdd6f4;
+                selection-background-color: #264f78;
+                selection-foreground-color: #ffffff;
+                font-size: 12px;
+            }
         }
     }
 }
