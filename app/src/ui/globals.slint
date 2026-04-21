@@ -9,8 +9,14 @@ export struct ConnectionEntry {
     is-active: bool,
 }
 
+/// One cell in a result row.  is-null distinguishes SQL NULL from an empty string.
+export struct RowCellData {
+    value:   string,
+    is-null: bool,
+}
+
 export struct RowData {
-    cells: [string],
+    cells: [RowCellData],
 }
 
 export struct SidebarNode {

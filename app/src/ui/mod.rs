@@ -17,7 +17,8 @@ use wf_db::models::{DbConnection, DbMetadata, DbType, TableInfo};
 
 struct OriginalQueryData {
     columns: Vec<slint::SharedString>,
-    rows: Vec<Vec<slint::SharedString>>,
+    // None = SQL NULL; Some(s) = value (including empty string)
+    rows: Vec<Vec<Option<String>>>,
 }
 
 type SharedOriginalData = Arc<Mutex<Option<OriginalQueryData>>>;
@@ -373,15 +374,10 @@ impl UI {
                         let col_count = result.columns.len();
                         let columns: Vec<slint::SharedString> =
                             result.columns.iter().map(|c| c.clone().into()).collect();
-                        let raw_rows: Vec<Vec<slint::SharedString>> = result
-                            .rows
-                            .iter()
-                            .map(|r| {
-                                r.iter()
-                                    .map(|cell| cell.as_deref().unwrap_or("").to_string().into())
-                                    .collect()
-                            })
-                            .collect();
+                        // Preserve None (SQL NULL) so the badge renderer can distinguish it
+                        // from an empty string.  Moved into OriginalQueryData for filtering.
+                        let raw_rows: Vec<Vec<Option<String>>> =
+                            result.rows.iter().map(|r| r.to_vec()).collect();
                         let row_count = result.row_count as i32;
                         let exec_ms = result.execution_time_ms;
 
@@ -406,12 +402,8 @@ impl UI {
                             // VecModel created on UI thread (Rc is not Send)
                             let col_model = Rc::new(slint::VecModel::from(columns));
                             ui.set_result_columns(col_model.into());
-                            let rows: Vec<crate::RowData> = raw_rows
-                                .into_iter()
-                                .map(|cells| crate::RowData {
-                                    cells: Rc::new(slint::VecModel::from(cells)).into(),
-                                })
-                                .collect();
+                            let rows: Vec<crate::RowData> =
+                                raw_rows.into_iter().map(rows_to_ui).collect();
                             ui.set_result_rows(Rc::new(slint::VecModel::from(rows)).into());
                             ui.set_result_row_count(row_count);
                             // Initialise per-column widths (150 px each).
@@ -900,12 +892,7 @@ impl UI {
                 };
                 let filtered = filter_rows(&data.columns, &data.rows, query.as_str());
                 let row_count = filtered.len() as i32;
-                let rows: Vec<crate::RowData> = filtered
-                    .into_iter()
-                    .map(|cells| crate::RowData {
-                        cells: Rc::new(slint::VecModel::from(cells)).into(),
-                    })
-                    .collect();
+                let rows: Vec<crate::RowData> = filtered.into_iter().map(rows_to_ui).collect();
                 ui.set_result_rows(Rc::new(slint::VecModel::from(rows)).into());
                 ui.set_result_row_count(row_count);
                 ui.set_result_active_filter(query);
@@ -927,13 +914,7 @@ impl UI {
                     return;
                 };
                 let row_count = data.rows.len() as i32;
-                let rows: Vec<crate::RowData> = data
-                    .rows
-                    .iter()
-                    .map(|cells| crate::RowData {
-                        cells: Rc::new(slint::VecModel::from(cells.clone())).into(),
-                    })
-                    .collect();
+                let rows: Vec<crate::RowData> = data.rows.iter().cloned().map(rows_to_ui).collect();
                 ui.set_result_rows(Rc::new(slint::VecModel::from(rows)).into());
                 ui.set_result_row_count(row_count);
                 ui.set_result_active_filter("".into());
@@ -1060,18 +1041,36 @@ fn build_conn_from_form(ui: &crate::UiState, enc_key: &[u8; 32]) -> (DbConnectio
     (conn, password)
 }
 
-// ── Result filter helpers ─────────────────────────────────────────────────────
+// ── Result table helpers ──────────────────────────────────────────────────────
+
+/// Convert one raw result row (`Option<String>` cells) into a Slint `RowData`.
+/// `None` → `RowCellData { value: "", is_null: true }`
+/// `Some(s)` → `RowCellData { value: s, is_null: false }`
+fn rows_to_ui(cells: Vec<Option<String>>) -> crate::RowData {
+    let cell_data: Vec<crate::RowCellData> = cells
+        .into_iter()
+        .map(|c| crate::RowCellData {
+            value: c.as_deref().unwrap_or("").into(),
+            is_null: c.is_none(),
+        })
+        .collect();
+    crate::RowData {
+        cells: Rc::new(slint::VecModel::from(cell_data)).into(),
+    }
+}
 
 /// Filter `rows` according to `query`:
 ///
 /// * Empty query → return all rows.
 /// * `col_name = 'value'` → exact match on the named column (case-insensitive column name).
-/// * Anything else → case-insensitive substring match across all columns.
+///   NULL cells never match an `= 'value'` predicate.
+/// * Anything else → case-insensitive substring match across all columns
+///   (NULL cells are treated as empty string for substring matching).
 fn filter_rows(
     columns: &[slint::SharedString],
-    rows: &[Vec<slint::SharedString>],
+    rows: &[Vec<Option<String>>],
     query: &str,
-) -> Vec<Vec<slint::SharedString>> {
+) -> Vec<Vec<Option<String>>> {
     let query = query.trim();
     if query.is_empty() {
         return rows.to_vec();
@@ -1083,7 +1082,7 @@ fn filter_rows(
         match col_idx {
             Some(idx) => rows
                 .iter()
-                .filter(|row| row.get(idx).is_some_and(|v| v.as_str() == value))
+                .filter(|row| row.get(idx).is_some_and(|v| v.as_deref() == Some(value)))
                 .cloned()
                 .collect(),
             None => vec![],
@@ -1092,8 +1091,12 @@ fn filter_rows(
         let query_lower = query.to_lowercase();
         rows.iter()
             .filter(|row| {
-                row.iter()
-                    .any(|cell| cell.as_str().to_lowercase().contains(&query_lower))
+                row.iter().any(|cell| {
+                    cell.as_deref()
+                        .unwrap_or("")
+                        .to_lowercase()
+                        .contains(&query_lower)
+                })
             })
             .cloned()
             .collect()
@@ -1212,10 +1215,14 @@ mod tests {
         s.into()
     }
 
+    fn sv(s: &str) -> Option<String> {
+        Some(s.to_string())
+    }
+
     #[test]
     fn filter_rows_should_return_all_when_query_empty() {
         let cols = vec![ss("id"), ss("name")];
-        let rows = vec![vec![ss("1"), ss("Alice")], vec![ss("2"), ss("Bob")]];
+        let rows = vec![vec![sv("1"), sv("Alice")], vec![sv("2"), sv("Bob")]];
         assert_eq!(filter_rows(&cols, &rows, "").len(), 2);
         assert_eq!(filter_rows(&cols, &rows, "   ").len(), 2);
     }
@@ -1224,31 +1231,52 @@ mod tests {
     fn filter_rows_should_match_substring_across_all_columns() {
         let cols = vec![ss("name"), ss("city")];
         let rows = vec![
-            vec![ss("Alice"), ss("Tokyo")],
-            vec![ss("Bob"), ss("Osaka")],
-            vec![ss("Alice Smith"), ss("Kyoto")],
+            vec![sv("Alice"), sv("Tokyo")],
+            vec![sv("Bob"), sv("Osaka")],
+            vec![sv("Alice Smith"), sv("Kyoto")],
         ];
         let result = filter_rows(&cols, &rows, "alice");
         assert_eq!(result.len(), 2);
-        assert_eq!(result[0][0].as_str(), "Alice");
-        assert_eq!(result[1][0].as_str(), "Alice Smith");
+        assert_eq!(result[0][0].as_deref(), Some("Alice"));
+        assert_eq!(result[1][0].as_deref(), Some("Alice Smith"));
     }
 
     #[test]
     fn filter_rows_should_match_exact_column_value() {
         let cols = vec![ss("name"), ss("city")];
-        let rows = vec![vec![ss("Alice"), ss("Tokyo")], vec![ss("Bob"), ss("Osaka")]];
+        let rows = vec![vec![sv("Alice"), sv("Tokyo")], vec![sv("Bob"), sv("Osaka")]];
         let result = filter_rows(&cols, &rows, "city = 'Tokyo'");
         assert_eq!(result.len(), 1);
-        assert_eq!(result[0][1].as_str(), "Tokyo");
+        assert_eq!(result[0][1].as_deref(), Some("Tokyo"));
     }
 
     #[test]
     fn filter_rows_should_return_empty_when_column_not_found() {
         let cols = vec![ss("name")];
-        let rows = vec![vec![ss("Alice")]];
+        let rows = vec![vec![sv("Alice")]];
         let result = filter_rows(&cols, &rows, "missing = 'x'");
         assert!(result.is_empty());
+    }
+
+    #[test]
+    fn filter_rows_should_not_match_null_with_eq_predicate() {
+        let cols = vec![ss("name")];
+        let rows = vec![vec![None], vec![sv("Alice")]];
+        let result = filter_rows(&cols, &rows, "name = ''");
+        // NULL != '' — only the non-null empty string row should match, but here
+        // there is none, so result is empty.
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn filter_rows_should_treat_null_as_empty_for_substring_match() {
+        let cols = vec![ss("name")];
+        // NULL treated as "" for substring search — empty query prefix matches all.
+        let rows = vec![vec![None], vec![sv("Alice")]];
+        // Substring "" matches everything (but we trim, so empty query returns all).
+        let result = filter_rows(&cols, &rows, "Alice");
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0][0].as_deref(), Some("Alice"));
     }
 
     // ── append_editor_text tests ──────────────────────────────────────────────
