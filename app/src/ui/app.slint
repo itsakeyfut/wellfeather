@@ -40,6 +40,18 @@ export global UiState {
     /// Fired by ResultTable drag handles; Rust updates the VecModel and total.
     callback resize-result-column(int, float);
 
+    // ── Result table filter / clipboard ──────────────────────────────────────
+    /// Text of the currently active client-side filter (empty = no filter).
+    in-out property <string> result-active-filter: "";
+    /// Apply a client-side filter to the current result rows.
+    callback filter-result-rows(string);
+    /// Clear the current filter and restore all rows.
+    callback clear-result-filter();
+    /// Copy a cell value to the system clipboard.
+    callback copy-result-cell(string);
+    /// Returns cumulative x-offset (logical px as float) of column j.
+    pure callback col-x-offset(int) -> float;
+
     // ── Connection list (sidebar) ─────────────────────────────────────────────
     in-out property <[ConnectionEntry]> connection-list:      [];
     in-out property <string>            active-connection-id: "";
@@ -147,8 +159,8 @@ export component AppWindow inherits Window {
         if (root._sidebar-active) { root.focused-pane = 0; }
     }
 
-    // Sync focused-pane when the result FocusScope gains focus by Alt+Down.
-    property <bool> _result-active: result-focus.has-focus;
+    // Sync focused-pane when the result table gains focus (keyboard nav or click).
+    property <bool> _result-active: result-table-inst.result-focused;
     changed _result-active => {
         if (root._result-active) { root.focused-pane = 2; }
     }
@@ -188,7 +200,7 @@ export component AppWindow inherits Window {
                 } else if (event.text == Key.DownArrow) {
                     if (root.focused-pane == 1 && UiState.result-panel-open) {
                         root.focused-pane = 2;
-                        result-focus.focus();
+                        result-table-inst.grab-focus();
                     }
                     EventResult.accept
                 } else if (event.text == Key.UpArrow) {
@@ -279,14 +291,16 @@ export component AppWindow inherits Window {
 
             // ── Result / error overlay panel ──────────────────────────────────
             // Overlays the editor from the bottom (VSCode-style).
-            // Visible only when UiState.result-panel-open is true.
-            if UiState.result-panel-open: Rectangle {
+            // Always instantiated (so result-table-inst is accessible from AppWindow
+            // scope for focus tracking and grab-focus); hidden via `visible:` when closed.
+            Rectangle {
                 x: root.gutter-col-width;
                 y: parent.height - root.panel-height;
                 width:  parent.width - root.gutter-col-width;
                 height: root.panel-height;
                 background: #1e1e2e;
                 clip: true;
+                visible: UiState.result-panel-open;
 
                 // ── Top drag handle ───────────────────────────────────────────
                 // Dragging this edge adjusts panel-height (panel grows/shrinks upward).
@@ -374,7 +388,7 @@ export component AppWindow inherits Window {
                 }
 
                 // ── Result table content ──────────────────────────────────────
-                ResultTable {
+                result-table-inst := ResultTable {
                     x: 0;
                     y: root.divider-thickness + root.panel-header-height;
                     width:  parent.width;
@@ -386,24 +400,14 @@ export component AppWindow inherits Window {
                     error-message:    UiState.error-message;
                     col-widths:       UiState.result-col-widths;
                     total-col-width:  UiState.result-total-col-width;
+                    active-filter:    UiState.result-active-filter;
                     resize-column(i, w) => { UiState.resize-result-column(i, w); }
+                    filter-rows(q)      => { UiState.filter-result-rows(q); }
+                    clear-filter        => { UiState.clear-result-filter(); }
+                    copy-cell(v)        => { UiState.copy-result-cell(v); }
+                    col-x-offset(j)     => { UiState.col-x-offset(j); }
                 }
             }
-        }
-
-        // ── Result-panel focus absorber ───────────────────────────────────────
-        // Always present (so it can be referenced by Alt+Down handler) but
-        // sized to 0 when the panel is closed.  focus-on-click: false so it
-        // does not intercept pointer events to the ResultTable below.
-        // When focused (via Alt+Down), key-pressed absorbs all keys to prevent
-        // them from leaking back to the editor's TextInput.
-        result-focus := FocusScope {
-            x: sidebar-width;
-            y: content-height - root.panel-height;
-            width:  main-width;
-            height: UiState.result-panel-open ? root.panel-height : 0;
-            focus-on-click: false;
-            key-pressed(event) => { EventResult.accept }
         }
 
         // ── Status bar ────────────────────────────────────────────────────────

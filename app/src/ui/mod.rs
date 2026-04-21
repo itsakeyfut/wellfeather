@@ -11,6 +11,17 @@ use tokio::sync::mpsc;
 use wf_config::crypto;
 use wf_db::models::{DbConnection, DbMetadata, DbType, TableInfo};
 
+// ---------------------------------------------------------------------------
+// Original query result — retained for client-side filtering
+// ---------------------------------------------------------------------------
+
+struct OriginalQueryData {
+    columns: Vec<slint::SharedString>,
+    rows: Vec<Vec<slint::SharedString>>,
+}
+
+type SharedOriginalData = Arc<Mutex<Option<OriginalQueryData>>>;
+
 use crate::{
     app::{command::Command, event::Event},
     state::SharedState,
@@ -189,6 +200,10 @@ impl UI {
         let sidebar_state: Arc<Mutex<SidebarUiState>> =
             Arc::new(Mutex::new(SidebarUiState::default()));
 
+        // Shared storage for the unfiltered query result; written by the event
+        // handler on QueryFinished, read by the filter callbacks on the UI thread.
+        let original_data: SharedOriginalData = Arc::new(Mutex::new(None));
+
         Self::register_sidebar_callbacks(
             &window,
             state.clone(),
@@ -198,9 +213,15 @@ impl UI {
         );
         Self::register_connection_form_callbacks(&window, tx_cmd.clone(), enc_key);
         Self::register_editor_callbacks(&window, state.clone(), tx_cmd.clone());
-        Self::register_result_callbacks(&window, state.clone());
+        Self::register_result_callbacks(&window, state.clone(), Arc::clone(&original_data));
         Self::register_status_callbacks(&window, state.clone());
-        Self::spawn_event_handler(&window, rx_event, state, Arc::clone(&sidebar_state));
+        Self::spawn_event_handler(
+            &window,
+            rx_event,
+            state,
+            Arc::clone(&sidebar_state),
+            Arc::clone(&original_data),
+        );
 
         Ok(Self { window })
     }
@@ -217,6 +238,7 @@ impl UI {
         mut rx_event: mpsc::Receiver<Event>,
         state: SharedState,
         sidebar_state: Arc<Mutex<SidebarUiState>>,
+        original_data: SharedOriginalData,
     ) {
         let window_weak = window.as_weak();
         tokio::spawn(async move {
@@ -362,6 +384,16 @@ impl UI {
                             .collect();
                         let row_count = result.row_count as i32;
                         let exec_ms = result.execution_time_ms;
+
+                        // Store original rows for client-side filtering.
+                        {
+                            let mut orig = original_data.lock().unwrap_or_else(|p| p.into_inner());
+                            *orig = Some(OriginalQueryData {
+                                columns: columns.clone(),
+                                rows: raw_rows.clone(),
+                            });
+                        }
+
                         // clone required: invoke_from_event_loop closure must be 'static
                         let window_weak = window_weak.clone();
                         let _ = slint::invoke_from_event_loop(move || {
@@ -370,6 +402,7 @@ impl UI {
                             };
                             let ui = window.global::<crate::UiState>();
                             ui.set_is_loading(false);
+                            ui.set_result_active_filter("".into()); // clear stale filter
                             // VecModel created on UI thread (Rc is not Send)
                             let col_model = Rc::new(slint::VecModel::from(columns));
                             ui.set_result_columns(col_model.into());
@@ -823,26 +856,113 @@ impl UI {
 
     // ── Result callbacks ──────────────────────────────────────────────────────
 
-    fn register_result_callbacks(window: &crate::AppWindow, _state: SharedState) {
+    fn register_result_callbacks(
+        window: &crate::AppWindow,
+        _state: SharedState,
+        original_data: SharedOriginalData,
+    ) {
         let ui_state = window.global::<crate::UiState>();
-        // clone required: callback closure must be 'static
         let window_weak = window.as_weak();
 
         // resize-result-column: update the column width VecModel in place and
         // recompute the total so viewport-width stays accurate during drag.
-        ui_state.on_resize_result_column(move |i, w| {
-            let Some(window) = window_weak.upgrade() else {
-                return;
-            };
-            let ui = window.global::<crate::UiState>();
-            let model = ui.get_result_col_widths();
-            let n = model.row_count();
-            if (i as usize) < n {
-                model.set_row_data(i as usize, w);
-                let total: f32 = (0..n).filter_map(|j| model.row_data(j)).sum();
-                ui.set_result_total_col_width(total);
-            }
-        });
+        {
+            // clone required: callback closure must be 'static
+            let window_weak = window_weak.clone();
+            ui_state.on_resize_result_column(move |i, w| {
+                let Some(window) = window_weak.upgrade() else {
+                    return;
+                };
+                let ui = window.global::<crate::UiState>();
+                let model = ui.get_result_col_widths();
+                let n = model.row_count();
+                if (i as usize) < n {
+                    model.set_row_data(i as usize, w);
+                    let total: f32 = (0..n).filter_map(|j| model.row_data(j)).sum();
+                    ui.set_result_total_col_width(total);
+                }
+            });
+        }
+
+        // filter-result-rows: apply client-side predicate and update the displayed rows.
+        {
+            // clone required: callback closure must be 'static
+            let window_weak = window_weak.clone();
+            let original_data = Arc::clone(&original_data);
+            ui_state.on_filter_result_rows(move |query| {
+                let Some(window) = window_weak.upgrade() else {
+                    return;
+                };
+                let ui = window.global::<crate::UiState>();
+                let orig = original_data.lock().unwrap_or_else(|p| p.into_inner());
+                let Some(ref data) = *orig else {
+                    return;
+                };
+                let filtered = filter_rows(&data.columns, &data.rows, query.as_str());
+                let row_count = filtered.len() as i32;
+                let rows: Vec<crate::RowData> = filtered
+                    .into_iter()
+                    .map(|cells| crate::RowData {
+                        cells: Rc::new(slint::VecModel::from(cells)).into(),
+                    })
+                    .collect();
+                ui.set_result_rows(Rc::new(slint::VecModel::from(rows)).into());
+                ui.set_result_row_count(row_count);
+                ui.set_result_active_filter(query);
+            });
+        }
+
+        // clear-result-filter: restore the unfiltered original rows.
+        {
+            // clone required: callback closure must be 'static
+            let window_weak = window_weak.clone();
+            let original_data = Arc::clone(&original_data);
+            ui_state.on_clear_result_filter(move || {
+                let Some(window) = window_weak.upgrade() else {
+                    return;
+                };
+                let ui = window.global::<crate::UiState>();
+                let orig = original_data.lock().unwrap_or_else(|p| p.into_inner());
+                let Some(ref data) = *orig else {
+                    return;
+                };
+                let row_count = data.rows.len() as i32;
+                let rows: Vec<crate::RowData> = data
+                    .rows
+                    .iter()
+                    .map(|cells| crate::RowData {
+                        cells: Rc::new(slint::VecModel::from(cells.clone())).into(),
+                    })
+                    .collect();
+                ui.set_result_rows(Rc::new(slint::VecModel::from(rows)).into());
+                ui.set_result_row_count(row_count);
+                ui.set_result_active_filter("".into());
+            });
+        }
+
+        // copy-result-cell: write the value to the system clipboard via arboard.
+        {
+            ui_state.on_copy_result_cell(move |value| {
+                if let Ok(mut clip) = arboard::Clipboard::new() {
+                    let _ = clip.set_text(value.as_str());
+                }
+            });
+        }
+
+        // col-x-offset (pure): cumulative x-position of column j (sum of widths 0..j).
+        // Used by result_table.slint's `changed selected-col` handler to auto-scroll.
+        {
+            // clone required: callback closure must be 'static
+            let window_weak = window_weak.clone();
+            ui_state.on_col_x_offset(move |j| {
+                let Some(window) = window_weak.upgrade() else {
+                    return 0.0;
+                };
+                let ui = window.global::<crate::UiState>();
+                let model = ui.get_result_col_widths();
+                (0..j as usize).filter_map(|i| model.row_data(i)).sum()
+            });
+        }
     }
 
     // ── Status callbacks (TODO) ───────────────────────────────────────────────
@@ -938,6 +1058,55 @@ fn build_conn_from_form(ui: &crate::UiState, enc_key: &[u8; 32]) -> (DbConnectio
     };
 
     (conn, password)
+}
+
+// ── Result filter helpers ─────────────────────────────────────────────────────
+
+/// Filter `rows` according to `query`:
+///
+/// * Empty query → return all rows.
+/// * `col_name = 'value'` → exact match on the named column (case-insensitive column name).
+/// * Anything else → case-insensitive substring match across all columns.
+fn filter_rows(
+    columns: &[slint::SharedString],
+    rows: &[Vec<slint::SharedString>],
+    query: &str,
+) -> Vec<Vec<slint::SharedString>> {
+    let query = query.trim();
+    if query.is_empty() {
+        return rows.to_vec();
+    }
+    if let Some((col_name, value)) = parse_col_eq(query) {
+        let col_idx = columns
+            .iter()
+            .position(|c| c.as_str().eq_ignore_ascii_case(&col_name));
+        match col_idx {
+            Some(idx) => rows
+                .iter()
+                .filter(|row| row.get(idx).is_some_and(|v| v.as_str() == value))
+                .cloned()
+                .collect(),
+            None => vec![],
+        }
+    } else {
+        let query_lower = query.to_lowercase();
+        rows.iter()
+            .filter(|row| {
+                row.iter()
+                    .any(|cell| cell.as_str().to_lowercase().contains(&query_lower))
+            })
+            .cloned()
+            .collect()
+    }
+}
+
+/// Parse `col = 'value'` syntax.  Returns `(column_name, value_str)` on success.
+fn parse_col_eq(query: &str) -> Option<(String, &str)> {
+    let mut parts = query.splitn(2, '=');
+    let col = parts.next()?.trim();
+    let rest = parts.next()?.trim();
+    let val = rest.strip_prefix('\'')?.strip_suffix('\'')?;
+    Some((col.to_string(), val))
 }
 
 // ---------------------------------------------------------------------------
@@ -1036,6 +1205,53 @@ mod tests {
         assert!(!nodes[0].is_active);
         assert!(nodes[1].is_active);
     }
+
+    // ── filter_rows tests ─────────────────────────────────────────────────────
+
+    fn ss(s: &str) -> slint::SharedString {
+        s.into()
+    }
+
+    #[test]
+    fn filter_rows_should_return_all_when_query_empty() {
+        let cols = vec![ss("id"), ss("name")];
+        let rows = vec![vec![ss("1"), ss("Alice")], vec![ss("2"), ss("Bob")]];
+        assert_eq!(filter_rows(&cols, &rows, "").len(), 2);
+        assert_eq!(filter_rows(&cols, &rows, "   ").len(), 2);
+    }
+
+    #[test]
+    fn filter_rows_should_match_substring_across_all_columns() {
+        let cols = vec![ss("name"), ss("city")];
+        let rows = vec![
+            vec![ss("Alice"), ss("Tokyo")],
+            vec![ss("Bob"), ss("Osaka")],
+            vec![ss("Alice Smith"), ss("Kyoto")],
+        ];
+        let result = filter_rows(&cols, &rows, "alice");
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0][0].as_str(), "Alice");
+        assert_eq!(result[1][0].as_str(), "Alice Smith");
+    }
+
+    #[test]
+    fn filter_rows_should_match_exact_column_value() {
+        let cols = vec![ss("name"), ss("city")];
+        let rows = vec![vec![ss("Alice"), ss("Tokyo")], vec![ss("Bob"), ss("Osaka")]];
+        let result = filter_rows(&cols, &rows, "city = 'Tokyo'");
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0][1].as_str(), "Tokyo");
+    }
+
+    #[test]
+    fn filter_rows_should_return_empty_when_column_not_found() {
+        let cols = vec![ss("name")];
+        let rows = vec![vec![ss("Alice")]];
+        let result = filter_rows(&cols, &rows, "missing = 'x'");
+        assert!(result.is_empty());
+    }
+
+    // ── append_editor_text tests ──────────────────────────────────────────────
 
     #[test]
     fn append_editor_text_should_set_text_when_editor_is_empty() {
