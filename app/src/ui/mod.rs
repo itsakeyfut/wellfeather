@@ -19,6 +19,9 @@ struct OriginalQueryData {
     columns: Vec<slint::SharedString>,
     // None = SQL NULL; Some(s) = value (including empty string)
     rows: Vec<Vec<Option<String>>>,
+    /// None = unsorted; Some(i) = sort column index.
+    sort_col: Option<usize>,
+    sort_asc: bool,
 }
 
 type SharedOriginalData = Arc<Mutex<Option<OriginalQueryData>>>;
@@ -381,12 +384,14 @@ impl UI {
                         let row_count = result.row_count as i32;
                         let exec_ms = result.execution_time_ms;
 
-                        // Store original rows for client-side filtering.
+                        // Store original rows for client-side filtering/sorting.
                         {
                             let mut orig = original_data.lock().unwrap_or_else(|p| p.into_inner());
                             *orig = Some(OriginalQueryData {
                                 columns: columns.clone(),
                                 rows: raw_rows.clone(),
+                                sort_col: None,
+                                sort_asc: true,
                             });
                         }
 
@@ -399,6 +404,8 @@ impl UI {
                             let ui = window.global::<crate::UiState>();
                             ui.set_is_loading(false);
                             ui.set_result_active_filter("".into()); // clear stale filter
+                            ui.set_result_sort_col(-1);
+                            ui.set_result_sort_asc(true);
                             // VecModel created on UI thread (Rc is not Send)
                             let col_model = Rc::new(slint::VecModel::from(columns));
                             ui.set_result_columns(col_model.into());
@@ -876,7 +883,7 @@ impl UI {
             });
         }
 
-        // filter-result-rows: apply client-side predicate and update the displayed rows.
+        // filter-result-rows: apply client-side predicate, then re-apply active sort.
         {
             // clone required: callback closure must be 'static
             let window_weak = window_weak.clone();
@@ -890,7 +897,10 @@ impl UI {
                 let Some(ref data) = *orig else {
                     return;
                 };
-                let filtered = filter_rows(&data.columns, &data.rows, query.as_str());
+                let mut filtered = filter_rows(&data.columns, &data.rows, query.as_str());
+                if let Some(col) = data.sort_col {
+                    sort_rows(&mut filtered, col, data.sort_asc);
+                }
                 let row_count = filtered.len() as i32;
                 let rows: Vec<crate::RowData> = filtered.into_iter().map(rows_to_ui).collect();
                 ui.set_result_rows(Rc::new(slint::VecModel::from(rows)).into());
@@ -899,7 +909,7 @@ impl UI {
             });
         }
 
-        // clear-result-filter: restore the unfiltered original rows.
+        // clear-result-filter: restore the unfiltered original rows, then re-apply active sort.
         {
             // clone required: callback closure must be 'static
             let window_weak = window_weak.clone();
@@ -913,9 +923,13 @@ impl UI {
                 let Some(ref data) = *orig else {
                     return;
                 };
-                let row_count = data.rows.len() as i32;
-                let rows: Vec<crate::RowData> = data.rows.iter().cloned().map(rows_to_ui).collect();
-                ui.set_result_rows(Rc::new(slint::VecModel::from(rows)).into());
+                let mut rows: Vec<Vec<Option<String>>> = data.rows.clone();
+                if let Some(col) = data.sort_col {
+                    sort_rows(&mut rows, col, data.sort_asc);
+                }
+                let row_count = rows.len() as i32;
+                let ui_rows: Vec<crate::RowData> = rows.into_iter().map(rows_to_ui).collect();
+                ui.set_result_rows(Rc::new(slint::VecModel::from(ui_rows)).into());
                 ui.set_result_row_count(row_count);
                 ui.set_result_active_filter("".into());
             });
@@ -942,6 +956,46 @@ impl UI {
                 let ui = window.global::<crate::UiState>();
                 let model = ui.get_result_col_widths();
                 (0..j as usize).filter_map(|i| model.row_data(i)).sum()
+            });
+        }
+
+        // sort-result-col: toggle sort state and re-render with filter + sort applied.
+        {
+            // clone required: callback closure must be 'static
+            let window_weak = window_weak.clone();
+            let original_data = Arc::clone(&original_data);
+            ui_state.on_sort_result_col(move |col_i| {
+                let Some(window) = window_weak.upgrade() else {
+                    return;
+                };
+                let ui = window.global::<crate::UiState>();
+                // Read active filter before taking the lock.
+                let filter_q = ui.get_result_active_filter().to_string();
+                let (new_col, new_asc, mut rows) = {
+                    let mut orig = original_data.lock().unwrap_or_else(|p| p.into_inner());
+                    let Some(ref mut data) = *orig else {
+                        return;
+                    };
+                    let col = col_i as usize;
+                    let (new_col, new_asc) = if data.sort_col == Some(col) {
+                        (Some(col), !data.sort_asc)
+                    } else {
+                        (Some(col), true)
+                    };
+                    data.sort_col = new_col;
+                    data.sort_asc = new_asc;
+                    let filtered = filter_rows(&data.columns, &data.rows, &filter_q);
+                    (new_col, new_asc, filtered)
+                };
+                if let Some(col) = new_col {
+                    sort_rows(&mut rows, col, new_asc);
+                }
+                let row_count = rows.len() as i32;
+                let ui_rows: Vec<crate::RowData> = rows.into_iter().map(rows_to_ui).collect();
+                ui.set_result_rows(Rc::new(slint::VecModel::from(ui_rows)).into());
+                ui.set_result_row_count(row_count);
+                ui.set_result_sort_col(new_col.map(|c| c as i32).unwrap_or(-1));
+                ui.set_result_sort_asc(new_asc);
             });
         }
     }
@@ -1057,6 +1111,29 @@ fn rows_to_ui(cells: Vec<Option<String>>) -> crate::RowData {
     crate::RowData {
         cells: Rc::new(slint::VecModel::from(cell_data)).into(),
     }
+}
+
+/// Sort `rows` in-place by column `col`.
+/// - Tries numeric (`f64`) comparison first; falls back to lexicographic.
+/// - `None` (SQL NULL) always sorts last regardless of direction.
+fn sort_rows(rows: &mut [Vec<Option<String>>], col: usize, ascending: bool) {
+    rows.sort_by(|a, b| {
+        let av = a.get(col).and_then(|v| v.as_deref());
+        let bv = b.get(col).and_then(|v| v.as_deref());
+        match (av, bv) {
+            // NULL always sorts last regardless of direction.
+            (None, None) => std::cmp::Ordering::Equal,
+            (None, _) => std::cmp::Ordering::Greater,
+            (_, None) => std::cmp::Ordering::Less,
+            (Some(a), Some(b)) => {
+                let ord = match (a.parse::<f64>(), b.parse::<f64>()) {
+                    (Ok(af), Ok(bf)) => af.partial_cmp(&bf).unwrap_or(std::cmp::Ordering::Equal),
+                    _ => a.cmp(b),
+                };
+                if ascending { ord } else { ord.reverse() }
+            }
+        }
+    });
 }
 
 /// Filter `rows` according to `query`:
@@ -1277,6 +1354,53 @@ mod tests {
         let result = filter_rows(&cols, &rows, "Alice");
         assert_eq!(result.len(), 1);
         assert_eq!(result[0][0].as_deref(), Some("Alice"));
+    }
+
+    // ── sort_rows tests ───────────────────────────────────────────────────────
+
+    #[test]
+    fn sort_rows_should_sort_strings_ascending() {
+        let mut rows = vec![vec![sv("banana")], vec![sv("apple")], vec![sv("cherry")]];
+        sort_rows(&mut rows, 0, true);
+        assert_eq!(rows[0][0].as_deref(), Some("apple"));
+        assert_eq!(rows[1][0].as_deref(), Some("banana"));
+        assert_eq!(rows[2][0].as_deref(), Some("cherry"));
+    }
+
+    #[test]
+    fn sort_rows_should_sort_strings_descending() {
+        let mut rows = vec![vec![sv("banana")], vec![sv("apple")], vec![sv("cherry")]];
+        sort_rows(&mut rows, 0, false);
+        assert_eq!(rows[0][0].as_deref(), Some("cherry"));
+        assert_eq!(rows[1][0].as_deref(), Some("banana"));
+        assert_eq!(rows[2][0].as_deref(), Some("apple"));
+    }
+
+    #[test]
+    fn sort_rows_should_sort_numerically_when_values_are_numbers() {
+        let mut rows = vec![vec![sv("10")], vec![sv("2")], vec![sv("20")]];
+        sort_rows(&mut rows, 0, true);
+        assert_eq!(rows[0][0].as_deref(), Some("2"));
+        assert_eq!(rows[1][0].as_deref(), Some("10"));
+        assert_eq!(rows[2][0].as_deref(), Some("20"));
+    }
+
+    #[test]
+    fn sort_rows_should_put_nulls_last_ascending() {
+        let mut rows = vec![vec![None], vec![sv("b")], vec![sv("a")]];
+        sort_rows(&mut rows, 0, true);
+        assert_eq!(rows[0][0].as_deref(), Some("a"));
+        assert_eq!(rows[1][0].as_deref(), Some("b"));
+        assert!(rows[2][0].is_none());
+    }
+
+    #[test]
+    fn sort_rows_should_put_nulls_last_descending() {
+        let mut rows = vec![vec![None], vec![sv("b")], vec![sv("a")]];
+        sort_rows(&mut rows, 0, false);
+        assert_eq!(rows[0][0].as_deref(), Some("b"));
+        assert_eq!(rows[1][0].as_deref(), Some("a"));
+        assert!(rows[2][0].is_none());
     }
 
     // ── append_editor_text tests ──────────────────────────────────────────────

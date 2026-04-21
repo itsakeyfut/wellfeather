@@ -52,6 +52,14 @@ export global UiState {
     /// Returns cumulative x-offset (logical px as float) of column j.
     pure callback col-x-offset(int) -> float;
 
+    // ── Result table column sort ──────────────────────────────────────────────
+    /// -1 = no sort; ≥0 = active sort column index.
+    in-out property <int>  result-sort-col: -1;
+    /// true = ascending, false = descending.
+    in-out property <bool> result-sort-asc: true;
+    /// Sort rows by column i (toggles direction when the same column is clicked twice).
+    callback sort-result-col(int);
+
     // ── Connection list (sidebar) ─────────────────────────────────────────────
     in-out property <[ConnectionEntry]> connection-list:      [];
     in-out property <string>            active-connection-id: "";
@@ -401,11 +409,14 @@ export component AppWindow inherits Window {
                     col-widths:       UiState.result-col-widths;
                     total-col-width:  UiState.result-total-col-width;
                     active-filter:    UiState.result-active-filter;
-                    resize-column(i, w) => { UiState.resize-result-column(i, w); }
-                    filter-rows(q)      => { UiState.filter-result-rows(q); }
-                    clear-filter        => { UiState.clear-result-filter(); }
-                    copy-cell(v)        => { UiState.copy-result-cell(v); }
-                    col-x-offset(j)     => { UiState.col-x-offset(j); }
+                    resize-column(i, w)  => { UiState.resize-result-column(i, w); }
+                    filter-rows(q)       => { UiState.filter-result-rows(q); }
+                    clear-filter         => { UiState.clear-result-filter(); }
+                    copy-cell(v)         => { UiState.copy-result-cell(v); }
+                    col-x-offset(j)      => { UiState.col-x-offset(j); }
+                    sort-col:            UiState.result-sort-col;
+                    sort-asc:            UiState.result-sort-asc;
+                    sort-col-clicked(i)  => { UiState.sort-result-col(i); }
                 }
             }
         }
