@@ -56,6 +56,14 @@ export component ResultTable inherits Rectangle {
         }
     }
 
+    // ── Pagination / row-count state ─────────────────────────────────────────
+    /// Active page size (100 / 500 / 1000). Driven from Rust; reflects config.
+    in property <int> page-size:   500;
+    /// Total rows returned by the last query (before client-side filtering).
+    in property <int> total-rows:  0;
+    /// User selected a new page size; Rust persists to config and updates state.
+    callback change-page-size(int);
+
     // ── Callbacks ─────────────────────────────────────────────────────────────
     callback resize-column(int, float);
     callback filter-rows(string);
@@ -86,6 +94,7 @@ export component ResultTable inherits Rectangle {
 
     // ── Style constants ───────────────────────────────────────────────────────
     property <length> row-height:    28px;
+    property <length> toolbar-h:     28px;
     property <length> default-col-w: 150px;
     property <length> min-col-w:     48px;
 
@@ -113,7 +122,7 @@ export component ResultTable inherits Rectangle {
 
     // ── Page size for Page Up/Down ────────────────────────────────────────────
     property <int> page-rows: max(1,
-        (root.height - root.row-height - root.bottom-total) / root.row-height);
+        (root.height - root.row-height - root.bottom-total - root.toolbar-h) / root.row-height);
 
     // ── Body viewport state ───────────────────────────────────────────────────
     // Mirrored at component level so `changed` handlers can update them without
@@ -121,8 +130,8 @@ export component ResultTable inherits Rectangle {
     // Two-way bound to body-scroll.viewport-y/x inside the if-block.
     property <length> body-vp-y: 0;
     property <length> body-vp-x: 0;
-    // Visible body height (full height minus header row and collapsed strips).
-    property <length> body-h: max(1px, root.height - root.bottom-total - root.row-height);
+    // Visible body height (full height minus toolbar, header row, and collapsed strips).
+    property <length> body-h: max(1px, root.height - root.bottom-total - root.row-height - root.toolbar-h);
 
     // Reset selection and nav state when a new query result arrives.
     changed rows => {
@@ -414,6 +423,97 @@ export component ResultTable inherits Rectangle {
         if !root.is-loading && root.error-message == "": VerticalLayout {
             width:  parent.width;
             height: parent.height - root.bottom-total;
+
+            // ── Toolbar (page-size selector + row count) ──────────────────────
+            Rectangle {
+                height: root.toolbar-h;
+                background: #181825;
+                clip: true;
+
+                // Bottom separator
+                Rectangle {
+                    x: 0; y: parent.height - 1px;
+                    width: parent.width; height: 1px;
+                    background: #313244;
+                }
+
+                // Row count display (left side; only when a result is loaded)
+                if root.columns.length > 0: Text {
+                    x: 10px;
+                    y: (parent.height - self.height) / 2;
+                    text: root.row-count != root.total-rows
+                        ? @tr("{0} / {1} rows", root.row-count, root.total-rows)
+                        : @tr("{0} rows", root.row-count);
+                    color: #585b70;
+                    font-size: 11px;
+                }
+
+                // Page-size selector: three toggle buttons aligned to the right
+                HorizontalLayout {
+                    x: parent.width - 136px;
+                    y: (parent.height - self.height) / 2;
+                    width: 128px;
+                    height: 20px;
+                    spacing: 2px;
+
+                    // 100
+                    Rectangle {
+                        width: 38px;
+                        height: 20px;
+                        border-radius: 3px;
+                        background: ps100-ta.has-hover ? #45475a
+                            : root.page-size == 100 ? #89b4fa : #313244;
+                        ps100-ta := TouchArea {
+                            clicked => { root.change-page-size(100); }
+                        }
+                        Text {
+                            text: "100";
+                            color: root.page-size == 100 ? #1e1e2e : #9399b2;
+                            font-size: 11px;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                    }
+
+                    // 500
+                    Rectangle {
+                        width: 38px;
+                        height: 20px;
+                        border-radius: 3px;
+                        background: ps500-ta.has-hover ? #45475a
+                            : root.page-size == 500 ? #89b4fa : #313244;
+                        ps500-ta := TouchArea {
+                            clicked => { root.change-page-size(500); }
+                        }
+                        Text {
+                            text: "500";
+                            color: root.page-size == 500 ? #1e1e2e : #9399b2;
+                            font-size: 11px;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                    }
+
+                    // 1000
+                    Rectangle {
+                        width: 46px;
+                        height: 20px;
+                        border-radius: 3px;
+                        background: ps1000-ta.has-hover ? #45475a
+                            : root.page-size == 1000 ? #89b4fa : #313244;
+                        ps1000-ta := TouchArea {
+                            clicked => { root.change-page-size(1000); }
+                        }
+                        Text {
+                            text: "1000";
+                            color: root.page-size == 1000 ? #1e1e2e : #9399b2;
+                            font-size: 11px;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+            }
 
             // ── Header row ────────────────────────────────────────────────────
             header-scroll := Flickable {

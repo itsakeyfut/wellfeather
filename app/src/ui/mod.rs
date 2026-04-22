@@ -27,7 +27,10 @@ struct OriginalQueryData {
 type SharedOriginalData = Arc<Mutex<Option<OriginalQueryData>>>;
 
 use crate::{
-    app::{command::Command, event::Event},
+    app::{
+        command::{Command, ConfigUpdate},
+        event::Event,
+    },
     state::SharedState,
 };
 
@@ -217,7 +220,17 @@ impl UI {
         );
         Self::register_connection_form_callbacks(&window, tx_cmd.clone(), enc_key);
         Self::register_editor_callbacks(&window, state.clone(), tx_cmd.clone());
-        Self::register_result_callbacks(&window, state.clone(), Arc::clone(&original_data));
+        // Set initial page size on the Slint window from shared state.
+        window
+            .global::<crate::UiState>()
+            .set_page_size(state.ui.page_size() as i32);
+
+        Self::register_result_callbacks(
+            &window,
+            state.clone(),
+            Arc::clone(&original_data),
+            tx_cmd.clone(),
+        );
         Self::register_status_callbacks(&window, state.clone());
         Self::spawn_event_handler(
             &window,
@@ -413,6 +426,7 @@ impl UI {
                                 raw_rows.into_iter().map(rows_to_ui).collect();
                             ui.set_result_rows(Rc::new(slint::VecModel::from(rows)).into());
                             ui.set_result_row_count(row_count);
+                            ui.set_result_total_rows(row_count);
                             // Initialise per-column widths (150 px each).
                             const DEFAULT_COL_W: f32 = 150.0;
                             let widths: Vec<f32> = vec![DEFAULT_COL_W; col_count];
@@ -857,8 +871,9 @@ impl UI {
 
     fn register_result_callbacks(
         window: &crate::AppWindow,
-        _state: SharedState,
+        state: SharedState,
         original_data: SharedOriginalData,
+        tx_cmd: mpsc::Sender<Command>,
     ) {
         let ui_state = window.global::<crate::UiState>();
         let window_weak = window.as_weak();
@@ -1007,6 +1022,27 @@ impl UI {
                 let tsv = result_to_tsv(&col_strs, &rows);
                 if let Ok(mut clip) = arboard::Clipboard::new() {
                     let _ = clip.set_text(tsv);
+                }
+            });
+        }
+
+        // update-page-size: user clicked 100/500/1000 button in the result toolbar.
+        // Update shared state immediately so the next RunQuery picks up the new limit,
+        // then send UpdateConfig to persist it to config.toml via the controller.
+        {
+            // clone required: callback closure must be 'static
+            let tx_cmd = tx_cmd.clone();
+            ui_state.on_update_page_size(move |n| {
+                let size = n as usize;
+                state.ui.set_page_size(size);
+                if let Ok(ps) = wf_config::models::PageSize::try_from(n as u32) {
+                    // clone required: tokio::spawn requires 'static
+                    let tx_cmd = tx_cmd.clone();
+                    tokio::spawn(async move {
+                        let _ = tx_cmd
+                            .send(Command::UpdateConfig(ConfigUpdate::PageSize(ps)))
+                            .await;
+                    });
                 }
             });
         }
