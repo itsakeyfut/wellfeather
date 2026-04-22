@@ -239,6 +239,8 @@ impl AppController {
             }
         };
 
+        self.state.query.set_last_sql(sql.clone());
+
         let token = CancellationToken::new();
         self.state.query.set_cancel_token(token.clone());
         let _ = self.tx_event.send(Event::QueryStarted).await;

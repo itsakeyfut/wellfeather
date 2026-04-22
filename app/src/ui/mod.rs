@@ -1026,30 +1026,77 @@ impl UI {
             });
         }
 
-        // update-page-size: user clicked 100/500/1000/ALL button in the result toolbar.
-        // 1. Update UiState.page-size immediately so the button highlight changes at once.
-        // 2. Update shared state so the next RunQuery picks up the new limit.
-        // 3. Persist via UpdateConfig (ALL / 0 is not persisted since PageSize enum has no
-        //    Unlimited variant yet; the button still works for the current session).
+        // update-page-size: user clicked 100/500/1000 in the result toolbar
+        // (ALL / 0 goes through confirm-all-rows instead).
+        // 1. Update UiState.page-size immediately so the button highlight changes.
+        // 2. Update shared state so the injected LIMIT is correct for the rerun.
+        // 3. Persist via UpdateConfig (0 has no PageSize variant yet — skipped).
+        // 4. Auto-rerun the last query with the new limit.
         {
             // clone required: callback closure must be 'static
             let window_weak = window_weak.clone();
             let tx_cmd = tx_cmd.clone();
+            let state_rerun = state.clone(); // clone required: captured by callback
             ui_state.on_update_page_size(move |n| {
                 let size = n as usize;
-                state.ui.set_page_size(size);
+                state_rerun.ui.set_page_size(size);
                 // Update the Slint property so button highlights refresh on the UI thread.
                 if let Some(window) = window_weak.upgrade() {
                     window.global::<crate::UiState>().set_page_size(n);
                 }
                 if let Ok(ps) = wf_config::models::PageSize::try_from(n as u32) {
                     // clone required: tokio::spawn requires 'static
-                    let tx_cmd = tx_cmd.clone();
+                    let tx_cmd_cfg = tx_cmd.clone();
                     tokio::spawn(async move {
-                        let _ = tx_cmd
+                        let _ = tx_cmd_cfg
                             .send(Command::UpdateConfig(ConfigUpdate::PageSize(ps)))
                             .await;
                     });
+                }
+                // Auto-rerun the last query so results reflect the new limit immediately.
+                if let Some(last_sql) = state_rerun.query.last_sql() {
+                    // clone required: tokio::spawn requires 'static
+                    let tx_cmd_run = tx_cmd.clone();
+                    tokio::spawn(async move {
+                        let _ = tx_cmd_run.send(Command::RunQuery(last_sql)).await;
+                    });
+                }
+            });
+        }
+
+        // confirm-all-rows: user confirmed the "fetch all rows" popup.
+        // Sets page-size=0 (no LIMIT), closes the popup, then reruns the last query.
+        {
+            // clone required: callback closure must be 'static
+            let window_weak = window_weak.clone();
+            let tx_cmd = tx_cmd.clone();
+            let state_all = state.clone(); // clone required: captured by callback
+            ui_state.on_confirm_all_rows(move || {
+                state_all.ui.set_page_size(0);
+                if let Some(window) = window_weak.upgrade() {
+                    let ui = window.global::<crate::UiState>();
+                    ui.set_page_size(0);
+                    ui.set_show_all_rows_confirm(false);
+                }
+                if let Some(last_sql) = state_all.query.last_sql() {
+                    // clone required: tokio::spawn requires 'static
+                    let tx_cmd = tx_cmd.clone();
+                    tokio::spawn(async move {
+                        let _ = tx_cmd.send(Command::RunQuery(last_sql)).await;
+                    });
+                }
+            });
+        }
+
+        // dismiss-all-rows-confirm: user cancelled the "fetch all rows" popup.
+        {
+            // clone required: callback closure must be 'static
+            let window_weak = window_weak.clone();
+            ui_state.on_dismiss_all_rows_confirm(move || {
+                if let Some(window) = window_weak.upgrade() {
+                    window
+                        .global::<crate::UiState>()
+                        .set_show_all_rows_confirm(false);
                 }
             });
         }

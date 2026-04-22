@@ -12,6 +12,7 @@ struct QueryData {
     is_loading: bool,
     result: Option<QueryResult>,
     cancel_token: Option<CancellationToken>,
+    last_sql: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -61,6 +62,23 @@ impl QueryState {
             .write()
             .unwrap_or_else(|p| p.into_inner())
             .cancel_token = Some(t);
+    }
+
+    /// Returns the SQL text of the most recently executed query, if any.
+    pub fn last_sql(&self) -> Option<String> {
+        self.data
+            .read()
+            .unwrap_or_else(|p| p.into_inner())
+            .last_sql
+            .clone()
+    }
+
+    /// Stores the SQL text of the most recently executed query.
+    pub fn set_last_sql(&self, sql: String) {
+        self.data
+            .write()
+            .unwrap_or_else(|p| p.into_inner())
+            .last_sql = Some(sql);
     }
 
     /// Cancels the running query by calling `cancel()` on the stored token.
