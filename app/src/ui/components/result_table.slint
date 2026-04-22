@@ -61,6 +61,10 @@ export component ResultTable inherits Rectangle {
     callback filter-rows(string);
     callback clear-filter();
     callback copy-cell(string);
+    /// Copy row i cells to clipboard (tab-separated, NULL → empty string).
+    callback copy-row(int);
+    /// Copy all visible rows as TSV with column headers.
+    callback copy-all-tsv();
     /// Returns cumulative x-offset (logical px as float) of column j.
     /// Implemented in Rust; used for horizontal auto-scroll in cell mode.
     pure callback col-x-offset(int) -> float;
@@ -72,6 +76,13 @@ export component ResultTable inherits Rectangle {
     in property <int>  sort-col: -1;
     /// true = ascending (▲), false = descending (▼).
     in property <bool> sort-asc: true;
+
+    // ── Context menu state ────────────────────────────────────────────────────
+    property <length> ctx-menu-x:       0;
+    property <length> ctx-menu-y:       0;
+    property <int>    ctx-row:          -1;
+    property <string> ctx-cell-value:   "";
+    property <bool>   ctx-cell-is-null: false;
 
     // ── Style constants ───────────────────────────────────────────────────────
     property <length> row-height:    28px;
@@ -291,6 +302,76 @@ export component ResultTable inherits Rectangle {
             }
         }
 
+        // ── Right-click context menu ──────────────────────────────────────────
+        ctx-popup := PopupWindow {
+            x: root.ctx-menu-x;
+            y: root.ctx-menu-y;
+            width: 204px;
+            height: 90px;
+            close-policy: PopupClosePolicy.close-on-click;
+
+            Rectangle {
+                width: 204px;
+                height: 90px;
+                background: #313244;
+                border-radius: 4px;
+                border-width: 1px;
+                border-color: #585b70;
+                drop-shadow-blur: 8px;
+                drop-shadow-color: #00000088;
+                clip: true;
+
+                VerticalLayout {
+                    spacing: 0;
+
+                    Rectangle {
+                        height: 30px;
+                        background: mi1.has-hover ? #45475a : transparent;
+                        mi1 := TouchArea {
+                            clicked => { root.copy-cell(root.ctx-cell-value); }
+                        }
+                        Text {
+                            x: 12px;
+                            y: (parent.height - self.height) / 2;
+                            text: @tr("Copy cell value");
+                            color: #cdd6f4;
+                            font-size: 12px;
+                        }
+                    }
+
+                    Rectangle {
+                        height: 30px;
+                        background: mi2.has-hover ? #45475a : transparent;
+                        mi2 := TouchArea {
+                            clicked => { root.copy-row(root.ctx-row); }
+                        }
+                        Text {
+                            x: 12px;
+                            y: (parent.height - self.height) / 2;
+                            text: @tr("Copy row (tab-separated)");
+                            color: #cdd6f4;
+                            font-size: 12px;
+                        }
+                    }
+
+                    Rectangle {
+                        height: 30px;
+                        background: mi3.has-hover ? #45475a : transparent;
+                        mi3 := TouchArea {
+                            clicked => { root.copy-all-tsv(); }
+                        }
+                        Text {
+                            x: 12px;
+                            y: (parent.height - self.height) / 2;
+                            text: @tr("Copy as TSV (with headers)");
+                            color: #cdd6f4;
+                            font-size: 12px;
+                        }
+                    }
+                }
+            }
+        }
+
         // ── Loading overlay ───────────────────────────────────────────────────
         if root.is-loading: Rectangle {
             width:  parent.width;
@@ -499,6 +580,29 @@ export component ResultTable inherits Rectangle {
                                         root.selected-cell-value   = cell.value;
                                         root.selected-cell-is-null = cell.is-null;
                                         table-fs.focus();
+                                    }
+                                    pointer-event(event) => {
+                                        if (event.button == PointerEventButton.right
+                                                && event.kind == PointerEventKind.down) {
+                                            root.selected-row          = i;
+                                            root.ctx-row               = i;
+                                            root.ctx-cell-value        = cell.value;
+                                            root.ctx-cell-is-null      = cell.is-null;
+                                            root.selected-cell-value   = cell.value;
+                                            root.selected-cell-is-null = cell.is-null;
+                                            root.ctx-menu-x = clamp(
+                                                root.col-x-offset(j) * 1px + root.body-vp-x + self.mouse-x,
+                                                0,
+                                                root.width - 208px
+                                            );
+                                            root.ctx-menu-y = clamp(
+                                                root.row-height + i * root.row-height + root.body-vp-y + self.mouse-y,
+                                                0,
+                                                root.height - 96px
+                                            );
+                                            ctx-popup.show();
+                                            table-fs.focus();
+                                        }
                                     }
                                 }
                             }

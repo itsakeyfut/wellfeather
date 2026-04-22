@@ -49,6 +49,10 @@ export global UiState {
     callback clear-result-filter();
     /// Copy a cell value to the system clipboard.
     callback copy-result-cell(string);
+    /// Copy row i cells to clipboard (tab-separated, NULL → empty string).
+    callback copy-result-row(int);
+    /// Copy all visible rows as TSV with column headers.
+    callback copy-result-tsv();
     /// Returns cumulative x-offset (logical px as float) of column j.
     pure callback col-x-offset(int) -> float;
 
@@ -472,6 +476,8 @@ export component AppWindow inherits Window {
                     filter-rows(q)       => { UiState.filter-result-rows(q); }
                     clear-filter         => { UiState.clear-result-filter(); }
                     copy-cell(v)         => { UiState.copy-result-cell(v); }
+                    copy-row(i)          => { UiState.copy-result-row(i); }
+                    copy-all-tsv         => { UiState.copy-result-tsv(); }
                     col-x-offset(j)      => { UiState.col-x-offset(j); }
                     sort-col:            UiState.result-sort-col;
                     sort-asc:            UiState.result-sort-asc;
