@@ -944,6 +944,73 @@ impl UI {
             });
         }
 
+        // copy-result-row: join visible row i cells with tabs, NULL → empty string.
+        {
+            // clone required: callback closure must be 'static
+            let window_weak = window_weak.clone();
+            ui_state.on_copy_result_row(move |row_i| {
+                let Some(window) = window_weak.upgrade() else {
+                    return;
+                };
+                let ui = window.global::<crate::UiState>();
+                let rows_model = ui.get_result_rows();
+                if let Some(row) = rows_model.row_data(row_i as usize) {
+                    let cells: Vec<Option<String>> = (0..row.cells.row_count())
+                        .filter_map(|j| row.cells.row_data(j))
+                        .map(|c| {
+                            if c.is_null {
+                                None
+                            } else {
+                                Some(c.value.to_string())
+                            }
+                        })
+                        .collect();
+                    let tsv = cells_to_tsv(&cells);
+                    if let Ok(mut clip) = arboard::Clipboard::new() {
+                        let _ = clip.set_text(tsv);
+                    }
+                }
+            });
+        }
+
+        // copy-result-tsv: export all visible rows as TSV with column headers.
+        {
+            // clone required: callback closure must be 'static
+            let window_weak = window_weak.clone();
+            ui_state.on_copy_result_tsv(move || {
+                let Some(window) = window_weak.upgrade() else {
+                    return;
+                };
+                let ui = window.global::<crate::UiState>();
+                let cols_model = ui.get_result_columns();
+                let rows_model = ui.get_result_rows();
+                let columns: Vec<String> = (0..cols_model.row_count())
+                    .filter_map(|i| cols_model.row_data(i))
+                    .map(|s| s.to_string())
+                    .collect();
+                let rows: Vec<Vec<Option<String>>> = (0..rows_model.row_count())
+                    .filter_map(|i| rows_model.row_data(i))
+                    .map(|row| {
+                        (0..row.cells.row_count())
+                            .filter_map(|j| row.cells.row_data(j))
+                            .map(|c| {
+                                if c.is_null {
+                                    None
+                                } else {
+                                    Some(c.value.to_string())
+                                }
+                            })
+                            .collect()
+                    })
+                    .collect();
+                let col_strs: Vec<&str> = columns.iter().map(String::as_str).collect();
+                let tsv = result_to_tsv(&col_strs, &rows);
+                if let Ok(mut clip) = arboard::Clipboard::new() {
+                    let _ = clip.set_text(tsv);
+                }
+            });
+        }
+
         // col-x-offset (pure): cumulative x-position of column j (sum of widths 0..j).
         // Used by result_table.slint's `changed selected-col` handler to auto-scroll.
         {
@@ -1111,6 +1178,25 @@ fn rows_to_ui(cells: Vec<Option<String>>) -> crate::RowData {
     crate::RowData {
         cells: Rc::new(slint::VecModel::from(cell_data)).into(),
     }
+}
+
+/// Join one row's cells as a TSV line. `None` (NULL) → empty string.
+fn cells_to_tsv(cells: &[Option<String>]) -> String {
+    cells
+        .iter()
+        .map(|c| c.as_deref().unwrap_or(""))
+        .collect::<Vec<_>>()
+        .join("\t")
+}
+
+/// Format `columns` + `rows` as a TSV string with a header line.
+fn result_to_tsv(columns: &[&str], rows: &[Vec<Option<String>>]) -> String {
+    let mut lines = Vec::with_capacity(rows.len() + 1);
+    lines.push(columns.join("\t"));
+    for row in rows {
+        lines.push(cells_to_tsv(row));
+    }
+    lines.join("\n")
 }
 
 /// Sort `rows` in-place by column `col`.
@@ -1401,6 +1487,50 @@ mod tests {
         assert_eq!(rows[0][0].as_deref(), Some("b"));
         assert_eq!(rows[1][0].as_deref(), Some("a"));
         assert!(rows[2][0].is_none());
+    }
+
+    // ── cells_to_tsv / result_to_tsv tests ───────────────────────────────────
+
+    #[test]
+    fn cells_to_tsv_should_join_values_with_tabs() {
+        let cells = vec![sv("a"), sv("b"), sv("c")];
+        assert_eq!(cells_to_tsv(&cells), "a\tb\tc");
+    }
+
+    #[test]
+    fn cells_to_tsv_should_render_null_as_empty_string() {
+        let cells = vec![sv("a"), None, sv("c")];
+        assert_eq!(cells_to_tsv(&cells), "a\t\tc");
+    }
+
+    #[test]
+    fn cells_to_tsv_should_handle_empty_row() {
+        let cells: Vec<Option<String>> = vec![];
+        assert_eq!(cells_to_tsv(&cells), "");
+    }
+
+    #[test]
+    fn result_to_tsv_should_include_header_and_rows() {
+        let cols = vec!["id", "name"];
+        let rows = vec![vec![sv("1"), sv("Alice")], vec![sv("2"), sv("Bob")]];
+        let tsv = result_to_tsv(&cols, &rows);
+        assert_eq!(tsv, "id\tname\n1\tAlice\n2\tBob");
+    }
+
+    #[test]
+    fn result_to_tsv_should_render_null_cells_as_empty_string() {
+        let cols = vec!["id", "name"];
+        let rows = vec![vec![sv("1"), None]];
+        let tsv = result_to_tsv(&cols, &rows);
+        assert_eq!(tsv, "id\tname\n1\t");
+    }
+
+    #[test]
+    fn result_to_tsv_should_produce_header_only_when_no_rows() {
+        let cols = vec!["id", "name"];
+        let rows: Vec<Vec<Option<String>>> = vec![];
+        let tsv = result_to_tsv(&cols, &rows);
+        assert_eq!(tsv, "id\tname");
     }
 
     // ── append_editor_text tests ──────────────────────────────────────────────
