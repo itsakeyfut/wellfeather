@@ -44,11 +44,10 @@ export component ResultTable inherits Rectangle {
     in property <string>    active-filter: "";
 
     // ── Focus API ─────────────────────────────────────────────────────────────
-    /// True when this table (or its search / cell-value inputs) holds focus.
+    /// True when this table (or its search input) holds focus.
     out property <bool> result-focused:
         table-fs.has-focus
-        || (root.nav-mode == 2 && search-input.has-focus)
-        || cell-value-input.has-focus;
+        || (root.nav-mode == 2 && search-input.has-focus);
 
     public function grab-focus() {
         table-fs.focus();
@@ -80,19 +79,21 @@ export component ResultTable inherits Rectangle {
     property <length> min-col-w:     48px;
 
     // ── Selection / nav state ─────────────────────────────────────────────────
-    property <int>    selected-row:        -1;
-    property <string> selected-cell-value: "";
-    property <int>    selected-col:        -1;
+    property <int>        selected-row:          -1;
+    /// Full value of the last clicked cell; "" when no specific cell is selected.
+    out property <string> selected-cell-value:   "";
+    /// true when the selected cell contains SQL NULL (distinct from empty string).
+    out property <bool>   selected-cell-is-null: false;
+    property <int>        selected-col:          -1;
     /// 0 = row mode  1 = cell mode  2 = search mode
     property <int>    nav-mode:    0;
     property <string> search-query: "";
 
     // ── Bottom strip heights ──────────────────────────────────────────────────
-    property <length> cell-strip-h:    root.selected-cell-value != "" ? 28px : 0px;
     property <length> filter-banner-h: root.active-filter != "" ? 24px : 0px;
     property <length> search-bar-h:    root.nav-mode == 2 ? 32px : 0px;
     property <length> bottom-total:
-        root.cell-strip-h + root.filter-banner-h + root.search-bar-h;
+        root.filter-banner-h + root.search-bar-h;
 
     // ── Viewport width ────────────────────────────────────────────────────────
     property <length> vp-w: root.total-col-width > 0
@@ -114,12 +115,13 @@ export component ResultTable inherits Rectangle {
 
     // Reset selection and nav state when a new query result arrives.
     changed rows => {
-        root.selected-row        = -1;
-        root.selected-col        = -1;
-        root.nav-mode            = 0;
-        root.selected-cell-value = "";
-        root.body-vp-y           = 0;
-        root.body-vp-x           = 0;
+        root.selected-row          = -1;
+        root.selected-col          = -1;
+        root.nav-mode              = 0;
+        root.selected-cell-value   = "";
+        root.selected-cell-is-null = false;
+        root.body-vp-y             = 0;
+        root.body-vp-x             = 0;
     }
 
     // ── Auto-scroll: keep selected row visible ────────────────────────────────
@@ -154,7 +156,7 @@ export component ResultTable inherits Rectangle {
 
     // ── Root FocusScope ───────────────────────────────────────────────────────
     // capture-key-pressed fires root→focused so it intercepts keys regardless
-    // of which child (search-input, cell-value-input) currently holds focus.
+    // of which child (e.g. search-input) currently holds focus.
     table-fs := FocusScope {
         x: 0; y: 0;
         width: parent.width; height: parent.height;
@@ -213,7 +215,8 @@ export component ResultTable inherits Rectangle {
             } else {
                 // Row mode
                 if (event.text == Key.UpArrow) {
-                    root.selected-cell-value = "";
+                    root.selected-cell-value   = "";
+                    root.selected-cell-is-null = false;
                     if (root.selected-row > 0) {
                         root.selected-row -= 1;
                     } else if (root.row-count > 0) {
@@ -221,7 +224,8 @@ export component ResultTable inherits Rectangle {
                     }
                     EventResult.accept
                 } else if (event.text == Key.DownArrow) {
-                    root.selected-cell-value = "";
+                    root.selected-cell-value   = "";
+                    root.selected-cell-is-null = false;
                     if (root.selected-row < 0 && root.row-count > 0) {
                         root.selected-row = 0;
                     } else if (root.selected-row < root.row-count - 1) {
@@ -229,21 +233,25 @@ export component ResultTable inherits Rectangle {
                     }
                     EventResult.accept
                 } else if (event.text == Key.Home) {
-                    root.selected-cell-value = "";
+                    root.selected-cell-value   = "";
+                    root.selected-cell-is-null = false;
                     if (root.row-count > 0) { root.selected-row = 0; }
                     EventResult.accept
                 } else if (event.text == Key.End) {
-                    root.selected-cell-value = "";
+                    root.selected-cell-value   = "";
+                    root.selected-cell-is-null = false;
                     if (root.row-count > 0) { root.selected-row = root.row-count - 1; }
                     EventResult.accept
                 } else if (event.text == Key.PageUp) {
-                    root.selected-cell-value = "";
+                    root.selected-cell-value   = "";
+                    root.selected-cell-is-null = false;
                     if (root.selected-row > 0) {
                         root.selected-row = max(0, root.selected-row - root.page-rows);
                     }
                     EventResult.accept
                 } else if (event.text == Key.PageDown) {
-                    root.selected-cell-value = "";
+                    root.selected-cell-value   = "";
+                    root.selected-cell-is-null = false;
                     if (root.selected-row < root.row-count - 1) {
                         root.selected-row = min(
                             root.row-count - 1, root.selected-row + root.page-rows);
@@ -267,8 +275,9 @@ export component ResultTable inherits Rectangle {
                     if (root.active-filter != "") {
                         root.clear-filter();
                     } else {
-                        root.selected-row        = -1;
-                        root.selected-cell-value = "";
+                        root.selected-row          = -1;
+                        root.selected-cell-value   = "";
+                        root.selected-cell-is-null = false;
                     }
                     EventResult.accept
                 } else if (event.text == "c" && event.modifiers.control) {
@@ -486,10 +495,10 @@ export component ResultTable inherits Rectangle {
 
                                 TouchArea {
                                     clicked => {
-                                        root.selected-row        = i;
-                                        root.selected-cell-value = cell.value;
-                                        cell-value-input.focus();
-                                        cell-value-input.set-selection-offsets(0, 2147483647);
+                                        root.selected-row          = i;
+                                        root.selected-cell-value   = cell.value;
+                                        root.selected-cell-is-null = cell.is-null;
+                                        table-fs.focus();
                                     }
                                 }
                             }
@@ -518,7 +527,7 @@ export component ResultTable inherits Rectangle {
         // clipped to height 0 when not in search mode.
         Rectangle {
             x: 0;
-            y: root.height - root.cell-strip-h - root.filter-banner-h - root.search-bar-h;
+            y: root.height - root.filter-banner-h - root.search-bar-h;
             width:  root.width;
             height: root.search-bar-h;
             background: #1e1e2e;
@@ -556,7 +565,7 @@ export component ResultTable inherits Rectangle {
         // Shown below the search bar when a filter is active.
         Rectangle {
             x: 0;
-            y: root.height - root.cell-strip-h - root.filter-banner-h;
+            y: root.height - root.filter-banner-h;
             width:  root.width;
             height: root.filter-banner-h;
             background: #1e3a5f;
@@ -597,34 +606,5 @@ export component ResultTable inherits Rectangle {
             }
         }
 
-        // ── Cell value strip ──────────────────────────────────────────────────
-        // Always in the tree; collapses to height 0 when no cell is selected.
-        Rectangle {
-            x: 0;
-            y: root.height - root.cell-strip-h;
-            width:  root.width;
-            height: root.cell-strip-h;
-            background: #2a2a3e;
-            clip: true;
-
-            Rectangle {   // top separator
-                x: 0; y: 0;
-                width: parent.width; height: 1px;
-                background: #45475a;
-            }
-
-            cell-value-input := TextInput {
-                x: 8px;
-                y: (parent.height - self.height) / 2;
-                width: parent.width - 16px;
-                text: root.selected-cell-value;
-                read-only: true;
-                single-line: true;
-                color: #cdd6f4;
-                selection-background-color: #264f78;
-                selection-foreground-color: #ffffff;
-                font-size: 12px;
-            }
-        }
     }
 }

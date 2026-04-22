@@ -140,6 +140,8 @@ export component AppWindow inherits Window {
     // Width of the shared line-number gutter column.
     // Must match the gutter rectangle width defined in the container below.
     property <length> gutter-col-width:  48px;
+    // Fixed-height preview strip shown above the result panel.
+    property <length> preview-strip-h:   60px;
 
     // ── Overlay panel geometry ────────────────────────────────────────────────
     // The result/error panel overlays the editor from the bottom (VSCode style).
@@ -295,6 +297,63 @@ export component AppWindow inherits Window {
                 move-cursor-line(text, pos, delta) => { UiState.move-cursor-line(text, pos, delta); }
                 run-query => { UiState.run-query(UiState.editor-text); }
                 toggle-panel => { UiState.result-panel-open = !UiState.result-panel-open; }
+            }
+
+            // ── Cell-value preview strip ──────────────────────────────────────
+            // Fixed-height strip placed above the result panel; shows the full
+            // value of the last clicked cell with word-wrap and vertical scroll.
+            // Rendered as a sibling of the result panel so it never reduces the
+            // table body height.
+            Rectangle {
+                x: root.gutter-col-width;
+                y: parent.height - root.panel-height - root.preview-strip-h;
+                width:  parent.width - root.gutter-col-width;
+                height: root.preview-strip-h;
+                background: #181825;
+                clip: true;
+                visible: UiState.result-panel-open;
+
+                // Top separator
+                Rectangle {
+                    x: 0; y: 0;
+                    width: parent.width; height: 1px;
+                    background: #45475a;
+                }
+
+                // Placeholder — nothing selected or row-only selection
+                if !result-table-inst.selected-cell-is-null
+                        && result-table-inst.selected-cell-value == "": Text {
+                    x: 10px; y: 8px;
+                    color: #45475a;
+                    font-size: 12px;
+                    text: @tr("Select a cell to preview its value");
+                }
+
+                // NULL indicator
+                if result-table-inst.selected-cell-is-null: Text {
+                    x: 10px; y: 8px;
+                    color: #9399b2;
+                    font-size: 12px;
+                    text: @tr("NULL");
+                }
+
+                // Cell value — word-wrapped, vertically scrollable
+                if !result-table-inst.selected-cell-is-null
+                        && result-table-inst.selected-cell-value != "": Flickable {
+                    x: 0; y: 4px;
+                    width:  parent.width;
+                    height: parent.height - 4px;
+                    viewport-height: preview-val-text.preferred-height + 8px;
+
+                    preview-val-text := Text {
+                        x: 10px; y: 4px;
+                        width: parent.width - 20px;
+                        text: result-table-inst.selected-cell-value;
+                        color: #cdd6f4;
+                        font-size: 12px;
+                        wrap: word-wrap;
+                    }
+                }
             }
 
             // ── Result / error overlay panel ──────────────────────────────────
@@ -457,12 +516,12 @@ export component AppWindow inherits Window {
             background: transparent;
         }
 
-        // Result-table pane focus border (only visible when the panel is open)
+        // Result-table pane focus border (covers result panel + preview strip above it)
         if root.focused-pane == 2 && UiState.result-panel-open: Rectangle {
             x: sidebar-width;
-            y: content-height - panel-height;
+            y: content-height - panel-height - preview-strip-h;
             width:  main-width;
-            height: panel-height;
+            height: panel-height + preview-strip-h;
             border-width: 2px;
             border-color: #89b4fa;
             background: transparent;
