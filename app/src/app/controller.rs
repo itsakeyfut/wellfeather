@@ -331,6 +331,9 @@ impl AppController {
 /// - Statements that already contain ` LIMIT ` are returned unchanged.
 /// - A trailing semicolon is stripped before appending the LIMIT clause.
 fn apply_limit(sql: &str, limit: usize) -> String {
+    if limit == 0 {
+        return sql.to_string();
+    }
     let trimmed = sql.trim().trim_end_matches(';').trim_end();
     let upper = trimmed.to_uppercase();
     if upper.starts_with("SELECT") && !upper.contains(" LIMIT ") {
@@ -438,6 +441,11 @@ mod tests {
         );
         let with_limit = "select * from t limit 5";
         assert_eq!(apply_limit(with_limit, 500), with_limit);
+    }
+
+    #[test]
+    fn apply_limit_should_not_apply_when_limit_is_zero() {
+        assert_eq!(apply_limit("SELECT * FROM t", 0), "SELECT * FROM t");
     }
 
     // ── TestConnection ────────────────────────────────────────────────────────

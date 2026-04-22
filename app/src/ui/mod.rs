@@ -1026,15 +1026,22 @@ impl UI {
             });
         }
 
-        // update-page-size: user clicked 100/500/1000 button in the result toolbar.
-        // Update shared state immediately so the next RunQuery picks up the new limit,
-        // then send UpdateConfig to persist it to config.toml via the controller.
+        // update-page-size: user clicked 100/500/1000/ALL button in the result toolbar.
+        // 1. Update UiState.page-size immediately so the button highlight changes at once.
+        // 2. Update shared state so the next RunQuery picks up the new limit.
+        // 3. Persist via UpdateConfig (ALL / 0 is not persisted since PageSize enum has no
+        //    Unlimited variant yet; the button still works for the current session).
         {
             // clone required: callback closure must be 'static
+            let window_weak = window_weak.clone();
             let tx_cmd = tx_cmd.clone();
             ui_state.on_update_page_size(move |n| {
                 let size = n as usize;
                 state.ui.set_page_size(size);
+                // Update the Slint property so button highlights refresh on the UI thread.
+                if let Some(window) = window_weak.upgrade() {
+                    window.global::<crate::UiState>().set_page_size(n);
+                }
                 if let Ok(ps) = wf_config::models::PageSize::try_from(n as u32) {
                     // clone required: tokio::spawn requires 'static
                     let tx_cmd = tx_cmd.clone();

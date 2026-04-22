@@ -448,11 +448,12 @@ export component ResultTable inherits Rectangle {
                     font-size: 11px;
                 }
 
-                // Page-size selector: three toggle buttons aligned to the right
+                // Page-size selector: four toggle buttons aligned to the right
+                // 0 = unlimited (ALL); 100/500/1000 inject LIMIT N.
                 HorizontalLayout {
-                    x: parent.width - 136px;
+                    x: parent.width - 178px;
                     y: (parent.height - self.height) / 2;
-                    width: 128px;
+                    width: 170px;
                     height: 20px;
                     spacing: 2px;
 
@@ -507,6 +508,25 @@ export component ResultTable inherits Rectangle {
                         Text {
                             text: "1000";
                             color: root.page-size == 1000 ? #1e1e2e : #9399b2;
+                            font-size: 11px;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                    }
+
+                    // ALL (0 = no LIMIT)
+                    Rectangle {
+                        width: 38px;
+                        height: 20px;
+                        border-radius: 3px;
+                        background: psall-ta.has-hover ? #45475a
+                            : root.page-size == 0 ? #89b4fa : #313244;
+                        psall-ta := TouchArea {
+                            clicked => { root.change-page-size(0); }
+                        }
+                        Text {
+                            text: @tr("ALL");
+                            color: root.page-size == 0 ? #1e1e2e : #9399b2;
                             font-size: 11px;
                             horizontal-alignment: center;
                             vertical-alignment: center;
