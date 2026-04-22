@@ -24,7 +24,11 @@ use wf_db::{error::DbError, models::DbConnection, service::DbService};
 use wf_history::service::HistoryService;
 
 use crate::{
-    app::{command::Command, event::Event, session::SessionManager},
+    app::{
+        command::{Command, ConfigUpdate},
+        event::Event,
+        session::SessionManager,
+    },
     state::SharedState,
 };
 
@@ -113,6 +117,7 @@ impl AppController {
                 Command::RunAll(sql) => self.handle_run_query(sql).await,
                 Command::RunSelection(sql) => self.handle_run_query(sql).await,
                 Command::CancelQuery => self.handle_cancel_query().await,
+                Command::UpdateConfig(update) => self.handle_update_config(update).await,
                 _ => {} // remaining commands handled in later tasks
             }
         }
@@ -234,9 +239,14 @@ impl AppController {
             }
         };
 
+        self.state.query.set_last_sql(sql.clone());
+
         let token = CancellationToken::new();
         self.state.query.set_cancel_token(token.clone());
         let _ = self.tx_event.send(Event::QueryStarted).await;
+
+        let page_size = self.state.ui.page_size();
+        let sql_to_run = apply_limit(&sql, page_size);
 
         let db = self.db.clone(); // clone required: tokio::spawn needs 'static
         let tx = self.tx_event.clone(); // clone required: tokio::spawn needs 'static
@@ -245,7 +255,7 @@ impl AppController {
         let conn_id_hist = conn_id.clone(); // clone required: history record needs owned id
         tokio::spawn(async move {
             let now = Utc::now().timestamp();
-            match db.execute_with_cancel(&conn_id, &sql, token).await {
+            match db.execute_with_cancel(&conn_id, &sql_to_run, token).await {
                 Ok(result) => {
                     if let Some(ref h) = history {
                         let exec = wf_db::models::QueryExecution {
@@ -287,6 +297,21 @@ impl AppController {
         });
     }
 
+    /// Handle an `UpdateConfig` command.
+    ///
+    /// Currently handles `PageSize` changes: updates the shared state so the
+    /// next `RunQuery` uses the new LIMIT, then persists the value to `config.toml`.
+    async fn handle_update_config(&self, update: ConfigUpdate) {
+        if let ConfigUpdate::PageSize(ps) = update {
+            let n: u32 = ps.into();
+            self.state.ui.set_page_size(n as usize);
+            if let Err(e) = self.session.save_page_size(n as usize) {
+                warn!(error = %e, "failed to persist page_size to config");
+            }
+            let _ = self.tx_event.send(Event::ConfigUpdated).await;
+        }
+    }
+
     /// Handle a `CancelQuery` command.
     ///
     /// Fires the stored [`CancellationToken`] (if any) and immediately sends
@@ -295,6 +320,28 @@ impl AppController {
         info!("handling CancelQuery command");
         self.state.query.cancel();
         let _ = self.tx_event.send(Event::QueryCancelled).await;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/// Append `LIMIT {limit}` to a SELECT statement that has no explicit LIMIT clause.
+///
+/// - Non-SELECT statements (INSERT, UPDATE, DELETE, …) are returned unchanged.
+/// - Statements that already contain ` LIMIT ` are returned unchanged.
+/// - A trailing semicolon is stripped before appending the LIMIT clause.
+fn apply_limit(sql: &str, limit: usize) -> String {
+    if limit == 0 {
+        return sql.to_string();
+    }
+    let trimmed = sql.trim().trim_end_matches(';').trim_end();
+    let upper = trimmed.to_uppercase();
+    if upper.starts_with("SELECT") && !upper.contains(" LIMIT ") {
+        format!("{} LIMIT {}", trimmed, limit)
+    } else {
+        sql.to_string()
     }
 }
 
@@ -318,7 +365,7 @@ mod tests {
         state::AppState,
     };
 
-    use super::AppController;
+    use super::{AppController, apply_limit};
 
     /// Build a [`SessionManager`] backed by a temporary directory.
     /// `keep()` prevents cleanup so the path stays valid for the test lifetime.
@@ -352,6 +399,55 @@ mod tests {
             password_encrypted: None,
             database: None,
         }
+    }
+
+    // ── apply_limit ───────────────────────────────────────────────────────────
+
+    #[test]
+    fn apply_limit_should_append_limit_to_select() {
+        assert_eq!(
+            apply_limit("SELECT * FROM t", 500),
+            "SELECT * FROM t LIMIT 500"
+        );
+    }
+
+    #[test]
+    fn apply_limit_should_strip_trailing_semicolon_before_appending() {
+        assert_eq!(
+            apply_limit("SELECT * FROM t;", 100),
+            "SELECT * FROM t LIMIT 100"
+        );
+    }
+
+    #[test]
+    fn apply_limit_should_not_append_when_limit_already_present() {
+        let sql = "SELECT * FROM t LIMIT 10";
+        assert_eq!(apply_limit(sql, 500), sql);
+    }
+
+    #[test]
+    fn apply_limit_should_not_modify_dml_statements() {
+        let insert = "INSERT INTO t VALUES (1)";
+        assert_eq!(apply_limit(insert, 500), insert);
+        let update = "UPDATE t SET x = 1";
+        assert_eq!(apply_limit(update, 500), update);
+        let delete = "DELETE FROM t";
+        assert_eq!(apply_limit(delete, 500), delete);
+    }
+
+    #[test]
+    fn apply_limit_should_be_case_insensitive() {
+        assert_eq!(
+            apply_limit("select * from t", 1000),
+            "select * from t LIMIT 1000"
+        );
+        let with_limit = "select * from t limit 5";
+        assert_eq!(apply_limit(with_limit, 500), with_limit);
+    }
+
+    #[test]
+    fn apply_limit_should_not_apply_when_limit_is_zero() {
+        assert_eq!(apply_limit("SELECT * FROM t", 0), "SELECT * FROM t");
     }
 
     // ── TestConnection ────────────────────────────────────────────────────────
@@ -551,7 +647,13 @@ mod tests {
             }
         };
         assert!(matches!(e2, Event::QueryStarted));
-        let e3 = rx_event.recv().await.unwrap();
+        // Drain any late MetadataLoaded/MetadataFetchFailed before QueryFinished.
+        let e3 = loop {
+            match rx_event.recv().await.unwrap() {
+                Event::MetadataLoaded(_, _) | Event::MetadataFetchFailed(_) => continue,
+                e => break e,
+            }
+        };
         assert!(matches!(e3, Event::QueryFinished(_)));
     }
 

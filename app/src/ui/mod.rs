@@ -27,7 +27,10 @@ struct OriginalQueryData {
 type SharedOriginalData = Arc<Mutex<Option<OriginalQueryData>>>;
 
 use crate::{
-    app::{command::Command, event::Event},
+    app::{
+        command::{Command, ConfigUpdate},
+        event::Event,
+    },
     state::SharedState,
 };
 
@@ -217,7 +220,17 @@ impl UI {
         );
         Self::register_connection_form_callbacks(&window, tx_cmd.clone(), enc_key);
         Self::register_editor_callbacks(&window, state.clone(), tx_cmd.clone());
-        Self::register_result_callbacks(&window, state.clone(), Arc::clone(&original_data));
+        // Set initial page size on the Slint window from shared state.
+        window
+            .global::<crate::UiState>()
+            .set_page_size(state.ui.page_size() as i32);
+
+        Self::register_result_callbacks(
+            &window,
+            state.clone(),
+            Arc::clone(&original_data),
+            tx_cmd.clone(),
+        );
         Self::register_status_callbacks(&window, state.clone());
         Self::spawn_event_handler(
             &window,
@@ -413,6 +426,7 @@ impl UI {
                                 raw_rows.into_iter().map(rows_to_ui).collect();
                             ui.set_result_rows(Rc::new(slint::VecModel::from(rows)).into());
                             ui.set_result_row_count(row_count);
+                            ui.set_result_total_rows(row_count);
                             // Initialise per-column widths (150 px each).
                             const DEFAULT_COL_W: f32 = 150.0;
                             let widths: Vec<f32> = vec![DEFAULT_COL_W; col_count];
@@ -857,8 +871,9 @@ impl UI {
 
     fn register_result_callbacks(
         window: &crate::AppWindow,
-        _state: SharedState,
+        state: SharedState,
         original_data: SharedOriginalData,
+        tx_cmd: mpsc::Sender<Command>,
     ) {
         let ui_state = window.global::<crate::UiState>();
         let window_weak = window.as_weak();
@@ -1007,6 +1022,81 @@ impl UI {
                 let tsv = result_to_tsv(&col_strs, &rows);
                 if let Ok(mut clip) = arboard::Clipboard::new() {
                     let _ = clip.set_text(tsv);
+                }
+            });
+        }
+
+        // update-page-size: user clicked 100/500/1000 in the result toolbar
+        // (ALL / 0 goes through confirm-all-rows instead).
+        // 1. Update UiState.page-size immediately so the button highlight changes.
+        // 2. Update shared state so the injected LIMIT is correct for the rerun.
+        // 3. Persist via UpdateConfig (0 has no PageSize variant yet — skipped).
+        // 4. Auto-rerun the last query with the new limit.
+        {
+            // clone required: callback closure must be 'static
+            let window_weak = window_weak.clone();
+            let tx_cmd = tx_cmd.clone();
+            let state_rerun = state.clone(); // clone required: captured by callback
+            ui_state.on_update_page_size(move |n| {
+                let size = n as usize;
+                state_rerun.ui.set_page_size(size);
+                // Update the Slint property so button highlights refresh on the UI thread.
+                if let Some(window) = window_weak.upgrade() {
+                    window.global::<crate::UiState>().set_page_size(n);
+                }
+                if let Ok(ps) = wf_config::models::PageSize::try_from(n as u32) {
+                    // clone required: tokio::spawn requires 'static
+                    let tx_cmd_cfg = tx_cmd.clone();
+                    tokio::spawn(async move {
+                        let _ = tx_cmd_cfg
+                            .send(Command::UpdateConfig(ConfigUpdate::PageSize(ps)))
+                            .await;
+                    });
+                }
+                // Auto-rerun the last query so results reflect the new limit immediately.
+                if let Some(last_sql) = state_rerun.query.last_sql() {
+                    // clone required: tokio::spawn requires 'static
+                    let tx_cmd_run = tx_cmd.clone();
+                    tokio::spawn(async move {
+                        let _ = tx_cmd_run.send(Command::RunQuery(last_sql)).await;
+                    });
+                }
+            });
+        }
+
+        // confirm-all-rows: user confirmed the "fetch all rows" popup.
+        // Sets page-size=0 (no LIMIT), closes the popup, then reruns the last query.
+        {
+            // clone required: callback closure must be 'static
+            let window_weak = window_weak.clone();
+            let tx_cmd = tx_cmd.clone();
+            let state_all = state.clone(); // clone required: captured by callback
+            ui_state.on_confirm_all_rows(move || {
+                state_all.ui.set_page_size(0);
+                if let Some(window) = window_weak.upgrade() {
+                    let ui = window.global::<crate::UiState>();
+                    ui.set_page_size(0);
+                    ui.set_show_all_rows_confirm(false);
+                }
+                if let Some(last_sql) = state_all.query.last_sql() {
+                    // clone required: tokio::spawn requires 'static
+                    let tx_cmd = tx_cmd.clone();
+                    tokio::spawn(async move {
+                        let _ = tx_cmd.send(Command::RunQuery(last_sql)).await;
+                    });
+                }
+            });
+        }
+
+        // dismiss-all-rows-confirm: user cancelled the "fetch all rows" popup.
+        {
+            // clone required: callback closure must be 'static
+            let window_weak = window_weak.clone();
+            ui_state.on_dismiss_all_rows_confirm(move || {
+                if let Some(window) = window_weak.upgrade() {
+                    window
+                        .global::<crate::UiState>()
+                        .set_show_all_rows_confirm(false);
                 }
             });
         }

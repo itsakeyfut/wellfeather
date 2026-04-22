@@ -14,7 +14,7 @@ use anyhow::Context as _;
 use tracing::{info, warn};
 use wf_config::{
     manager::ConfigManager,
-    models::{ConnectionConfig, DbTypeName},
+    models::{ConnectionConfig, DbTypeName, PageSize},
 };
 use wf_db::models::{DbConnection, DbType};
 
@@ -70,6 +70,29 @@ impl SessionManager {
             .save(&config)
             .context("failed to save session")?;
         info!(conn_id = %conn.id, "session saved");
+        Ok(())
+    }
+
+    /// Persist `size` (100 / 500 / 1000) as `[editor].page_size` in `config.toml`.
+    ///
+    /// Silently ignores unknown values (not in the `PageSize` enum); they are
+    /// replaced with the default (500).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the config file cannot be loaded or written.
+    pub fn save_page_size(&self, size: usize) -> anyhow::Result<()> {
+        let mut config = self
+            .config_manager
+            .load()
+            .context("failed to load config for page_size save")?;
+
+        config.editor.page_size = PageSize::try_from(size as u32).unwrap_or_default();
+
+        self.config_manager
+            .save(&config)
+            .context("failed to save page_size")?;
+        info!(page_size = size, "page_size saved");
         Ok(())
     }
 
@@ -228,6 +251,21 @@ mod tests {
 
         let sm = SessionManager::with_config_manager(ConfigManager::with_path(path));
         assert!(sm.restore().unwrap().is_none());
+    }
+
+    #[test]
+    fn save_page_size_should_persist_to_config() {
+        let dir = tempdir().unwrap();
+        let sm = SessionManager::with_config_manager(ConfigManager::with_path(
+            dir.path().join("config.toml"),
+        ));
+        sm.save_page_size(1000).unwrap();
+
+        let cfg = ConfigManager::with_path(dir.path().join("config.toml"))
+            .load()
+            .unwrap();
+        use wf_config::models::PageSize;
+        assert_eq!(cfg.editor.page_size, PageSize::Rows1000);
     }
 
     #[test]

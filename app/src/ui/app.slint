@@ -56,6 +56,14 @@ export global UiState {
     /// Returns cumulative x-offset (logical px as float) of column j.
     pure callback col-x-offset(int) -> float;
 
+    // ── Page-size selector ────────────────────────────────────────────────────
+    /// Active page-size limit (100 / 500 / 1000). Persisted in config.toml.
+    in-out property <int> page-size: 500;
+    /// Total rows returned by the last query (before client-side filtering).
+    in-out property <int> result-total-rows: 0;
+    /// User selected a new page size; Rust updates state and persists to config.
+    callback update-page-size(int);
+
     // ── Result table column sort ──────────────────────────────────────────────
     /// -1 = no sort; ≥0 = active sort column index.
     in-out property <int>  result-sort-col: -1;
@@ -94,6 +102,12 @@ export global UiState {
     in-out property <string> test-result-message:    "";
     /// Controls the "add without a passing test" confirmation popup.
     in-out property <bool>   show-add-confirm-popup: false;
+    /// Controls the "fetch all rows" confirmation popup (shown when ALL is clicked).
+    in-out property <bool>   show-all-rows-confirm: false;
+    /// User confirmed "fetch all rows" — Rust sets page-size=0 and reruns last query.
+    callback confirm-all-rows();
+    /// User dismissed the "fetch all rows" confirm popup.
+    callback dismiss-all-rows-confirm();
 
     // ── UI → Controller callbacks ─────────────────────────────────────────────
     callback run-query(string);
@@ -194,7 +208,8 @@ export component AppWindow inherits Window {
             // Don't intercept while a modal overlay is open.
             if (UiState.show-connection-form
                     || UiState.show-test-result-popup
-                    || UiState.show-add-confirm-popup) {
+                    || UiState.show-add-confirm-popup
+                    || UiState.show-all-rows-confirm) {
                 EventResult.reject
             } else if (event.modifiers.alt
                     && !event.modifiers.shift
@@ -482,6 +497,15 @@ export component AppWindow inherits Window {
                     sort-col:            UiState.result-sort-col;
                     sort-asc:            UiState.result-sort-asc;
                     sort-col-clicked(i)  => { UiState.sort-result-col(i); }
+                    page-size:           UiState.page-size;
+                    total-rows:          UiState.result-total-rows;
+                    change-page-size(n)  => {
+                        if (n == 0) {
+                            UiState.show-all-rows-confirm = true;
+                        } else {
+                            UiState.update-page-size(n);
+                        }
+                    }
                 }
             }
         }
@@ -704,6 +728,84 @@ export component AppWindow inherits Window {
                                         vertical-alignment: center;
                                     }
                                     TouchArea { clicked => { UiState.confirm-add-connection(); } }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        // ── Fetch-all-rows confirmation popup ────────────────────────────────
+        // Shown when the user clicks the ALL button in the result toolbar.
+        if UiState.show-all-rows-confirm: Rectangle {
+            x: 0;
+            y: 0;
+            width:  root.width;
+            height: root.height;
+            background: #00000099;
+
+            VerticalLayout {
+                alignment: center;
+                HorizontalLayout {
+                    alignment: center;
+                    Rectangle {
+                        width: 360px;
+                        background: #313244;
+                        border-radius: 8px;
+                        border-width: 1px;
+                        border-color: #585b70;
+                        drop-shadow-blur: 20px;
+                        drop-shadow-color: #00000088;
+
+                        VerticalLayout {
+                            padding: 24px;
+                            spacing: 16px;
+                            alignment: start;
+
+                            Text {
+                                text: @tr("Fetch all rows?");
+                                color: #f9e2af;
+                                font-size: 15px;
+                                font-weight: 700;
+                            }
+
+                            Text {
+                                text: @tr("No LIMIT will be applied. This may take a long time for large tables.");
+                                color: #cdd6f4;
+                                font-size: 13px;
+                                wrap: word-wrap;
+                            }
+
+                            HorizontalLayout {
+                                spacing: 8px;
+                                alignment: end;
+
+                                Rectangle {
+                                    width: 80px;
+                                    height: 32px;
+                                    background: #45475a;
+                                    border-radius: 4px;
+                                    Text {
+                                        text: @tr("Cancel");
+                                        color: #cdd6f4;
+                                        horizontal-alignment: center;
+                                        vertical-alignment: center;
+                                    }
+                                    TouchArea { clicked => { UiState.dismiss-all-rows-confirm(); } }
+                                }
+
+                                Rectangle {
+                                    width: 80px;
+                                    height: 32px;
+                                    background: #f38ba8;
+                                    border-radius: 4px;
+                                    Text {
+                                        text: @tr("Fetch");
+                                        color: #1e1e2e;
+                                        horizontal-alignment: center;
+                                        vertical-alignment: center;
+                                    }
+                                    TouchArea { clicked => { UiState.confirm-all-rows(); } }
                                 }
                             }
                         }

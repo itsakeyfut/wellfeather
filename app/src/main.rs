@@ -45,6 +45,15 @@ fn main() -> anyhow::Result<()> {
     let enc_key = crypto::load_or_create_key(&ConfigManager::app_dir())?;
 
     let state = Arc::new(AppState::new());
+
+    // Load persisted page_size from config so the first query uses the user's last setting.
+    {
+        let config = ConfigManager::new().load().unwrap_or_default();
+        state
+            .ui
+            .set_page_size(u32::from(config.editor.page_size) as usize);
+    }
+
     let db = DbService::new();
 
     let session = SessionManager::new();
