@@ -109,6 +109,13 @@ export global UiState {
     /// User dismissed the "fetch all rows" confirm popup.
     callback dismiss-all-rows-confirm();
 
+    // ── Completion ────────────────────────────────────────────────────────────
+    /// Fired by the editor on every user text edit; Rust debounces 300 ms then
+    /// sends Command::FetchCompletion.
+    callback fetch-completion(string, int);
+    /// Fired by Ctrl+Space; Rust sends Command::FetchCompletion immediately.
+    callback trigger-completion(string, int);
+
     // ── UI → Controller callbacks ─────────────────────────────────────────────
     callback run-query(string);
     callback cancel-query();
@@ -316,6 +323,8 @@ export component AppWindow inherits Window {
                 move-cursor-line(text, pos, delta) => { UiState.move-cursor-line(text, pos, delta); }
                 run-query => { UiState.run-query(UiState.editor-text); }
                 toggle-panel => { UiState.result-panel-open = !UiState.result-panel-open; }
+                text-edited(sql, pos) => { UiState.fetch-completion(sql, pos); }
+                trigger-completion(sql, pos) => { UiState.trigger-completion(sql, pos); }
             }
 
             // ── Cell-value preview strip ──────────────────────────────────────
