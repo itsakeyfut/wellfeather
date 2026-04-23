@@ -69,6 +69,15 @@ export component Editor inherits Rectangle {
     /// Implemented in app.slint by toggling UiState.result-panel-open.
     callback toggle-panel();
 
+    /// Fired on every user text edit (not programmatic).
+    /// Carries the new SQL text and the cursor byte offset.
+    /// Wired in app.slint to UiState.fetch-completion for 300 ms debounce.
+    callback text-edited(string, int);
+
+    /// Fired on Ctrl+Space for immediate completion.
+    /// Carries the current SQL text and cursor byte offset.
+    callback trigger-completion(string, int);
+
     // ── Out properties consumed by the external gutter in app.slint ──────────
     out property <length> gutter-scroll-y:  editor-scroll.viewport-y;
     out property <length> gutter-line-h:    root.line-h;
@@ -252,6 +261,9 @@ export component Editor inherits Rectangle {
                 } else if (event.text == "j" && event.modifiers.control) {
                     root.toggle-panel();
                     EventResult.accept
+                } else if (event.text == " " && event.modifiers.control) {
+                    root.trigger-completion(inner-input.text, inner-input.cursor-position-byte-offset);
+                    EventResult.accept
                 } else {
                     EventResult.reject
                 }
@@ -277,6 +289,12 @@ export component Editor inherits Rectangle {
                 selection-foreground-color: #cdd6f4;
                 font-family: root.font-family;
                 font-size:   root.font-size-px * 1px;
+
+                // Notify app.slint on every user keystroke so the completion
+                // debounce timer can be (re)started.
+                edited => {
+                    root.text-edited(self.text, self.cursor-position-byte-offset);
+                }
 
                 // Horizontal auto-scroll: keep cursor inside the visible area
                 // whenever the cursor position changes (typing, keyboard nav,

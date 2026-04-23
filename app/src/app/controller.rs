@@ -19,7 +19,7 @@ use chrono::Utc;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
-use wf_completion::cache::MetadataCache;
+use wf_completion::{cache::MetadataCache, service::CompletionService};
 use wf_db::{error::DbError, models::DbConnection, service::DbService};
 use wf_history::service::HistoryService;
 
@@ -49,6 +49,8 @@ pub struct AppController {
     metadata_cache_path: PathBuf,
     /// `None` until `run()` initialises the cache.
     metadata_cache: Option<MetadataCache>,
+    /// `None` until `run()` initialises the cache (same `MetadataCache` clone).
+    completion: Option<CompletionService>,
     rx_cmd: mpsc::Receiver<Command>,
     tx_event: mpsc::Sender<Event>,
 }
@@ -78,6 +80,7 @@ impl AppController {
                 history: None,
                 metadata_cache_path,
                 metadata_cache: None,
+                completion: None,
                 rx_cmd,
                 tx_event,
             },
@@ -106,6 +109,7 @@ impl AppController {
         if let Err(e) = cache.preload_from_disk().await {
             warn!("failed to preload metadata cache: {e}");
         }
+        self.completion = Some(CompletionService::new(cache.clone()));
         self.metadata_cache = Some(cache);
 
         while let Some(cmd) = self.rx_cmd.recv().await {
@@ -118,6 +122,9 @@ impl AppController {
                 Command::RunSelection(sql) => self.handle_run_query(sql).await,
                 Command::CancelQuery => self.handle_cancel_query().await,
                 Command::UpdateConfig(update) => self.handle_update_config(update).await,
+                Command::FetchCompletion(sql, cursor_pos) => {
+                    self.handle_fetch_completion(sql, cursor_pos).await;
+                }
                 _ => {} // remaining commands handled in later tasks
             }
         }
@@ -309,6 +316,22 @@ impl AppController {
                 warn!(error = %e, "failed to persist page_size to config");
             }
             let _ = self.tx_event.send(Event::ConfigUpdated).await;
+        }
+    }
+
+    /// Handle a `FetchCompletion` command.
+    ///
+    /// Looks up the active connection, calls [`CompletionService::complete`], and
+    /// sends [`Event::CompletionReady`] with the (possibly empty) candidate list.
+    /// Silently no-ops when there is no active connection or no completion service.
+    async fn handle_fetch_completion(&self, sql: String, cursor_pos: usize) {
+        let conn_id = match self.state.conn.active() {
+            Some(c) => c.id.clone(),
+            None => return,
+        };
+        if let Some(ref completion) = self.completion {
+            let items = completion.complete(&conn_id, &sql, cursor_pos).await;
+            let _ = self.tx_event.send(Event::CompletionReady(items)).await;
         }
     }
 

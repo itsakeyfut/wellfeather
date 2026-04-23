@@ -220,6 +220,7 @@ impl UI {
         );
         Self::register_connection_form_callbacks(&window, tx_cmd.clone(), enc_key);
         Self::register_editor_callbacks(&window, state.clone(), tx_cmd.clone());
+        Self::register_completion_callbacks(&window, tx_cmd.clone());
         // Set initial page size on the Slint window from shared state.
         window
             .global::<crate::UiState>()
@@ -862,6 +863,57 @@ impl UI {
                 let tx_cmd = tx_cmd.clone(); // clone required: tokio::spawn requires 'static
                 tokio::spawn(async move {
                     let _ = tx_cmd.send(Command::CancelQuery).await;
+                });
+            });
+        }
+    }
+
+    // ── Completion callbacks ──────────────────────────────────────────────────
+
+    fn register_completion_callbacks(window: &crate::AppWindow, tx_cmd: mpsc::Sender<Command>) {
+        use std::cell::RefCell;
+        use std::rc::Rc;
+        use std::time::Duration;
+
+        let ui = window.global::<crate::UiState>();
+
+        // Debounced path (text-change → 300 ms → FetchCompletion).
+        // Dropping the previous timer stops it — each keystroke resets the window.
+        let debounce: Rc<RefCell<Option<slint::Timer>>> = Rc::new(RefCell::new(None));
+        {
+            let debounce = debounce.clone(); // clone required: on_fetch_completion closure
+            let tx_cmd = tx_cmd.clone(); // clone required: on_fetch_completion closure
+            ui.on_fetch_completion(move |sql, cursor_pos| {
+                *debounce.borrow_mut() = None; // drop previous timer → cancels it
+                let tx = tx_cmd.clone(); // clone required: Timer callback
+                let sql = sql.to_string();
+                let timer = slint::Timer::default();
+                timer.start(
+                    slint::TimerMode::SingleShot,
+                    Duration::from_millis(300),
+                    move || {
+                        let tx = tx.clone(); // clone required: tokio::spawn
+                        let sql = sql.clone();
+                        tokio::spawn(async move {
+                            let _ = tx
+                                .send(Command::FetchCompletion(sql, cursor_pos as usize))
+                                .await;
+                        });
+                    },
+                );
+                *debounce.borrow_mut() = Some(timer);
+            });
+        }
+
+        // Immediate path (Ctrl+Space → FetchCompletion without delay).
+        {
+            ui.on_trigger_completion(move |sql, cursor_pos| {
+                let tx = tx_cmd.clone(); // clone required: tokio::spawn
+                let sql = sql.to_string();
+                tokio::spawn(async move {
+                    let _ = tx
+                        .send(Command::FetchCompletion(sql, cursor_pos as usize))
+                        .await;
                 });
             });
         }
