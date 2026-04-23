@@ -221,6 +221,7 @@ impl UI {
         Self::register_connection_form_callbacks(&window, tx_cmd.clone(), enc_key);
         Self::register_editor_callbacks(&window, state.clone(), tx_cmd.clone());
         Self::register_completion_callbacks(&window, tx_cmd.clone());
+        Self::register_completion_accept_callback(&window);
         // Set initial page size on the Slint window from shared state.
         window
             .global::<crate::UiState>()
@@ -546,6 +547,35 @@ impl UI {
                             let ui = window.global::<crate::UiState>();
                             let current = ui.get_editor_text().to_string();
                             ui.set_editor_text(append_editor_text(&current, &text).into());
+                        });
+                    }
+                    Event::CompletionReady(ref items) => {
+                        // Build Vec<CompletionRow> outside invoke_from_event_loop —
+                        // Vec is Send, Rc is not.
+                        let rows: Vec<crate::CompletionRow> = items
+                            .iter()
+                            .map(|item| crate::CompletionRow {
+                                label: item.label.clone().into(),
+                                kind: completion_kind_label(&item.kind).into(),
+                                detail: item.detail.clone().unwrap_or_default().into(),
+                                insert_text: item.insert_text.clone().into(),
+                            })
+                            .collect();
+                        // clone required: invoke_from_event_loop closure must be 'static
+                        let window_weak = window_weak.clone();
+                        let _ = slint::invoke_from_event_loop(move || {
+                            let Some(window) = window_weak.upgrade() else {
+                                return;
+                            };
+                            let ui = window.global::<crate::UiState>();
+                            if rows.is_empty() {
+                                ui.set_completion_visible(false);
+                            } else {
+                                let model = Rc::new(slint::VecModel::from(rows));
+                                ui.set_completion_items(model.into());
+                                ui.set_completion_selected(0);
+                                ui.set_completion_visible(true);
+                            }
                         });
                     }
                     _ => {}
@@ -919,6 +949,29 @@ impl UI {
         }
     }
 
+    fn register_completion_accept_callback(window: &crate::AppWindow) {
+        let ui = window.global::<crate::UiState>();
+        let window_weak = window.as_weak(); // clone required: on_accept_completion closure
+        ui.on_accept_completion(move |insert_text, cursor_pos| {
+            let Some(window) = window_weak.upgrade() else {
+                return;
+            };
+            let ui = window.global::<crate::UiState>();
+            let current = ui.get_editor_text().to_string();
+            let pos = (cursor_pos as usize).min(current.len());
+            let prefix_start = find_prefix_start(&current, pos);
+            let new_text = format!(
+                "{}{}{}",
+                &current[..prefix_start],
+                insert_text,
+                &current[pos..]
+            );
+            let new_cursor = (prefix_start + insert_text.len()) as i32;
+            ui.set_editor_text(new_text.into());
+            ui.set_editor_cursor_target(new_cursor);
+        });
+    }
+
     // ── Result callbacks ──────────────────────────────────────────────────────
 
     fn register_result_callbacks(
@@ -1227,6 +1280,32 @@ fn db_type_label(dt: &DbType) -> &'static str {
     }
 }
 
+fn completion_kind_label(kind: &wf_completion::CompletionKind) -> &'static str {
+    use wf_completion::CompletionKind::*;
+    match kind {
+        Table => "Table",
+        Column => "Column",
+        Keyword => "Keyword",
+        Schema => "Schema",
+        View => "View",
+    }
+}
+
+/// Returns the byte offset of the first character of the word immediately
+/// before `cursor_pos` in `text`.  Handles dot-qualified names (e.g. `u.em`)
+/// by only considering the segment after the last `.`.
+pub(crate) fn find_prefix_start(text: &str, cursor_pos: usize) -> usize {
+    let pos = cursor_pos.min(text.len());
+    let before = &text[..pos];
+    let search_start = before.rfind('.').map(|i| i + 1).unwrap_or(0);
+    let prefix_len = before[search_start..]
+        .bytes()
+        .rev()
+        .take_while(|b| b.is_ascii_alphanumeric() || *b == b'_')
+        .count();
+    pos - prefix_len
+}
+
 /// Append `text` to `current` editor content with a newline separator.
 /// If `current` is empty the text is used as-is.
 /// If `current` already ends with `\n` the text is appended directly.
@@ -1425,6 +1504,28 @@ fn parse_col_eq(query: &str) -> Option<(String, &str)> {
 mod tests {
     use super::*;
     use wf_db::models::{DbMetadata, DbType, TableInfo};
+
+    // ── find_prefix_start ────────────────────────────────────────────────────
+
+    #[test]
+    fn find_prefix_start_should_return_word_start_before_cursor() {
+        assert_eq!(find_prefix_start("SELECT sel", 10), 7);
+    }
+
+    #[test]
+    fn find_prefix_start_should_return_cursor_when_at_space() {
+        assert_eq!(find_prefix_start("SELECT ", 7), 7);
+    }
+
+    #[test]
+    fn find_prefix_start_should_return_after_dot_for_qualified_name() {
+        assert_eq!(find_prefix_start("u.em", 4), 2);
+    }
+
+    #[test]
+    fn find_prefix_start_should_return_cursor_when_no_prefix() {
+        assert_eq!(find_prefix_start("SELECT * FROM ", 14), 14);
+    }
 
     fn make_conn(id: &str, name: &str) -> DbConnection {
         DbConnection {

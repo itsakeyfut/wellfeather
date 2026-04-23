@@ -87,7 +87,21 @@ impl CompletionEngine {
     ) -> Vec<CompletionItem> {
         let prefix_upper = prefix.to_ascii_uppercase();
         match context {
-            CompletionContext::Keyword => keyword_candidates(&prefix_upper),
+            CompletionContext::Keyword => {
+                if prefix_upper.is_empty() {
+                    // Don't flood the popup when the cursor is at an empty position
+                    // (e.g. after typing "SELECT ").  The user must type at least one
+                    // character before keyword suggestions appear.
+                    return vec![];
+                }
+                // Exclude keywords the user has already typed in full (e.g. if prefix
+                // is "SELECT", omit SELECT itself — but keep "UNION ALL" when prefix
+                // is "UNION").
+                keyword_candidates(&prefix_upper)
+                    .into_iter()
+                    .filter(|item| item.label.to_ascii_uppercase() != prefix_upper)
+                    .collect()
+            }
             CompletionContext::TableName => table_candidates(metadata, &prefix_upper),
             CompletionContext::ColumnName { table } => {
                 column_candidates(metadata, table.as_deref(), &prefix_upper)
@@ -231,16 +245,14 @@ mod tests {
     }
 
     #[test]
-    fn complete_should_return_all_keywords_for_empty_prefix() {
+    fn complete_should_return_empty_for_keyword_with_empty_prefix() {
         let meta = DbMetadata::default();
         let items = CompletionEngine::complete(CompletionContext::Keyword, &meta, "");
         assert!(
-            items.len() >= SQL_KEYWORDS.len(),
-            "expected ≥{} keywords, got {}",
-            SQL_KEYWORDS.len(),
+            items.is_empty(),
+            "expected no keyword suggestions for empty prefix, got {}",
             items.len()
         );
-        assert!(items.iter().all(|i| i.kind == CompletionKind::Keyword));
     }
 
     #[test]
@@ -342,7 +354,7 @@ mod tests {
         let meta = make_metadata();
         let items = CompletionEngine::complete(CompletionContext::TableName, &meta, "");
         assert!(items.iter().all(|i| i.insert_text == i.label));
-        let kw_items = CompletionEngine::complete(CompletionContext::Keyword, &meta, "");
+        let kw_items = CompletionEngine::complete(CompletionContext::Keyword, &meta, "sel");
         assert!(kw_items.iter().all(|i| i.insert_text == i.label));
     }
 }

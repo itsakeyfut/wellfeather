@@ -1,0 +1,62 @@
+import { CompletionRow } from "../globals.slint";
+
+export component CompletionPopup inherits Rectangle {
+    in property    <[CompletionRow]> items: [];
+    in-out property <int>            selected-index: 0;
+
+    property <length> item-h: 22px;
+
+    background: #313244;
+    border-radius: 4px;
+    border-width: 1px;
+    border-color: #585b70;
+    drop-shadow-blur: 10px;
+    drop-shadow-color: #00000088;
+    width: 320px;
+    height: min(items.length, 8) * item-h;
+    clip: true;
+
+    popup-scroll := Flickable {
+        width: parent.width;
+        height: parent.height;
+        viewport-height: root.items.length * root.item-h;
+        interactive: false;
+
+        for item[i] in root.items: Rectangle {
+            y: i * root.item-h;
+            height: root.item-h;
+            width: root.width;
+            background: i == root.selected-index ? #45475a : transparent;
+
+            Text {
+                x: 8px;
+                y: (parent.height - self.preferred-height) / 2;
+                text: item.label;
+                color: #cdd6f4;
+                font-size: 13px;
+                font-family: "JetBrains Mono";
+            }
+
+            Text {
+                x: 200px;
+                y: (parent.height - self.preferred-height) / 2;
+                text: item.kind;
+                color: #6c7086;
+                font-size: 11px;
+            }
+        }
+    }
+
+    // Auto-scroll to keep the selected row visible when navigating with ↑/↓.
+    changed selected-index => {
+        let item-top = root.selected-index * root.item-h;
+        let item-bot = item-top + root.item-h;
+        let vis-top  = -popup-scroll.viewport-y;
+        let vis-bot  = vis-top + popup-scroll.height;
+        if (item-top < vis-top) {
+            popup-scroll.viewport-y = -item-top;
+        } else if (item-bot > vis-bot) {
+            popup-scroll.viewport-y = -(item-bot - popup-scroll.height);
+        }
+    }
+}

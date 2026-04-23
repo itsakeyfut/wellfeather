@@ -29,3 +29,10 @@ export struct SidebarNode {
     node-kind: string,    // "connection" | "category" | "table" | "view" | "proc" | "index"
     parent-index: int,    // flat-list index of parent node; -1 for root connection nodes
 }
+
+export struct CompletionRow {
+    label: string,
+    kind: string,
+    detail: string,
+    insert-text: string,
+}

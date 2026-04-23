@@ -1,3 +1,5 @@
+import { CompletionRow } from "../globals.slint";
+
 // SQL editor component — multi-line TextInput with synchronised line numbers.
 //
 // The line-number gutter is intentionally NOT rendered here.  It lives in
@@ -84,6 +86,17 @@ export component Editor inherits Rectangle {
     out property <int>    gutter-vis-first: root.vis-first;
     out property <int>    gutter-vis-count: root.vis-count;
 
+    // ── Completion popup ──────────────────────────────────────────────────────
+    in-out property <bool>           completion-visible:  false;
+    in property    <[CompletionRow]> completion-items:    [];
+    in-out property <int>            completion-selected: 0;
+    in-out property <int>            editor-cursor-target: -1;
+    callback accept-completion(string, int);
+
+    /// Cursor position in editor-viewport space; consumed by app.slint to place the popup.
+    out property <length> popup-x: 0px;
+    out property <length> popup-y: 0px;
+
     // ── Key-hold state for timer-based UP/DOWN navigation ────────────────────
     property <bool> up-held:   false;
     property <bool> down-held: false;
@@ -151,6 +164,15 @@ export component Editor inherits Rectangle {
             editor-scroll.viewport-y = -(root.current-line * root.line-h);
         } else if ((root.current-line + 1) * root.line-h > -editor-scroll.viewport-y + editor-scroll.height) {
             editor-scroll.viewport-y = -((root.current-line + 1) * root.line-h - editor-scroll.height);
+        }
+    }
+
+    // When Rust sets editor-cursor-target after a completion insertion, move the
+    // TextInput cursor to that byte offset then reset the target back to -1.
+    changed editor-cursor-target => {
+        if (root.editor-cursor-target >= 0) {
+            inner-input.set-selection-offsets(root.editor-cursor-target, root.editor-cursor-target);
+            root.editor-cursor-target = -1;
         }
     }
 
@@ -225,7 +247,52 @@ export component Editor inherits Rectangle {
             focus-on-click: false;
 
             capture-key-pressed(event) => {
-                if (event.text == Key.UpArrow
+                if (root.completion-visible) {
+                    // ── Popup navigation ────────────────────────────────────
+                    if (event.text == Key.UpArrow
+                            && !event.modifiers.shift
+                            && !event.modifiers.control
+                            && !event.modifiers.alt) {
+                        if (root.completion-selected > 0) {
+                            root.completion-selected -= 1;
+                        }
+                        EventResult.accept
+                    } else if (event.text == Key.DownArrow
+                            && !event.modifiers.shift
+                            && !event.modifiers.control
+                            && !event.modifiers.alt) {
+                        if (root.completion-selected < root.completion-items.length - 1) {
+                            root.completion-selected += 1;
+                        }
+                        EventResult.accept
+                    } else if (event.text == Key.Return
+                            && !event.modifiers.shift
+                            && !event.modifiers.control
+                            && !event.modifiers.alt) {
+                        if (root.completion-items.length > 0) {
+                            root.accept-completion(
+                                root.completion-items[root.completion-selected].insert-text,
+                                inner-input.cursor-position-byte-offset
+                            );
+                        }
+                        root.completion-visible = false;
+                        EventResult.accept
+                    } else if (event.text == Key.Tab) {
+                        if (root.completion-selected < root.completion-items.length - 1) {
+                            root.completion-selected += 1;
+                        } else {
+                            root.completion-selected = 0;
+                        }
+                        EventResult.accept
+                    } else if (event.text == Key.Escape) {
+                        root.completion-visible = false;
+                        EventResult.accept
+                    } else {
+                        // All other keys: let them reach TextInput; popup stays until
+                        // the debounce fires and either updates or hides it.
+                        EventResult.reject
+                    }
+                } else if (event.text == Key.UpArrow
                         && !event.modifiers.shift
                         && !event.modifiers.control
                         && !event.modifiers.alt) {
@@ -318,6 +385,9 @@ export component Editor inherits Rectangle {
                             editor-scroll.viewport-x = 0px;
                         }
                     }
+                    // Track cursor viewport position for completion popup placement.
+                    root.popup-x = pos.x + editor-scroll.viewport-x;
+                    root.popup-y = (root.current-line + 1) * root.line-h + editor-scroll.viewport-y;
                 }
             }
         }
