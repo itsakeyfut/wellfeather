@@ -2,15 +2,17 @@
 pub struct CompletionItem {
     pub label: String,
     pub kind: CompletionKind,
+    pub insert_text: String,
     pub detail: Option<String>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum CompletionKind {
     Table,
     Column,
     Keyword,
     Schema,
+    View,
 }
 
 pub mod cache;
