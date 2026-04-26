@@ -116,6 +116,8 @@ export global UiState {
     callback fetch-completion(string, int);
     /// Fired by Ctrl+Space; Rust sends Command::FetchCompletion immediately.
     callback trigger-completion(string, int);
+    /// Fired by Ctrl+Shift+F; Rust reformats editor-text in place.
+    callback format-sql();
 
     // ── Completion popup state ─────────────────────────────────────────────
     in property    <[CompletionRow]> completion-items:    [];
@@ -335,6 +337,7 @@ export component AppWindow inherits Window {
                 toggle-panel => { UiState.result-panel-open = !UiState.result-panel-open; }
                 text-edited(sql, pos) => { UiState.fetch-completion(sql, pos); }
                 trigger-completion(sql, pos) => { UiState.trigger-completion(sql, pos); }
+                format-sql => { UiState.format-sql(); }
                 completion-visible   <=> UiState.completion-visible;
                 completion-items:        UiState.completion-items;
                 completion-selected  <=> UiState.completion-selected;

@@ -222,6 +222,7 @@ impl UI {
         Self::register_editor_callbacks(&window, state.clone(), tx_cmd.clone());
         Self::register_completion_callbacks(&window, tx_cmd.clone());
         Self::register_completion_accept_callback(&window);
+        Self::register_formatter_callback(&window);
         // Set initial page size on the Slint window from shared state.
         window
             .global::<crate::UiState>()
@@ -1080,6 +1081,20 @@ impl UI {
                 }
             },
         );
+    }
+
+    fn register_formatter_callback(window: &crate::AppWindow) {
+        let ui = window.global::<crate::UiState>();
+        let window_weak = window.as_weak(); // clone required: on_format_sql closure
+        ui.on_format_sql(move || {
+            let Some(window) = window_weak.upgrade() else {
+                return;
+            };
+            let ui = window.global::<crate::UiState>();
+            let text = ui.get_editor_text().to_string();
+            let formatted = wf_query::formatter::format_sql(&text);
+            ui.set_editor_text(formatted.into());
+        });
     }
 
     // ── Result callbacks ──────────────────────────────────────────────────────
