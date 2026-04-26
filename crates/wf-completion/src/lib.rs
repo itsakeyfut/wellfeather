@@ -11,6 +11,7 @@ pub enum CompletionKind {
     Table,
     Column,
     Keyword,
+    Operator,
     Schema,
     View,
 }

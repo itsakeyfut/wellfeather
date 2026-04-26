@@ -1286,6 +1286,7 @@ fn completion_kind_label(kind: &wf_completion::CompletionKind) -> &'static str {
         Table => "Table",
         Column => "Column",
         Keyword => "Keyword",
+        Operator => "Operator",
         Schema => "Schema",
         View => "View",
     }

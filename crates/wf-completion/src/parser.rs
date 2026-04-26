@@ -15,9 +15,14 @@ pub enum CompletionContext {
     /// `table` carries the first table name found in the `FROM` clause,
     /// resolved through alias lookup when the cursor is in `alias.column` notation.
     ColumnName { table: Option<String> },
-    /// Cursor is at a space after a complete table/view name — suggest next-clause keywords
-    /// (WHERE, JOIN, ORDER BY, LIMIT, etc.) ranked by frequency.
+    /// Cursor is at a space after a complete table/view name in a FROM clause — suggest
+    /// next-clause keywords (WHERE, JOIN, ORDER BY, LIMIT, etc.) ranked by frequency.
     NextClause,
+    /// Cursor is at a space after a complete table/view name in a JOIN clause — suggest `ON`.
+    JoinOn,
+    /// Cursor is at a space after a column reference in WHERE / HAVING / ON — suggest
+    /// comparison operators (`=`, `!=`, `IS NULL`, `LIKE`, …).
+    Operator,
     /// Context cannot be determined (e.g. the SQL is empty).
     None,
 }
@@ -49,31 +54,53 @@ pub fn parse_context(sql: &str, cursor_pos: usize) -> CompletionContext {
 
     let before_upper = before.to_ascii_uppercase();
     match last_trigger_keyword(&before_upper) {
-        Some("FROM") | Some("JOIN") | Some("INTO") => {
-            // If the cursor is at whitespace after a complete table identifier, the user
-            // is done naming the table and wants next-clause keywords (WHERE, JOIN, …).
+        Some(trig @ ("FROM" | "JOIN" | "INTO")) => {
+            // After a complete table identifier (cursor at space): distinguish FROM→NextClause
+            // from JOIN→JoinOn so the popup stays contextually minimal.
             if before.ends_with(|c: char| c.is_ascii_whitespace()) {
-                let trigger_end = ["FROM", "JOIN", "INTO"]
-                    .iter()
-                    .filter_map(|&kw| last_kw_pos(&before_upper, kw).map(|p| p + kw.len()))
-                    .max()
+                let trigger_end = last_kw_pos(&before_upper, trig)
+                    .map(|p| p + trig.len())
                     .unwrap_or(0);
                 let after_trigger = before[trigger_end..].trim_start();
                 let first_token_len = after_trigger
                     .find(|c: char| !c.is_alphanumeric() && c != '_')
                     .unwrap_or(after_trigger.len());
                 if first_token_len > 0 {
-                    return CompletionContext::NextClause;
+                    return if trig == "JOIN" {
+                        CompletionContext::JoinOn
+                    } else {
+                        CompletionContext::NextClause
+                    };
                 }
             }
             CompletionContext::TableName
         }
-        Some("SELECT") | Some("WHERE") | Some("SET") | Some("HAVING") | Some("BY") | Some("ON") => {
+        Some(trig @ ("WHERE" | "HAVING" | "ON")) => {
+            // Operator context: cursor at space right after a single column/qualified-column
+            // reference (e.g. "WHERE id ", "ON t.id ").  Detected when the text after the
+            // trigger is a lone identifier with no spaces or operator symbols inside it.
+            if before.ends_with(|c: char| c.is_ascii_whitespace()) {
+                let trigger_end = last_kw_pos(&before_upper, trig)
+                    .map(|p| p + trig.len())
+                    .unwrap_or(0);
+                let after_trigger = before[trigger_end..].trim();
+                if !after_trigger.is_empty()
+                    && after_trigger
+                        .chars()
+                        .all(|c| c.is_alphanumeric() || c == '_' || c == '.')
+                {
+                    return CompletionContext::Operator;
+                }
+            }
             match extract_from_table(sql) {
                 Some(t) => CompletionContext::ColumnName { table: Some(t) },
                 None => CompletionContext::Keyword,
             }
         }
+        Some("SELECT") | Some("SET") | Some("BY") => match extract_from_table(sql) {
+            Some(t) => CompletionContext::ColumnName { table: Some(t) },
+            None => CompletionContext::Keyword,
+        },
         _ => CompletionContext::Keyword,
     }
 }
@@ -374,10 +401,42 @@ mod tests {
     }
 
     #[test]
-    fn parse_context_should_return_next_clause_after_join_table_and_space() {
+    fn parse_context_should_return_join_on_after_join_table_and_space() {
+        assert_eq!(p("SELECT * FROM t1 JOIN t2 |"), CompletionContext::JoinOn);
+    }
+
+    #[test]
+    fn parse_context_should_return_join_on_after_inner_join_table_and_space() {
         assert_eq!(
-            p("SELECT * FROM t1 JOIN t2 |"),
-            CompletionContext::NextClause
+            p("SELECT id FROM users INNER JOIN departments |"),
+            CompletionContext::JoinOn
+        );
+    }
+
+    #[test]
+    fn parse_context_should_return_operator_after_where_column_and_space() {
+        assert_eq!(
+            p("SELECT * FROM users WHERE id |"),
+            CompletionContext::Operator
+        );
+    }
+
+    #[test]
+    fn parse_context_should_return_operator_after_on_column_and_space() {
+        assert_eq!(
+            p("SELECT * FROM t1 JOIN t2 ON t1.id |"),
+            CompletionContext::Operator
+        );
+    }
+
+    #[test]
+    fn parse_context_should_return_column_name_after_where_operator() {
+        // After "WHERE id = " the cursor follows an operator, not a column → ColumnName
+        assert_eq!(
+            p("SELECT * FROM users WHERE id = |"),
+            CompletionContext::ColumnName {
+                table: Some("users".to_string())
+            }
         );
     }
 

@@ -130,6 +130,8 @@ impl CompletionEngine {
                 }
             }
             CompletionContext::NextClause => next_clause_candidates(),
+            CompletionContext::JoinOn => join_on_candidates(),
+            CompletionContext::Operator => operator_candidates(),
             CompletionContext::None => vec![],
         }
     }
@@ -160,6 +162,42 @@ fn next_clause_candidates() -> Vec<CompletionItem> {
             label: kw.to_string(),
             kind: CompletionKind::Keyword,
             insert_text: kw.to_string(),
+            detail: None,
+        })
+        .collect()
+}
+
+fn join_on_candidates() -> Vec<CompletionItem> {
+    vec![CompletionItem {
+        label: "ON".to_string(),
+        kind: CompletionKind::Keyword,
+        insert_text: "ON".to_string(),
+        detail: None,
+    }]
+}
+
+fn operator_candidates() -> Vec<CompletionItem> {
+    const OPS: &[&str] = &[
+        "=",
+        "!=",
+        "<>",
+        "<",
+        ">",
+        "<=",
+        ">=",
+        "IS NULL",
+        "IS NOT NULL",
+        "IN",
+        "NOT IN",
+        "LIKE",
+        "ILIKE",
+        "BETWEEN",
+    ];
+    OPS.iter()
+        .map(|&op| CompletionItem {
+            label: op.to_string(),
+            kind: CompletionKind::Operator,
+            insert_text: op.to_string(),
             detail: None,
         })
         .collect()
@@ -385,6 +423,29 @@ mod tests {
         let labels: Vec<_> = items.iter().map(|i| i.label.as_str()).collect();
         assert_eq!(labels, vec!["users"]);
         assert!(items.iter().all(|i| i.kind == CompletionKind::Table));
+    }
+
+    #[test]
+    fn complete_should_return_on_for_join_on_context() {
+        let meta = DbMetadata::default();
+        let items = CompletionEngine::complete(CompletionContext::JoinOn, &meta, "");
+        let labels: Vec<_> = items.iter().map(|i| i.label.as_str()).collect();
+        assert_eq!(labels, vec!["ON"]);
+        assert!(items.iter().all(|i| i.kind == CompletionKind::Keyword));
+    }
+
+    #[test]
+    fn complete_should_return_comparison_operators_for_operator_context() {
+        let meta = DbMetadata::default();
+        let items = CompletionEngine::complete(CompletionContext::Operator, &meta, "");
+        let labels: Vec<_> = items.iter().map(|i| i.label.as_str()).collect();
+        assert!(labels.contains(&"="), "expected = in {labels:?}");
+        assert!(
+            labels.contains(&"IS NULL"),
+            "expected IS NULL in {labels:?}"
+        );
+        assert!(labels.contains(&"LIKE"), "expected LIKE in {labels:?}");
+        assert!(items.iter().all(|i| i.kind == CompletionKind::Operator));
     }
 
     #[test]
