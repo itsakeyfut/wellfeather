@@ -129,12 +129,41 @@ impl CompletionEngine {
                     cols
                 }
             }
+            CompletionContext::NextClause => next_clause_candidates(),
             CompletionContext::None => vec![],
         }
     }
 }
 
 // ── Internal helpers ──────────────────────────────────────────────────────────
+
+fn next_clause_candidates() -> Vec<CompletionItem> {
+    const NEXT_CLAUSES: &[&str] = &[
+        "WHERE",
+        "JOIN",
+        "INNER JOIN",
+        "LEFT JOIN",
+        "RIGHT JOIN",
+        "FULL OUTER JOIN",
+        "ORDER BY",
+        "GROUP BY",
+        "HAVING",
+        "LIMIT",
+        "OFFSET",
+        "ON",
+        "UNION",
+        "UNION ALL",
+    ];
+    NEXT_CLAUSES
+        .iter()
+        .map(|&kw| CompletionItem {
+            label: kw.to_string(),
+            kind: CompletionKind::Keyword,
+            insert_text: kw.to_string(),
+            detail: None,
+        })
+        .collect()
+}
 
 fn keyword_candidates(prefix_upper: &str) -> Vec<CompletionItem> {
     SQL_KEYWORDS
@@ -356,6 +385,21 @@ mod tests {
         let labels: Vec<_> = items.iter().map(|i| i.label.as_str()).collect();
         assert_eq!(labels, vec!["users"]);
         assert!(items.iter().all(|i| i.kind == CompletionKind::Table));
+    }
+
+    #[test]
+    fn complete_should_return_next_clause_candidates_for_next_clause_context() {
+        let meta = DbMetadata::default();
+        let items = CompletionEngine::complete(CompletionContext::NextClause, &meta, "");
+        let labels: Vec<_> = items.iter().map(|i| i.label.as_str()).collect();
+        assert!(labels.contains(&"WHERE"), "expected WHERE in {labels:?}");
+        assert!(labels.contains(&"JOIN"), "expected JOIN in {labels:?}");
+        assert!(
+            labels.contains(&"ORDER BY"),
+            "expected ORDER BY in {labels:?}"
+        );
+        assert!(labels.contains(&"LIMIT"), "expected LIMIT in {labels:?}");
+        assert!(items.iter().all(|i| i.kind == CompletionKind::Keyword));
     }
 
     #[test]
