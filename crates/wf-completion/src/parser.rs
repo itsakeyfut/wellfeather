@@ -47,7 +47,7 @@ pub fn parse_context(sql: &str, cursor_pos: usize) -> CompletionContext {
     let before_upper = before.to_ascii_uppercase();
     match last_trigger_keyword(&before_upper) {
         Some("FROM") | Some("JOIN") | Some("INTO") => CompletionContext::TableName,
-        Some("SELECT") | Some("WHERE") | Some("SET") | Some("HAVING") => {
+        Some("SELECT") | Some("WHERE") | Some("SET") | Some("HAVING") | Some("BY") | Some("ON") => {
             match extract_from_table(sql) {
                 Some(t) => CompletionContext::ColumnName { table: Some(t) },
                 None => CompletionContext::Keyword,
@@ -114,7 +114,11 @@ fn first_kw_pos(upper_text: &str, kw: &str) -> Option<usize> {
 
 /// Among all trigger keywords, return the one with the highest (last) position in `upper_text`.
 fn last_trigger_keyword(upper_text: &str) -> Option<&'static str> {
-    const TRIGGERS: &[&str] = &["SELECT", "FROM", "JOIN", "WHERE", "SET", "HAVING", "INTO"];
+    const TRIGGERS: &[&str] = &[
+        "SELECT", "FROM", "JOIN", "WHERE", "SET", "HAVING", "INTO",
+        "BY", // ORDER BY, GROUP BY → column names
+        "ON", // JOIN ... ON → column names
+    ];
     let mut best: Option<(usize, &'static str)> = None;
     for &kw in TRIGGERS {
         if let Some(pos) = last_kw_pos(upper_text, kw)
@@ -309,6 +313,36 @@ mod tests {
             p("SELECT u.| FROM users AS u"),
             CompletionContext::ColumnName {
                 table: Some("users".to_string())
+            }
+        );
+    }
+
+    #[test]
+    fn parse_context_should_return_column_name_after_order_by() {
+        assert_eq!(
+            p("SELECT * FROM users ORDER BY |"),
+            CompletionContext::ColumnName {
+                table: Some("users".to_string())
+            }
+        );
+    }
+
+    #[test]
+    fn parse_context_should_return_column_name_after_group_by() {
+        assert_eq!(
+            p("SELECT * FROM users GROUP BY |"),
+            CompletionContext::ColumnName {
+                table: Some("users".to_string())
+            }
+        );
+    }
+
+    #[test]
+    fn parse_context_should_return_column_name_after_join_on() {
+        assert_eq!(
+            p("SELECT * FROM t1 JOIN t2 ON |"),
+            CompletionContext::ColumnName {
+                table: Some("t1".to_string())
             }
         );
     }
