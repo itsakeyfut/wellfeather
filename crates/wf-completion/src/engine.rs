@@ -102,9 +102,32 @@ impl CompletionEngine {
                     .filter(|item| item.label.to_ascii_uppercase() != prefix_upper)
                     .collect()
             }
-            CompletionContext::TableName => table_candidates(metadata, &prefix_upper),
+            CompletionContext::TableName => {
+                let tables = table_candidates(metadata, &prefix_upper);
+                if tables.is_empty() && !prefix_upper.is_empty() {
+                    // No table matched the prefix — the user is likely typing a
+                    // keyword (e.g. "WHERE" after "FROM users wh").  Fall back to
+                    // keyword suggestions so structure keywords always surface.
+                    keyword_candidates(&prefix_upper)
+                        .into_iter()
+                        .filter(|item| item.label.to_ascii_uppercase() != prefix_upper)
+                        .collect()
+                } else {
+                    tables
+                }
+            }
             CompletionContext::ColumnName { table } => {
-                column_candidates(metadata, table.as_deref(), &prefix_upper)
+                let cols = column_candidates(metadata, table.as_deref(), &prefix_upper);
+                if cols.is_empty() && !prefix_upper.is_empty() {
+                    // No column matched the prefix — fall back to keywords so the
+                    // user can continue structuring the query (AND, OR, ORDER BY …).
+                    keyword_candidates(&prefix_upper)
+                        .into_iter()
+                        .filter(|item| item.label.to_ascii_uppercase() != prefix_upper)
+                        .collect()
+                } else {
+                    cols
+                }
             }
             CompletionContext::None => vec![],
         }
@@ -300,6 +323,39 @@ mod tests {
         assert!(labels.contains(&"order_id"));
         assert!(labels.contains(&"total"));
         assert!(labels.contains(&"user_id"));
+    }
+
+    #[test]
+    fn complete_should_fall_back_to_keywords_when_no_table_matches_prefix() {
+        let meta = make_metadata();
+        // "wh" doesn't match any table/view name → falls back to keywords (WHERE, WITH)
+        let items = CompletionEngine::complete(CompletionContext::TableName, &meta, "wh");
+        let labels: Vec<_> = items.iter().map(|i| i.label.as_str()).collect();
+        assert!(labels.contains(&"WHERE"), "expected WHERE in {labels:?}");
+        assert!(items.iter().all(|i| i.kind == CompletionKind::Keyword));
+    }
+
+    #[test]
+    fn complete_should_fall_back_to_keywords_when_no_column_matches_prefix() {
+        let meta = make_metadata();
+        // users columns are "id" and "email"; "wh" matches neither → falls back to keywords
+        let ctx = CompletionContext::ColumnName {
+            table: Some("users".to_string()),
+        };
+        let items = CompletionEngine::complete(ctx, &meta, "wh");
+        let labels: Vec<_> = items.iter().map(|i| i.label.as_str()).collect();
+        assert!(labels.contains(&"WHERE"), "expected WHERE in {labels:?}");
+        assert!(items.iter().all(|i| i.kind == CompletionKind::Keyword));
+    }
+
+    #[test]
+    fn complete_should_prefer_table_candidates_over_keyword_fallback() {
+        let meta = make_metadata();
+        // "us" matches table "users" → table candidates returned, no keyword fallback
+        let items = CompletionEngine::complete(CompletionContext::TableName, &meta, "us");
+        let labels: Vec<_> = items.iter().map(|i| i.label.as_str()).collect();
+        assert_eq!(labels, vec!["users"]);
+        assert!(items.iter().all(|i| i.kind == CompletionKind::Table));
     }
 
     #[test]
