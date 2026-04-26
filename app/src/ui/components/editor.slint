@@ -91,7 +91,7 @@ export component Editor inherits Rectangle {
     in property    <[CompletionRow]> completion-items:    [];
     in-out property <int>            completion-selected: 0;
     in-out property <int>            editor-cursor-target: -1;
-    callback accept-completion(string, int);
+    callback accept-completion(string, int, int, string);
 
     /// Cursor position in editor-viewport space; consumed by app.slint to place the popup.
     out property <length> popup-x: 0px;
@@ -272,7 +272,9 @@ export component Editor inherits Rectangle {
                         if (root.completion-items.length > 0) {
                             root.accept-completion(
                                 root.completion-items[root.completion-selected].insert-text,
-                                inner-input.cursor-position-byte-offset
+                                inner-input.cursor-position-byte-offset,
+                                root.completion-items[root.completion-selected].cursor-offset,
+                                root.completion-items[root.completion-selected].table-name
                             );
                         }
                         root.completion-visible = false;
@@ -288,8 +290,15 @@ export component Editor inherits Rectangle {
                         root.completion-visible = false;
                         EventResult.accept
                     } else {
-                        // All other keys: let them reach TextInput; popup stays until
-                        // the debounce fires and either updates or hides it.
+                        // Close popup immediately on characters that end a SQL token
+                        // (statement terminator, space, comma, parentheses).  This
+                        // avoids the user having to press Escape after, e.g., `;`.
+                        // The keystroke still reaches TextInput (EventResult.reject).
+                        if (event.text == ";" || event.text == " "
+                                || event.text == "," || event.text == ")"
+                                || event.text == "(") {
+                            root.completion-visible = false;
+                        }
                         EventResult.reject
                     }
                 } else if (event.text == Key.UpArrow

@@ -124,7 +124,7 @@ export global UiState {
     /// Set by Rust after inserting completion text; editor watches it to move cursor.
     in-out property <int>            editor-cursor-target: -1;
     /// Fired when user accepts a candidate (Enter key in popup).
-    callback accept-completion(string, int);
+    callback accept-completion(string, int, int, string);
 
     // ── UI → Controller callbacks ─────────────────────────────────────────────
     callback run-query(string);
@@ -339,7 +339,7 @@ export component AppWindow inherits Window {
                 completion-items:        UiState.completion-items;
                 completion-selected  <=> UiState.completion-selected;
                 editor-cursor-target <=> UiState.editor-cursor-target;
-                accept-completion(text, pos) => { UiState.accept-completion(text, pos); }
+                accept-completion(text, pos, offset, tname) => { UiState.accept-completion(text, pos, offset, tname); }
             }
 
             // ── Cell-value preview strip ──────────────────────────────────────

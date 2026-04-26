@@ -23,6 +23,12 @@ pub enum CompletionContext {
     /// Cursor is at a space after a column reference in WHERE / HAVING / ON — suggest
     /// comparison operators (`=`, `!=`, `IS NULL`, `LIKE`, …).
     Operator,
+    /// Cursor follows `ON` with nothing typed yet — suggest table names from FROM/JOIN clauses
+    /// so the user can continue with dot-notation column access.
+    JoinConditionTable { tables: Vec<String> },
+    /// Cursor follows a comparison operator (`=`, `<`, `>`) — suggest value literals
+    /// (`''`, `NULL`, `TRUE`, `FALSE`).
+    ValueExpected,
     /// Context cannot be determined (e.g. the SQL is empty).
     None,
 }
@@ -40,6 +46,11 @@ pub enum CompletionContext {
 pub fn parse_context(sql: &str, cursor_pos: usize) -> CompletionContext {
     let cursor_pos = cursor_pos.min(sql.len());
     let before = &sql[..cursor_pos];
+
+    // After a semicolon there is nothing more to complete in this statement.
+    if before.trim_end().ends_with(';') {
+        return CompletionContext::None;
+    }
 
     // Dot notation: "alias.|" → column completion scoped to that alias's table.
     if let Some(prefix) = before.trim_end().strip_suffix('.') {
@@ -76,14 +87,26 @@ pub fn parse_context(sql: &str, cursor_pos: usize) -> CompletionContext {
             CompletionContext::TableName
         }
         Some(trig @ ("WHERE" | "HAVING" | "ON")) => {
-            // Operator context: cursor at space right after a single column/qualified-column
-            // reference (e.g. "WHERE id ", "ON t.id ").  Detected when the text after the
-            // trigger is a lone identifier with no spaces or operator symbols inside it.
             if before.ends_with(|c: char| c.is_ascii_whitespace()) {
                 let trigger_end = last_kw_pos(&before_upper, trig)
                     .map(|p| p + trig.len())
                     .unwrap_or(0);
                 let after_trigger = before[trigger_end..].trim();
+
+                // ON with nothing typed yet → suggest referenced table names for dot notation
+                if trig == "ON" && after_trigger.is_empty() {
+                    let tables = extract_referenced_tables(sql);
+                    if !tables.is_empty() {
+                        return CompletionContext::JoinConditionTable { tables };
+                    }
+                }
+
+                // Cursor follows a comparison operator → suggest value literals
+                if after_trigger.ends_with(['=', '<', '>']) {
+                    return CompletionContext::ValueExpected;
+                }
+
+                // Lone column/qualified-column identifier → suggest comparison operators
                 if !after_trigger.is_empty()
                     && after_trigger
                         .chars()
@@ -97,9 +120,8 @@ pub fn parse_context(sql: &str, cursor_pos: usize) -> CompletionContext {
                 None => CompletionContext::Keyword,
             }
         }
-        Some("SELECT") | Some("SET") | Some("BY") => match extract_from_table(sql) {
-            Some(t) => CompletionContext::ColumnName { table: Some(t) },
-            None => CompletionContext::Keyword,
+        Some("SELECT") | Some("SET") | Some("BY") => CompletionContext::ColumnName {
+            table: extract_from_table(sql),
         },
         _ => CompletionContext::Keyword,
     }
@@ -226,7 +248,10 @@ fn resolve_alias(sql: &str, alias: Option<&str>) -> Option<String> {
                 if i >= 2 {
                     return Some(tokens_sql[i - 2].to_string());
                 }
-            } else if !is_join_keyword(prev) {
+            } else if is_join_keyword(prev) {
+                // "JOIN tablename" — no alias, the token itself IS the table name
+                return Some(tokens_sql[i].to_string());
+            } else {
                 // "tablename alias" pattern
                 return Some(tokens_sql[i - 1].to_string());
             }
@@ -237,12 +262,89 @@ fn resolve_alias(sql: &str, alias: Option<&str>) -> Option<String> {
     extract_from_table(sql)
 }
 
-/// True if `kw` is a SQL keyword that directly precedes a table name.
+/// True if `kw` is a SQL keyword that can directly precede a table name or alias reference.
 fn is_join_keyword(kw: &str) -> bool {
     matches!(
         kw.to_ascii_uppercase().as_str(),
-        "FROM" | "JOIN" | "LEFT" | "RIGHT" | "INNER" | "OUTER" | "CROSS" | "FULL" | "NATURAL"
+        "FROM"
+            | "JOIN"
+            | "LEFT"
+            | "RIGHT"
+            | "INNER"
+            | "OUTER"
+            | "CROSS"
+            | "FULL"
+            | "NATURAL"
+            | "ON"
     )
+}
+
+/// Returns `true` when `cursor_pos` is inside a SELECT column list.
+///
+/// Specifically: there is a `SELECT` keyword before the cursor with no `FROM`
+/// keyword between that SELECT and the cursor position.
+pub fn in_select_list(sql: &str, cursor_pos: usize) -> bool {
+    let cursor_pos = cursor_pos.min(sql.len());
+    let upper = sql.to_ascii_uppercase();
+    let before_upper = &upper[..cursor_pos];
+    let Some(select_pos) = last_kw_pos(before_upper, "SELECT") else {
+        return false;
+    };
+    first_kw_pos(&before_upper[select_pos + 6..], "FROM").is_none()
+}
+
+/// Return the distinct table names referenced after `FROM` and `JOIN` keywords in `sql`.
+///
+/// Used to build `JoinConditionTable` candidates after `ON`.
+pub fn extract_referenced_tables(sql: &str) -> Vec<String> {
+    let upper = sql.to_ascii_uppercase();
+    let mut tables = Vec::new();
+
+    for kw in ["FROM", "JOIN"] {
+        let mut start = 0;
+        while start < upper.len() {
+            let Some(rel) = upper[start..].find(kw) else {
+                break;
+            };
+            let abs = start + rel;
+            let bytes = upper.as_bytes();
+            let before_ok = abs == 0 || !is_word_char(bytes[abs - 1]);
+            let after_pos = abs + kw.len();
+            let after_ok = after_pos >= upper.len() || !is_word_char(bytes[after_pos]);
+            if before_ok && after_ok {
+                let rest = sql[after_pos..].trim_start();
+                let name: String = rest
+                    .chars()
+                    .take_while(|c| c.is_alphanumeric() || *c == '_')
+                    .collect();
+                if !name.is_empty() {
+                    let name_upper = name.to_ascii_uppercase();
+                    let is_keyword = matches!(
+                        name_upper.as_str(),
+                        "ON" | "WHERE"
+                            | "HAVING"
+                            | "GROUP"
+                            | "ORDER"
+                            | "LIMIT"
+                            | "SET"
+                            | "INNER"
+                            | "LEFT"
+                            | "RIGHT"
+                            | "OUTER"
+                            | "CROSS"
+                            | "FULL"
+                            | "NATURAL"
+                    );
+                    if !is_keyword && !tables.contains(&name) {
+                        tables.push(name);
+                    }
+                }
+            }
+            start = abs + 1;
+        }
+    }
+
+    tables
 }
 
 /// Split `text` into a list of identifier tokens (runs of alphanumeric + `_`).
@@ -261,6 +363,70 @@ fn ident_tokens(text: &str) -> Vec<&str> {
         rest = &s[end..];
     }
     tokens
+}
+
+/// Returns `true` when `word` is a SQL keyword that should never be treated as
+/// a column-name prefix in compound-prefix detection.
+pub fn is_sql_keyword(word: &str) -> bool {
+    matches!(
+        word.to_ascii_uppercase().as_str(),
+        "SELECT"
+            | "FROM"
+            | "WHERE"
+            | "JOIN"
+            | "INNER"
+            | "LEFT"
+            | "RIGHT"
+            | "FULL"
+            | "OUTER"
+            | "CROSS"
+            | "NATURAL"
+            | "ON"
+            | "AS"
+            | "GROUP"
+            | "ORDER"
+            | "BY"
+            | "HAVING"
+            | "LIMIT"
+            | "OFFSET"
+            | "SET"
+            | "INSERT"
+            | "INTO"
+            | "VALUES"
+            | "UPDATE"
+            | "DELETE"
+            | "CREATE"
+            | "DROP"
+            | "ALTER"
+            | "TABLE"
+            | "INDEX"
+            | "VIEW"
+            | "WITH"
+            | "DISTINCT"
+            | "ALL"
+            | "UNION"
+            | "EXCEPT"
+            | "INTERSECT"
+            | "AND"
+            | "OR"
+            | "NOT"
+            | "IN"
+            | "EXISTS"
+            | "LIKE"
+            | "ILIKE"
+            | "BETWEEN"
+            | "IS"
+            | "NULL"
+            | "TRUE"
+            | "FALSE"
+            | "CASE"
+            | "WHEN"
+            | "THEN"
+            | "ELSE"
+            | "END"
+            | "ASC"
+            | "DESC"
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -284,8 +450,8 @@ mod tests {
     // ── Four required cases from the issue ───────────────────────────────────
 
     #[test]
-    fn parse_context_should_return_keyword_when_select_has_no_from_clause() {
-        assert_eq!(p("SELECT |"), CompletionContext::Keyword);
+    fn parse_context_should_return_column_name_when_select_has_no_from_clause() {
+        assert_eq!(p("SELECT |"), CompletionContext::ColumnName { table: None });
     }
 
     #[test]
@@ -386,11 +552,11 @@ mod tests {
     }
 
     #[test]
-    fn parse_context_should_return_column_name_after_join_on() {
+    fn parse_context_should_return_join_condition_table_after_join_on() {
         assert_eq!(
             p("SELECT * FROM t1 JOIN t2 ON |"),
-            CompletionContext::ColumnName {
-                table: Some("t1".to_string())
+            CompletionContext::JoinConditionTable {
+                tables: vec!["t1".to_string(), "t2".to_string()]
             }
         );
     }
@@ -430,12 +596,47 @@ mod tests {
     }
 
     #[test]
-    fn parse_context_should_return_column_name_after_where_operator() {
-        // After "WHERE id = " the cursor follows an operator, not a column → ColumnName
+    fn parse_context_should_return_value_expected_after_where_column_equals() {
         assert_eq!(
             p("SELECT * FROM users WHERE id = |"),
+            CompletionContext::ValueExpected
+        );
+    }
+
+    #[test]
+    fn parse_context_should_return_value_expected_after_where_column_gt() {
+        assert_eq!(
+            p("SELECT * FROM users WHERE created_at > |"),
+            CompletionContext::ValueExpected
+        );
+    }
+
+    #[test]
+    fn parse_context_should_return_none_after_semicolon() {
+        assert_eq!(
+            parse_context("SELECT * FROM users;", 20),
+            CompletionContext::None
+        );
+        assert_eq!(parse_context("SELECT 1; ", 9), CompletionContext::None);
+    }
+
+    #[test]
+    fn parse_context_should_return_join_condition_table_after_on_keyword() {
+        let ctx = p("SELECT id FROM users INNER JOIN departments ON |");
+        assert_eq!(
+            ctx,
+            CompletionContext::JoinConditionTable {
+                tables: vec!["users".to_string(), "departments".to_string()]
+            }
+        );
+    }
+
+    #[test]
+    fn parse_context_should_return_column_name_for_dot_notation_on_join_alias() {
+        assert_eq!(
+            p("SELECT * FROM t1 JOIN t2 ON t1.|"),
             CompletionContext::ColumnName {
-                table: Some("users".to_string())
+                table: Some("t1".to_string())
             }
         );
     }
@@ -476,5 +677,54 @@ mod tests {
             extract_from_table("select * from orders"),
             Some("orders".to_string())
         );
+    }
+
+    // ── in_select_list ────────────────────────────────────────────────────────
+
+    #[test]
+    fn in_select_list_should_return_true_between_select_and_from() {
+        assert!(in_select_list("SELECT id FROM users", 9)); // after "id"
+        assert!(in_select_list("SELECT ", 7)); // right after SELECT
+    }
+
+    #[test]
+    fn in_select_list_should_return_false_after_from() {
+        assert!(!in_select_list("SELECT id FROM users WHERE id = 1", 20)); // in WHERE
+        assert!(!in_select_list("SELECT * FROM ", 14)); // in FROM
+    }
+
+    #[test]
+    fn in_select_list_should_return_false_when_no_select() {
+        assert!(!in_select_list("FROM users", 5));
+    }
+
+    // ── extract_referenced_tables ────────────────────────────────────────────
+
+    #[test]
+    fn extract_referenced_tables_should_return_tables_from_from_and_join() {
+        let tables = extract_referenced_tables(
+            "SELECT id FROM users INNER JOIN departments ON users.id = departments.id",
+        );
+        assert!(
+            tables.contains(&"users".to_string()),
+            "expected users in {tables:?}"
+        );
+        assert!(
+            tables.contains(&"departments".to_string()),
+            "expected departments in {tables:?}"
+        );
+    }
+
+    #[test]
+    fn extract_referenced_tables_should_deduplicate() {
+        let tables =
+            extract_referenced_tables("SELECT * FROM users JOIN users ON users.id = users.id");
+        assert_eq!(tables.iter().filter(|t| t.as_str() == "users").count(), 1);
+    }
+
+    #[test]
+    fn extract_referenced_tables_should_return_empty_when_no_from() {
+        let tables = extract_referenced_tables("SELECT 1");
+        assert!(tables.is_empty());
     }
 }
