@@ -1,4 +1,5 @@
-import { ConnectionEntry, RowData, SidebarNode } from "globals.slint";
+import { ConnectionEntry, RowData, SidebarNode, CompletionRow } from "globals.slint";
+import { CompletionPopup } from "components/completion_popup.slint";
 import { ConnectionForm }  from "components/connection_form.slint";
 import { Sidebar }         from "components/sidebar.slint";
 import { Editor }          from "components/editor.slint";
@@ -115,6 +116,15 @@ export global UiState {
     callback fetch-completion(string, int);
     /// Fired by Ctrl+Space; Rust sends Command::FetchCompletion immediately.
     callback trigger-completion(string, int);
+
+    // ── Completion popup state ─────────────────────────────────────────────
+    in property    <[CompletionRow]> completion-items:    [];
+    in-out property <bool>           completion-visible:  false;
+    in-out property <int>            completion-selected: 0;
+    /// Set by Rust after inserting completion text; editor watches it to move cursor.
+    in-out property <int>            editor-cursor-target: -1;
+    /// Fired when user accepts a candidate (Enter key in popup).
+    callback accept-completion(string, int, int, string);
 
     // ── UI → Controller callbacks ─────────────────────────────────────────────
     callback run-query(string);
@@ -325,6 +335,11 @@ export component AppWindow inherits Window {
                 toggle-panel => { UiState.result-panel-open = !UiState.result-panel-open; }
                 text-edited(sql, pos) => { UiState.fetch-completion(sql, pos); }
                 trigger-completion(sql, pos) => { UiState.trigger-completion(sql, pos); }
+                completion-visible   <=> UiState.completion-visible;
+                completion-items:        UiState.completion-items;
+                completion-selected  <=> UiState.completion-selected;
+                editor-cursor-target <=> UiState.editor-cursor-target;
+                accept-completion(text, pos, offset, tname) => { UiState.accept-completion(text, pos, offset, tname); }
             }
 
             // ── Cell-value preview strip ──────────────────────────────────────
@@ -517,6 +532,16 @@ export component AppWindow inherits Window {
                     }
                 }
             }
+        }
+
+        // ── Completion popup overlay ──────────────────────────────────────────
+        // Lives at FocusScope level (not inside the clip:true main Rectangle) so
+        // it is never clipped even when the cursor is near the editor bottom.
+        if UiState.completion-visible && UiState.completion-items.length > 0: CompletionPopup {
+            x: root.sidebar-width + root.gutter-col-width + editor-inst.popup-x;
+            y: editor-inst.popup-y;
+            items: UiState.completion-items;
+            selected-index <=> UiState.completion-selected;
         }
 
         // ── Status bar ────────────────────────────────────────────────────────
