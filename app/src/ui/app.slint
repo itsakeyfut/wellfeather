@@ -6,7 +6,9 @@ import { Sidebar }         from "components/sidebar.slint";
 import { Editor }          from "components/editor.slint";
 import { ResultTable }     from "components/result_table.slint";
 import { StatusBar }       from "components/status_bar.slint";
-import { ActionButton }    from "components/common.slint";
+import { TestResultDialog }    from "components/dialogs/test_result_dialog.slint";
+import { AddConnectionDialog } from "components/dialogs/add_connection_dialog.slint";
+import { AllRowsDialog }       from "components/dialogs/all_rows_dialog.slint";
 
 // UiState is defined here (root file) so that Slint generates Rust bindings for it.
 // Sub-components that need global state receive properties bound from UiState below.
@@ -635,191 +637,28 @@ export component AppWindow inherits Window {
         }
 
         // ── Test-result popup ─────────────────────────────────────────────────
-        // Shown after Test Connection completes (success or failure).
-        // Rendered after the connection-form overlay so it appears on top.
-        if UiState.show-test-result-popup: Rectangle {
-            x: 0;
-            y: 0;
-            width:  root.width;
-            height: root.height;
-            background: Colors.modal-overlay;
-
-            VerticalLayout {
-                alignment: center;
-                HorizontalLayout {
-                    alignment: center;
-                    Rectangle {
-                        width: 360px;
-                        background: Colors.surface0;
-                        border-radius: 8px;
-                        border-width: 1px;
-                        border-color: Colors.surface2;
-                        drop-shadow-blur: 20px;
-                        drop-shadow-color: Colors.shadow;
-
-                        VerticalLayout {
-                            padding: 24px;
-                            spacing: 16px;
-                            alignment: start;
-
-                            Text {
-                                text: UiState.test-result-ok
-                                    ? @tr("Connection Successful")
-                                    : @tr("Connection Failed");
-                                color: UiState.test-result-ok ? Colors.green : Colors.red;
-                                font-size: Typography.size-xl;
-                                font-weight: 700;
-                                horizontal-alignment: center;
-                            }
-
-                            if !UiState.test-result-ok: Text {
-                                text: UiState.test-result-message;
-                                color: Colors.text;
-                                font-size: Typography.size-base;
-                                wrap: word-wrap;
-                                horizontal-alignment: center;
-                            }
-
-                            HorizontalLayout {
-                                alignment: center;
-                                ActionButton {
-                                    width: 80px;
-                                    text: @tr("OK");
-                                    bg: Colors.blue;
-                                    fg: Colors.base;
-                                    clicked => { UiState.dismiss-test-popup(); }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+        if UiState.show-test-result-popup: TestResultDialog {
+            x: 0; y: 0;
+            width: root.width; height: root.height;
+            result-ok:      UiState.test-result-ok;
+            result-message: UiState.test-result-message;
+            ok-clicked => { UiState.dismiss-test-popup(); }
         }
 
         // ── Add-without-test confirmation popup ───────────────────────────────
-        // Shown when the user clicks Add before a successful Test Connection.
-        if UiState.show-add-confirm-popup: Rectangle {
-            x: 0;
-            y: 0;
-            width:  root.width;
-            height: root.height;
-            background: Colors.modal-overlay;
-
-            VerticalLayout {
-                alignment: center;
-                HorizontalLayout {
-                    alignment: center;
-                    Rectangle {
-                        width: 360px;
-                        background: Colors.surface0;
-                        border-radius: 8px;
-                        border-width: 1px;
-                        border-color: Colors.surface2;
-                        drop-shadow-blur: 20px;
-                        drop-shadow-color: Colors.shadow;
-
-                        VerticalLayout {
-                            padding: 24px;
-                            spacing: 16px;
-                            alignment: start;
-
-                            Text {
-                                text: @tr("Warning");
-                                color: Colors.yellow;
-                                font-size: Typography.size-xl;
-                                font-weight: 700;
-                            }
-
-                            Text {
-                                text: @tr("Connection test was not successful. Add anyway?");
-                                color: Colors.text;
-                                font-size: Typography.size-lg;
-                                wrap: word-wrap;
-                            }
-
-                            HorizontalLayout {
-                                spacing: 8px;
-                                alignment: end;
-                                ActionButton {
-                                    width: 80px;
-                                    text: @tr("No");
-                                    clicked => { UiState.dismiss-add-confirm(); }
-                                }
-                                ActionButton {
-                                    width: 80px;
-                                    text: @tr("Yes");
-                                    bg: Colors.red;
-                                    fg: Colors.base;
-                                    clicked => { UiState.confirm-add-connection(); }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+        if UiState.show-add-confirm-popup: AddConnectionDialog {
+            x: 0; y: 0;
+            width: root.width; height: root.height;
+            no-clicked  => { UiState.dismiss-add-confirm(); }
+            yes-clicked => { UiState.confirm-add-connection(); }
         }
 
-        // ── Fetch-all-rows confirmation popup ────────────────────────────────
-        // Shown when the user clicks the ALL button in the result toolbar.
-        if UiState.show-all-rows-confirm: Rectangle {
-            x: 0;
-            y: 0;
-            width:  root.width;
-            height: root.height;
-            background: Colors.modal-overlay;
-
-            VerticalLayout {
-                alignment: center;
-                HorizontalLayout {
-                    alignment: center;
-                    Rectangle {
-                        width: 360px;
-                        background: Colors.surface0;
-                        border-radius: 8px;
-                        border-width: 1px;
-                        border-color: Colors.surface2;
-                        drop-shadow-blur: 20px;
-                        drop-shadow-color: Colors.shadow;
-
-                        VerticalLayout {
-                            padding: 24px;
-                            spacing: 16px;
-                            alignment: start;
-
-                            Text {
-                                text: @tr("Fetch all rows?");
-                                color: Colors.yellow;
-                                font-size: Typography.size-xl;
-                                font-weight: 700;
-                            }
-
-                            Text {
-                                text: @tr("No LIMIT will be applied. This may take a long time for large tables.");
-                                color: Colors.text;
-                                font-size: Typography.size-lg;
-                                wrap: word-wrap;
-                            }
-
-                            HorizontalLayout {
-                                spacing: 8px;
-                                alignment: end;
-                                ActionButton {
-                                    width: 80px;
-                                    text: @tr("Cancel");
-                                    clicked => { UiState.dismiss-all-rows-confirm(); }
-                                }
-                                ActionButton {
-                                    width: 80px;
-                                    text: @tr("Fetch");
-                                    bg: Colors.red;
-                                    fg: Colors.base;
-                                    clicked => { UiState.confirm-all-rows(); }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+        // ── Fetch-all-rows confirmation popup ─────────────────────────────────
+        if UiState.show-all-rows-confirm: AllRowsDialog {
+            x: 0; y: 0;
+            width: root.width; height: root.height;
+            cancel-clicked => { UiState.dismiss-all-rows-confirm(); }
+            fetch-clicked  => { UiState.confirm-all-rows(); }
         }
     }
 }

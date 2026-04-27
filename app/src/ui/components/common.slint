@@ -62,6 +62,35 @@ export component ActionButton inherits Rectangle {
     }
 }
 
+// ── ModalOverlay ─────────────────────────────────────────────────────────────
+// Full-screen dim overlay with a centred card.
+// Children are placed inside the card's VerticalLayout — provide padding and
+// content directly:
+//   export component MyDialog inherits ModalOverlay {
+//       VerticalLayout { padding: 24px; ... }
+//   }
+
+export component ModalOverlay inherits Rectangle {
+    background: Colors.modal-overlay;
+
+    VerticalLayout {
+        alignment: center;
+        HorizontalLayout {
+            alignment: center;
+            Rectangle {
+                width: 360px;
+                background: Colors.surface0;
+                border-radius: 8px;
+                border-width: 1px;
+                border-color: Colors.surface2;
+                drop-shadow-blur: 20px;
+                drop-shadow-color: Colors.shadow;
+                @children
+            }
+        }
+    }
+}
+
 // ── MenuItem ──────────────────────────────────────────────────────────────────
 // One row inside a popup / context menu.  Height is fixed at 30px; the
 // containing PopupWindow / Rectangle sets the overall popup dimensions.
