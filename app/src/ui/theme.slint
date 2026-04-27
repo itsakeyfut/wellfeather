@@ -1,51 +1,53 @@
-// Design tokens for the Catppuccin Mocha theme.
+// Design tokens for Catppuccin Mocha (dark) and Catppuccin Latte (light).
 // Import this file in every .slint file that uses colours or font sizes.
 
 export global Colors {
-    // ── Catppuccin Mocha backgrounds ──────────────────────────────────────────
-    out property <color> crust:    #11111b;  // deepest bg — status bar
-    out property <color> mantle:   #181825;  // editor bg, toolbar bg, preview strip
-    out property <color> base:     #1e1e2e;  // main application background
-    out property <color> surface0: #313244;  // widget default bg, popup bg, panel header
-    out property <color> surface1: #45475a;  // hover bg, drag-handle active, null badge
-    out property <color> surface2: #585b70;  // border, disabled / placeholder text
+    in-out property <bool> is-dark: true;
+
+    // ── Backgrounds ───────────────────────────────────────────────────────────
+    out property <color> crust:    is-dark ? #11111b : #dce0e8;
+    out property <color> mantle:   is-dark ? #181825 : #e6e9ef;
+    out property <color> base:     is-dark ? #1e1e2e : #eff1f5;
+    out property <color> surface0: is-dark ? #313244 : #ccd0da;
+    out property <color> surface1: is-dark ? #45475a : #bcc0cc;
+    out property <color> surface2: is-dark ? #585b70 : #acb0be;
 
     // ── Text / overlay ────────────────────────────────────────────────────────
-    out property <color> overlay0:  #6c7086;  // completion-item kind; Add-btn unverified
-    out property <color> overlay1:  #7f849c;  // sidebar category label
-    out property <color> overlay2:  #9399b2;  // toolbar button text (inactive)
-    out property <color> subtext0:  #a6adc8;  // secondary text, status bar
-    out property <color> subtext1:  #bac2de;  // inactive connection name in sidebar
-    out property <color> text:      #cdd6f4;  // primary text
+    out property <color> overlay0:  is-dark ? #6c7086 : #9ca0b0;
+    out property <color> overlay1:  is-dark ? #7f849c : #8c8fa1;
+    out property <color> overlay2:  is-dark ? #9399b2 : #7c7f93;
+    out property <color> subtext0:  is-dark ? #a6adc8 : #6c6f85;
+    out property <color> subtext1:  is-dark ? #bac2de : #5c5f77;
+    out property <color> text:      is-dark ? #cdd6f4 : #4c4f69;
 
     // ── Accent colours ────────────────────────────────────────────────────────
-    out property <color> blue:   #89b4fa;  // active state, focus border, links, sort
-    out property <color> green:  #a6e3a1;  // success, Add button (test passed)
-    out property <color> red:    #f38ba8;  // error text, danger button (Yes / Fetch)
-    out property <color> yellow: #f9e2af;  // warning / caution heading
+    out property <color> blue:   is-dark ? #89b4fa : #1e66f5;
+    out property <color> green:  is-dark ? #a6e3a1 : #40a02b;
+    out property <color> red:    is-dark ? #f38ba8 : #d20f39;
+    out property <color> yellow: is-dark ? #f9e2af : #df8e1d;
 
     // ── Semantic / app-specific ───────────────────────────────────────────────
-    out property <color> selection:      #264f78;   // selected-row background
-    out property <color> current-line:   #2a2a3e;   // editor current-line highlight
-    out property <color> error-bg:       #2d1b1b;   // result-table error-panel background
-    out property <color> filter-bg:      #1e3a5f;   // filter-banner background
-    out property <color> filter-accent:  #2a5298;   // filter-banner top border
-    out property <color> sidebar-sel:    #3d3d5c;   // sidebar keyboard-focus row
-    out property <color> header-hover:   #383850;   // column-header hover tint
-    out property <color> cell-highlight: #89b4fa44; // cell-mode focus column overlay
-    out property <color> selected-text:  #ffffff;   // high-contrast text on selection bg
-    out property <color> shadow-light:   #00000066; // light drop-shadow (forms)
-    out property <color> shadow:         #00000088; // standard drop-shadow (popups)
-    out property <color> modal-overlay:  #00000099; // modal dim overlay
-    out property <color> hover-subtle:   #ffffff0d; // sidebar row hover tint
+    out property <color> selection:      is-dark ? #264f78   : #b9d0f5;
+    out property <color> current-line:   is-dark ? #2a2a3e   : #e3e7f0;
+    out property <color> error-bg:       is-dark ? #2d1b1b   : #fde8ea;
+    out property <color> filter-bg:      is-dark ? #1e3a5f   : #dce8f8;
+    out property <color> filter-accent:  is-dark ? #2a5298   : #1e66f5;
+    out property <color> sidebar-sel:    is-dark ? #3d3d5c   : #d1e0f7;
+    out property <color> header-hover:   is-dark ? #383850   : #c5c9d6;
+    out property <color> cell-highlight: is-dark ? #89b4fa44 : #1e66f533;
+    out property <color> selected-text:  is-dark ? #ffffff   : #1e1e2e;
+    out property <color> shadow-light:   #00000066;
+    out property <color> shadow:         #00000088;
+    out property <color> modal-overlay:  #00000099;
+    out property <color> hover-subtle:   is-dark ? #ffffff0d : #0000000d;
 }
 
 export global Typography {
-    out property <length> size-xs:   9px;   // sidebar expand/collapse icon
-    out property <length> size-sm:  10px;   // NULL badge, completion-item kind
-    out property <length> size-md:  11px;   // toolbar buttons, filter-bar text
-    out property <length> size-base: 12px;  // most body text (cells, status bar, menus)
-    out property <length> size-lg:  13px;   // editor content, loading/placeholder text
-    out property <length> size-xl:  15px;   // modal dialog titles
-    out property <length> size-2xl: 16px;   // connection-form title, close button
+    out property <length> size-xs:   9px;
+    out property <length> size-sm:  10px;
+    out property <length> size-md:  11px;
+    out property <length> size-base: 12px;
+    out property <length> size-lg:  13px;
+    out property <length> size-xl:  15px;
+    out property <length> size-2xl: 16px;
 }

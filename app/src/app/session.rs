@@ -14,7 +14,7 @@ use anyhow::Context as _;
 use tracing::{info, warn};
 use wf_config::{
     manager::ConfigManager,
-    models::{ConnectionConfig, DbTypeName, PageSize},
+    models::{ConnectionConfig, DbTypeName, PageSize, Theme},
 };
 use wf_db::models::{DbConnection, DbType};
 
@@ -93,6 +93,26 @@ impl SessionManager {
             .save(&config)
             .context("failed to save page_size")?;
         info!(page_size = size, "page_size saved");
+        Ok(())
+    }
+
+    /// Persist `theme` as `[appearance].theme` in `config.toml`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the config file cannot be loaded or written.
+    pub fn save_theme(&self, theme: &Theme) -> anyhow::Result<()> {
+        let mut config = self
+            .config_manager
+            .load()
+            .context("failed to load config for theme save")?;
+
+        config.appearance.theme = theme.clone();
+
+        self.config_manager
+            .save(&config)
+            .context("failed to save theme")?;
+        info!(?theme, "theme saved");
         Ok(())
     }
 

@@ -26,7 +26,7 @@ use wf_history::service::HistoryService;
 use crate::{
     app::{
         command::{Command, ConfigUpdate},
-        event::Event,
+        event::{Event, StateEvent},
         session::SessionManager,
     },
     state::SharedState,
@@ -308,16 +308,29 @@ impl AppController {
 
     /// Handle an `UpdateConfig` command.
     ///
-    /// Currently handles `PageSize` changes: updates the shared state so the
-    /// next `RunQuery` uses the new LIMIT, then persists the value to `config.toml`.
+    /// Handles `Theme` and `PageSize` changes: updates shared state so they
+    /// survive the current session, then persists the value to `config.toml`.
     async fn handle_update_config(&self, update: ConfigUpdate) {
-        if let ConfigUpdate::PageSize(ps) = update {
-            let n: u32 = ps.into();
-            self.state.ui.set_page_size(n as usize);
-            if let Err(e) = self.session.save_page_size(n as usize) {
-                warn!(error = %e, "failed to persist page_size to config");
+        match update {
+            ConfigUpdate::Theme(t) => {
+                self.state.ui.set_theme(t.clone());
+                if let Err(e) = self.session.save_theme(&t) {
+                    warn!(error = %e, "failed to persist theme to config");
+                }
+                let _ = self
+                    .tx_event
+                    .send(Event::StateChanged(StateEvent::ThemeChanged(t)))
+                    .await;
             }
-            let _ = self.tx_event.send(Event::ConfigUpdated).await;
+            ConfigUpdate::PageSize(ps) => {
+                let n: u32 = ps.into();
+                self.state.ui.set_page_size(n as usize);
+                if let Err(e) = self.session.save_page_size(n as usize) {
+                    warn!(error = %e, "failed to persist page_size to config");
+                }
+                let _ = self.tx_event.send(Event::ConfigUpdated).await;
+            }
+            _ => {}
         }
     }
 

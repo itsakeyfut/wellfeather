@@ -46,12 +46,13 @@ fn main() -> anyhow::Result<()> {
 
     let state = Arc::new(AppState::new());
 
-    // Load persisted page_size from config so the first query uses the user's last setting.
+    // Load persisted page_size and theme from config so the first launch uses the user's last settings.
     {
         let config = ConfigManager::new().load().unwrap_or_default();
         state
             .ui
             .set_page_size(u32::from(config.editor.page_size) as usize);
+        state.ui.set_theme(config.appearance.theme);
     }
 
     let db = DbService::new();
