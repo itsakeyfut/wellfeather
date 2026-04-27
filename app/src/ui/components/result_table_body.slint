@@ -19,6 +19,8 @@ export component ResultTableBody inherits Rectangle {
     in property <string>    active-filter: "";
     in property <bool>      is-loading:    false;
     in property <string>    error-message: "";
+    in property <string>    font-family:   "JetBrains Mono";
+    in property <int>       font-size-px:  12;
 
     in-out property <string> search-query: "";
     in-out property <length> body-vp-x:    0;
@@ -321,7 +323,8 @@ export component ResultTableBody inherits Rectangle {
                             width: parent.width - 16px;
                             text: cell.value;
                             color: i == root.selected-row ? Colors.selected-text : Colors.subtext0;
-                            font-size: Typography.size-base;
+                            font-family: root.font-family;
+                            font-size: root.font-size-px * 1px;
                             overflow: elide;
                         }
 

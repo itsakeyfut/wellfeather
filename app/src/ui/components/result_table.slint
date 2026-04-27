@@ -22,6 +22,8 @@ export component ResultTable inherits Rectangle {
     in property <int>       total-rows:      0;
     in property <int>       sort-col:        -1;
     in property <bool>      sort-asc:        true;
+    in property <string>    font-family:     "JetBrains Mono";
+    in property <int>       font-size-px:    12;
     callback resize-column(int, float);
     callback filter-rows(string);
     callback clear-filter();
@@ -91,6 +93,8 @@ export component ResultTable inherits Rectangle {
             active-filter: root.active-filter;
             is-loading:    root.is-loading;
             error-message: root.error-message;
+            font-family:   root.font-family;
+            font-size-px:  root.font-size-px;
             search-query  <=> root.search-query;
             filter-rows(q) => { root.filter-rows(q); }
             clear-filter   => { root.clear-filter(); }

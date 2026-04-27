@@ -533,6 +533,8 @@ export component AppWindow inherits Window {
                     col-widths:       UiState.result-col-widths;
                     total-col-width:  UiState.result-total-col-width;
                     active-filter:    UiState.result-active-filter;
+                    font-family:      UiState.font-family;
+                    font-size-px:     UiState.font-size;
                     resize-column(i, w)  => { UiState.resize-result-column(i, w); }
                     filter-rows(q)       => { UiState.filter-result-rows(q); }
                     clear-filter         => { UiState.clear-result-filter(); }
