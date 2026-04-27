@@ -259,12 +259,14 @@ impl UI {
         Self::register_export_callbacks(&window, Arc::clone(&original_data));
         Self::register_theme_callback(&window, state.clone(), tx_cmd.clone());
         // Set initial page size and theme on the Slint window from shared state.
-        window
-            .global::<crate::UiState>()
-            .set_page_size(state.ui.page_size() as i32);
-        window
-            .global::<crate::UiState>()
-            .set_is_dark(state.ui.theme() == Theme::Dark);
+        let ui_global = window.global::<crate::UiState>();
+        ui_global.set_page_size(state.ui.page_size() as i32);
+        ui_global.set_is_dark(state.ui.theme() == Theme::Dark);
+        let config = wf_config::manager::ConfigManager::new()
+            .load()
+            .unwrap_or_default();
+        ui_global.set_font_family(config.appearance.font_family.into());
+        ui_global.set_font_size(config.appearance.font_size as i32);
 
         Self::register_result_callbacks(
             &window,
