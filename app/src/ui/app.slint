@@ -1,10 +1,12 @@
 import { ConnectionEntry, RowData, SidebarNode, CompletionRow } from "globals.slint";
+import { Colors, Typography } from "theme.slint";
 import { CompletionPopup } from "components/completion_popup.slint";
 import { ConnectionForm }  from "components/connection_form.slint";
 import { Sidebar }         from "components/sidebar.slint";
 import { Editor }          from "components/editor.slint";
 import { ResultTable }     from "components/result_table.slint";
 import { StatusBar }       from "components/status_bar.slint";
+import { ActionButton }    from "components/common.slint";
 
 // UiState is defined here (root file) so that Slint generates Rust bindings for it.
 // Sub-components that need global state receive properties bound from UiState below.
@@ -307,7 +309,7 @@ export component AppWindow inherits Window {
                 y: 0;
                 width:  root.gutter-col-width;
                 height: parent.height;
-                background: #1e1e2e;
+                background: Colors.base;
                 clip: true;
 
                 for i in editor-inst.gutter-vis-count: Text {
@@ -316,7 +318,7 @@ export component AppWindow inherits Window {
                     height: editor-inst.gutter-line-h;
                     width:  root.gutter-col-width - 8px;
                     text:   "\{line-nr + 1}";
-                    color:  line-nr == editor-inst.current-line ? #cdd6f4 : #585b70;
+                    color:  line-nr == editor-inst.current-line ? Colors.text : Colors.surface2;
                     font-family: UiState.font-family;
                     font-size:   UiState.font-size * 1px;
                     horizontal-alignment: right;
@@ -359,7 +361,7 @@ export component AppWindow inherits Window {
                 y: parent.height - root.panel-height - root.preview-strip-h;
                 width:  parent.width - root.gutter-col-width;
                 height: root.preview-strip-h;
-                background: #181825;
+                background: Colors.mantle;
                 clip: true;
                 visible: UiState.result-panel-open;
 
@@ -367,23 +369,23 @@ export component AppWindow inherits Window {
                 Rectangle {
                     x: 0; y: 0;
                     width: parent.width; height: 1px;
-                    background: #45475a;
+                    background: Colors.surface1;
                 }
 
                 // Placeholder — nothing selected or row-only selection
                 if !result-table-inst.selected-cell-is-null
                         && result-table-inst.selected-cell-value == "": Text {
                     x: 10px; y: 8px;
-                    color: #45475a;
-                    font-size: 12px;
+                    color: Colors.surface1;
+                    font-size: Typography.size-base;
                     text: @tr("Select a cell to preview its value");
                 }
 
                 // NULL indicator
                 if result-table-inst.selected-cell-is-null: Text {
                     x: 10px; y: 8px;
-                    color: #9399b2;
-                    font-size: 12px;
+                    color: Colors.overlay2;
+                    font-size: Typography.size-base;
                     text: @tr("NULL");
                 }
 
@@ -399,8 +401,8 @@ export component AppWindow inherits Window {
                         x: 10px; y: 4px;
                         width: parent.width - 20px;
                         text: result-table-inst.selected-cell-value;
-                        color: #cdd6f4;
-                        font-size: 12px;
+                        color: Colors.text;
+                        font-size: Typography.size-base;
                         wrap: word-wrap;
                     }
                 }
@@ -415,7 +417,7 @@ export component AppWindow inherits Window {
                 y: parent.height - root.panel-height;
                 width:  parent.width - root.gutter-col-width;
                 height: root.panel-height;
-                background: #1e1e2e;
+                background: Colors.base;
                 clip: true;
                 visible: UiState.result-panel-open;
 
@@ -426,11 +428,11 @@ export component AppWindow inherits Window {
                     y: 0;
                     width:  parent.width;
                     height: root.divider-thickness;
-                    background: #313244;
+                    background: Colors.surface0;
 
                     states [
                         active when panel-drag-ta.has-hover || panel-drag-ta.pressed: {
-                            background: #585b70;
+                            background: Colors.surface2;
                         }
                     ]
 
@@ -464,15 +466,15 @@ export component AppWindow inherits Window {
                     y: root.divider-thickness;
                     width:  parent.width;
                     height: root.panel-header-height;
-                    background: #313244;
+                    background: Colors.surface0;
 
                     // Tab label
                     Text {
                         x: 12px;
                         y: (parent.height - self.height) / 2;
                         text: UiState.error-message != "" ? @tr("Error") : @tr("Results");
-                        color: UiState.error-message != "" ? #f38ba8 : #cdd6f4;
-                        font-size: 12px;
+                        color: UiState.error-message != "" ? Colors.red : Colors.text;
+                        font-size: Typography.size-base;
                         font-weight: 600;
                     }
 
@@ -486,14 +488,14 @@ export component AppWindow inherits Window {
 
                         states [
                             hovered when close-ta.has-hover: {
-                                background: #45475a;
+                                background: Colors.surface1;
                             }
                         ]
 
                         Text {
                             text: "×";
-                            color: #585b70;
-                            font-size: 16px;
+                            color: Colors.surface2;
+                            font-size: Typography.size-2xl;
                             horizontal-alignment: center;
                             vertical-alignment:   center;
                         }
@@ -574,7 +576,7 @@ export component AppWindow inherits Window {
             width:  sidebar-width;
             height: content-height;
             border-width: 2px;
-            border-color: #89b4fa;
+            border-color: Colors.blue;
             background: transparent;
         }
 
@@ -585,7 +587,7 @@ export component AppWindow inherits Window {
             width:  main-width;
             height: content-height;
             border-width: 2px;
-            border-color: #89b4fa;
+            border-color: Colors.blue;
             background: transparent;
         }
 
@@ -596,7 +598,7 @@ export component AppWindow inherits Window {
             width:  main-width;
             height: panel-height + preview-strip-h;
             border-width: 2px;
-            border-color: #89b4fa;
+            border-color: Colors.blue;
             background: transparent;
         }
 
@@ -607,7 +609,7 @@ export component AppWindow inherits Window {
             y: 0;
             width:  root.width;
             height: root.height;
-            background: #00000088;
+            background: Colors.shadow;
 
             ConnectionForm {
                 x: (parent.width  - self.width)  / 2;
@@ -640,7 +642,7 @@ export component AppWindow inherits Window {
             y: 0;
             width:  root.width;
             height: root.height;
-            background: #00000099;
+            background: Colors.modal-overlay;
 
             VerticalLayout {
                 alignment: center;
@@ -648,12 +650,12 @@ export component AppWindow inherits Window {
                     alignment: center;
                     Rectangle {
                         width: 360px;
-                        background: #313244;
+                        background: Colors.surface0;
                         border-radius: 8px;
                         border-width: 1px;
-                        border-color: #585b70;
+                        border-color: Colors.surface2;
                         drop-shadow-blur: 20px;
-                        drop-shadow-color: #00000088;
+                        drop-shadow-color: Colors.shadow;
 
                         VerticalLayout {
                             padding: 24px;
@@ -664,34 +666,28 @@ export component AppWindow inherits Window {
                                 text: UiState.test-result-ok
                                     ? @tr("Connection Successful")
                                     : @tr("Connection Failed");
-                                color: UiState.test-result-ok ? #a6e3a1 : #f38ba8;
-                                font-size: 15px;
+                                color: UiState.test-result-ok ? Colors.green : Colors.red;
+                                font-size: Typography.size-xl;
                                 font-weight: 700;
                                 horizontal-alignment: center;
                             }
 
                             if !UiState.test-result-ok: Text {
                                 text: UiState.test-result-message;
-                                color: #cdd6f4;
-                                font-size: 12px;
+                                color: Colors.text;
+                                font-size: Typography.size-base;
                                 wrap: word-wrap;
                                 horizontal-alignment: center;
                             }
 
                             HorizontalLayout {
                                 alignment: center;
-                                Rectangle {
+                                ActionButton {
                                     width: 80px;
-                                    height: 32px;
-                                    background: #89b4fa;
-                                    border-radius: 4px;
-                                    Text {
-                                        text: @tr("OK");
-                                        color: #1e1e2e;
-                                        horizontal-alignment: center;
-                                        vertical-alignment: center;
-                                    }
-                                    TouchArea { clicked => { UiState.dismiss-test-popup(); } }
+                                    text: @tr("OK");
+                                    bg: Colors.blue;
+                                    fg: Colors.base;
+                                    clicked => { UiState.dismiss-test-popup(); }
                                 }
                             }
                         }
@@ -707,7 +703,7 @@ export component AppWindow inherits Window {
             y: 0;
             width:  root.width;
             height: root.height;
-            background: #00000099;
+            background: Colors.modal-overlay;
 
             VerticalLayout {
                 alignment: center;
@@ -715,12 +711,12 @@ export component AppWindow inherits Window {
                     alignment: center;
                     Rectangle {
                         width: 360px;
-                        background: #313244;
+                        background: Colors.surface0;
                         border-radius: 8px;
                         border-width: 1px;
-                        border-color: #585b70;
+                        border-color: Colors.surface2;
                         drop-shadow-blur: 20px;
-                        drop-shadow-color: #00000088;
+                        drop-shadow-color: Colors.shadow;
 
                         VerticalLayout {
                             padding: 24px;
@@ -729,48 +725,32 @@ export component AppWindow inherits Window {
 
                             Text {
                                 text: @tr("Warning");
-                                color: #f9e2af;
-                                font-size: 15px;
+                                color: Colors.yellow;
+                                font-size: Typography.size-xl;
                                 font-weight: 700;
                             }
 
                             Text {
                                 text: @tr("Connection test was not successful. Add anyway?");
-                                color: #cdd6f4;
-                                font-size: 13px;
+                                color: Colors.text;
+                                font-size: Typography.size-lg;
                                 wrap: word-wrap;
                             }
 
                             HorizontalLayout {
                                 spacing: 8px;
                                 alignment: end;
-
-                                Rectangle {
+                                ActionButton {
                                     width: 80px;
-                                    height: 32px;
-                                    background: #45475a;
-                                    border-radius: 4px;
-                                    Text {
-                                        text: @tr("No");
-                                        color: #cdd6f4;
-                                        horizontal-alignment: center;
-                                        vertical-alignment: center;
-                                    }
-                                    TouchArea { clicked => { UiState.dismiss-add-confirm(); } }
+                                    text: @tr("No");
+                                    clicked => { UiState.dismiss-add-confirm(); }
                                 }
-
-                                Rectangle {
+                                ActionButton {
                                     width: 80px;
-                                    height: 32px;
-                                    background: #f38ba8;
-                                    border-radius: 4px;
-                                    Text {
-                                        text: @tr("Yes");
-                                        color: #1e1e2e;
-                                        horizontal-alignment: center;
-                                        vertical-alignment: center;
-                                    }
-                                    TouchArea { clicked => { UiState.confirm-add-connection(); } }
+                                    text: @tr("Yes");
+                                    bg: Colors.red;
+                                    fg: Colors.base;
+                                    clicked => { UiState.confirm-add-connection(); }
                                 }
                             }
                         }
@@ -778,6 +758,7 @@ export component AppWindow inherits Window {
                 }
             }
         }
+
         // ── Fetch-all-rows confirmation popup ────────────────────────────────
         // Shown when the user clicks the ALL button in the result toolbar.
         if UiState.show-all-rows-confirm: Rectangle {
@@ -785,7 +766,7 @@ export component AppWindow inherits Window {
             y: 0;
             width:  root.width;
             height: root.height;
-            background: #00000099;
+            background: Colors.modal-overlay;
 
             VerticalLayout {
                 alignment: center;
@@ -793,12 +774,12 @@ export component AppWindow inherits Window {
                     alignment: center;
                     Rectangle {
                         width: 360px;
-                        background: #313244;
+                        background: Colors.surface0;
                         border-radius: 8px;
                         border-width: 1px;
-                        border-color: #585b70;
+                        border-color: Colors.surface2;
                         drop-shadow-blur: 20px;
-                        drop-shadow-color: #00000088;
+                        drop-shadow-color: Colors.shadow;
 
                         VerticalLayout {
                             padding: 24px;
@@ -807,48 +788,32 @@ export component AppWindow inherits Window {
 
                             Text {
                                 text: @tr("Fetch all rows?");
-                                color: #f9e2af;
-                                font-size: 15px;
+                                color: Colors.yellow;
+                                font-size: Typography.size-xl;
                                 font-weight: 700;
                             }
 
                             Text {
                                 text: @tr("No LIMIT will be applied. This may take a long time for large tables.");
-                                color: #cdd6f4;
-                                font-size: 13px;
+                                color: Colors.text;
+                                font-size: Typography.size-lg;
                                 wrap: word-wrap;
                             }
 
                             HorizontalLayout {
                                 spacing: 8px;
                                 alignment: end;
-
-                                Rectangle {
+                                ActionButton {
                                     width: 80px;
-                                    height: 32px;
-                                    background: #45475a;
-                                    border-radius: 4px;
-                                    Text {
-                                        text: @tr("Cancel");
-                                        color: #cdd6f4;
-                                        horizontal-alignment: center;
-                                        vertical-alignment: center;
-                                    }
-                                    TouchArea { clicked => { UiState.dismiss-all-rows-confirm(); } }
+                                    text: @tr("Cancel");
+                                    clicked => { UiState.dismiss-all-rows-confirm(); }
                                 }
-
-                                Rectangle {
+                                ActionButton {
                                     width: 80px;
-                                    height: 32px;
-                                    background: #f38ba8;
-                                    border-radius: 4px;
-                                    Text {
-                                        text: @tr("Fetch");
-                                        color: #1e1e2e;
-                                        horizontal-alignment: center;
-                                        vertical-alignment: center;
-                                    }
-                                    TouchArea { clicked => { UiState.confirm-all-rows(); } }
+                                    text: @tr("Fetch");
+                                    bg: Colors.red;
+                                    fg: Colors.base;
+                                    clicked => { UiState.confirm-all-rows(); }
                                 }
                             }
                         }

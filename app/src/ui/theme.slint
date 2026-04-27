@@ -1,0 +1,51 @@
+// Design tokens for the Catppuccin Mocha theme.
+// Import this file in every .slint file that uses colours or font sizes.
+
+export global Colors {
+    // ── Catppuccin Mocha backgrounds ──────────────────────────────────────────
+    out property <color> crust:    #11111b;  // deepest bg — status bar
+    out property <color> mantle:   #181825;  // editor bg, toolbar bg, preview strip
+    out property <color> base:     #1e1e2e;  // main application background
+    out property <color> surface0: #313244;  // widget default bg, popup bg, panel header
+    out property <color> surface1: #45475a;  // hover bg, drag-handle active, null badge
+    out property <color> surface2: #585b70;  // border, disabled / placeholder text
+
+    // ── Text / overlay ────────────────────────────────────────────────────────
+    out property <color> overlay0:  #6c7086;  // completion-item kind; Add-btn unverified
+    out property <color> overlay1:  #7f849c;  // sidebar category label
+    out property <color> overlay2:  #9399b2;  // toolbar button text (inactive)
+    out property <color> subtext0:  #a6adc8;  // secondary text, status bar
+    out property <color> subtext1:  #bac2de;  // inactive connection name in sidebar
+    out property <color> text:      #cdd6f4;  // primary text
+
+    // ── Accent colours ────────────────────────────────────────────────────────
+    out property <color> blue:   #89b4fa;  // active state, focus border, links, sort
+    out property <color> green:  #a6e3a1;  // success, Add button (test passed)
+    out property <color> red:    #f38ba8;  // error text, danger button (Yes / Fetch)
+    out property <color> yellow: #f9e2af;  // warning / caution heading
+
+    // ── Semantic / app-specific ───────────────────────────────────────────────
+    out property <color> selection:      #264f78;   // selected-row background
+    out property <color> current-line:   #2a2a3e;   // editor current-line highlight
+    out property <color> error-bg:       #2d1b1b;   // result-table error-panel background
+    out property <color> filter-bg:      #1e3a5f;   // filter-banner background
+    out property <color> filter-accent:  #2a5298;   // filter-banner top border
+    out property <color> sidebar-sel:    #3d3d5c;   // sidebar keyboard-focus row
+    out property <color> header-hover:   #383850;   // column-header hover tint
+    out property <color> cell-highlight: #89b4fa44; // cell-mode focus column overlay
+    out property <color> selected-text:  #ffffff;   // high-contrast text on selection bg
+    out property <color> shadow-light:   #00000066; // light drop-shadow (forms)
+    out property <color> shadow:         #00000088; // standard drop-shadow (popups)
+    out property <color> modal-overlay:  #00000099; // modal dim overlay
+    out property <color> hover-subtle:   #ffffff0d; // sidebar row hover tint
+}
+
+export global Typography {
+    out property <length> size-xs:   9px;   // sidebar expand/collapse icon
+    out property <length> size-sm:  10px;   // NULL badge, completion-item kind
+    out property <length> size-md:  11px;   // toolbar buttons, filter-bar text
+    out property <length> size-base: 12px;  // most body text (cells, status bar, menus)
+    out property <length> size-lg:  13px;   // editor content, loading/placeholder text
+    out property <length> size-xl:  15px;   // modal dialog titles
+    out property <length> size-2xl: 16px;   // connection-form title, close button
+}

@@ -2,8 +2,10 @@
 // Left: active connection name (and DB) or "Not connected".
 // Right: query lifecycle status — "Running…", "N ms · M rows", "Cancelled", "Error: …".
 
+import { Colors, Typography } from "../theme.slint";
+
 export component StatusBar inherits Rectangle {
-    background: #11111b;
+    background: Colors.crust;
 
     /// Text shown on the left: active connection name (and DB) or "Not connected".
     /// Updated from Rust via invoke_from_event_loop on Event::Connected / Event::Disconnected.
@@ -18,16 +20,16 @@ export component StatusBar inherits Rectangle {
 
         Text {
             text: root.connection-text;
-            color: #a6adc8;
-            font-size: 12px;
+            color: Colors.subtext0;
+            font-size: Typography.size-base;
             vertical-alignment: center;
             horizontal-stretch: 1;
         }
 
         Text {
             text: root.query-status;
-            color: #a6adc8;
-            font-size: 12px;
+            color: Colors.subtext0;
+            font-size: Typography.size-base;
             vertical-alignment: center;
         }
     }

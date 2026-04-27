@@ -1,5 +1,7 @@
 import { ListView } from "std-widgets.slint";
 import { RowData, RowCellData } from "../globals.slint";
+import { Colors, Typography } from "../theme.slint";
+import { ToolbarButton, MenuItem } from "common.slint";
 
 // Result table — column headers + scrollable data rows.
 //
@@ -27,7 +29,7 @@ import { RowData, RowCellData } from "../globals.slint";
 //   Search:    type to build query; Enter — apply; Esc — cancel
 
 export component ResultTable inherits Rectangle {
-    background: #1e1e2e;
+    background: Colors.base;
     clip: true;
     preferred-height: 0;
     min-height: 0;
@@ -73,9 +75,9 @@ export component ResultTable inherits Rectangle {
     callback copy-row(int);
     /// Copy all visible rows as TSV with column headers.
     callback copy-all-tsv();
-    /// Fired when the "Export CSV" button is clicked.
+    /// Fired when the "Export CSV" menu item is clicked.
     callback export-csv();
-    /// Fired when the "Export JSON" button is clicked.
+    /// Fired when the "Export JSON" menu item is clicked.
     callback export-json();
     /// Returns cumulative x-offset (logical px as float) of column j.
     /// Implemented in Rust; used for horizontal auto-scroll in cell mode.
@@ -328,45 +330,23 @@ export component ResultTable inherits Rectangle {
             Rectangle {
                 width: 120px;
                 height: 60px;
-                background: #313244;
+                background: Colors.surface0;
                 border-radius: 4px;
                 border-width: 1px;
-                border-color: #585b70;
+                border-color: Colors.surface2;
                 drop-shadow-blur: 8px;
-                drop-shadow-color: #00000088;
+                drop-shadow-color: Colors.shadow;
                 clip: true;
 
                 VerticalLayout {
                     spacing: 0;
-
-                    Rectangle {
-                        height: 30px;
-                        background: exp-csv-mi.has-hover ? #45475a : transparent;
-                        exp-csv-mi := TouchArea {
-                            clicked => { root.export-csv(); }
-                        }
-                        Text {
-                            x: 12px;
-                            y: (parent.height - self.height) / 2;
-                            text: @tr("Export CSV");
-                            color: #cdd6f4;
-                            font-size: 12px;
-                        }
+                    MenuItem {
+                        text: @tr("Export CSV");
+                        clicked => { root.export-csv(); }
                     }
-
-                    Rectangle {
-                        height: 30px;
-                        background: exp-json-mi.has-hover ? #45475a : transparent;
-                        exp-json-mi := TouchArea {
-                            clicked => { root.export-json(); }
-                        }
-                        Text {
-                            x: 12px;
-                            y: (parent.height - self.height) / 2;
-                            text: @tr("Export JSON");
-                            color: #cdd6f4;
-                            font-size: 12px;
-                        }
+                    MenuItem {
+                        text: @tr("Export JSON");
+                        clicked => { root.export-json(); }
                     }
                 }
             }
@@ -383,60 +363,27 @@ export component ResultTable inherits Rectangle {
             Rectangle {
                 width: 204px;
                 height: 90px;
-                background: #313244;
+                background: Colors.surface0;
                 border-radius: 4px;
                 border-width: 1px;
-                border-color: #585b70;
+                border-color: Colors.surface2;
                 drop-shadow-blur: 8px;
-                drop-shadow-color: #00000088;
+                drop-shadow-color: Colors.shadow;
                 clip: true;
 
                 VerticalLayout {
                     spacing: 0;
-
-                    Rectangle {
-                        height: 30px;
-                        background: mi1.has-hover ? #45475a : transparent;
-                        mi1 := TouchArea {
-                            clicked => { root.copy-cell(root.ctx-cell-value); }
-                        }
-                        Text {
-                            x: 12px;
-                            y: (parent.height - self.height) / 2;
-                            text: @tr("Copy cell value");
-                            color: #cdd6f4;
-                            font-size: 12px;
-                        }
+                    MenuItem {
+                        text: @tr("Copy cell value");
+                        clicked => { root.copy-cell(root.ctx-cell-value); }
                     }
-
-                    Rectangle {
-                        height: 30px;
-                        background: mi2.has-hover ? #45475a : transparent;
-                        mi2 := TouchArea {
-                            clicked => { root.copy-row(root.ctx-row); }
-                        }
-                        Text {
-                            x: 12px;
-                            y: (parent.height - self.height) / 2;
-                            text: @tr("Copy row (tab-separated)");
-                            color: #cdd6f4;
-                            font-size: 12px;
-                        }
+                    MenuItem {
+                        text: @tr("Copy row (tab-separated)");
+                        clicked => { root.copy-row(root.ctx-row); }
                     }
-
-                    Rectangle {
-                        height: 30px;
-                        background: mi3.has-hover ? #45475a : transparent;
-                        mi3 := TouchArea {
-                            clicked => { root.copy-all-tsv(); }
-                        }
-                        Text {
-                            x: 12px;
-                            y: (parent.height - self.height) / 2;
-                            text: @tr("Copy as TSV (with headers)");
-                            color: #cdd6f4;
-                            font-size: 12px;
-                        }
+                    MenuItem {
+                        text: @tr("Copy as TSV (with headers)");
+                        clicked => { root.copy-all-tsv(); }
                     }
                 }
             }
@@ -446,13 +393,13 @@ export component ResultTable inherits Rectangle {
         if root.is-loading: Rectangle {
             width:  parent.width;
             height: parent.height;
-            background: #1e1e2e;
+            background: Colors.base;
             Text {
                 x: (parent.width  - self.width)  / 2;
                 y: (parent.height - self.height) / 2;
                 text: @tr("Running\u{2026}");
-                color: #cdd6f4;
-                font-size: 13px;
+                color: Colors.text;
+                font-size: Typography.size-lg;
             }
         }
 
@@ -460,21 +407,21 @@ export component ResultTable inherits Rectangle {
         if !root.is-loading && root.error-message != "": Rectangle {
             width:  parent.width;
             height: parent.height;
-            background: #2d1b1b;
+            background: Colors.error-bg;
             VerticalLayout {
                 alignment: start;
                 padding: 16px;
                 spacing: 8px;
                 Text {
                     text: @tr("Query Error");
-                    color: #f38ba8;
-                    font-size: 13px;
+                    color: Colors.red;
+                    font-size: Typography.size-lg;
                     font-weight: 700;
                 }
                 Text {
                     text: root.error-message;
-                    color: #cdd6f4;
-                    font-size: 12px;
+                    color: Colors.text;
+                    font-size: Typography.size-base;
                     wrap: word-wrap;
                 }
             }
@@ -488,14 +435,14 @@ export component ResultTable inherits Rectangle {
             // ── Toolbar (page-size selector + row count) ──────────────────────
             Rectangle {
                 height: root.toolbar-h;
-                background: #181825;
+                background: Colors.mantle;
                 clip: true;
 
                 // Bottom separator
                 Rectangle {
                     x: 0; y: parent.height - 1px;
                     width: parent.width; height: 1px;
-                    background: #313244;
+                    background: Colors.surface0;
                 }
 
                 // Row count display (left side; only when a result is loaded)
@@ -505,28 +452,17 @@ export component ResultTable inherits Rectangle {
                     text: root.row-count != root.total-rows
                         ? @tr("{0} / {1} rows", root.row-count, root.total-rows)
                         : @tr("{0} rows", root.row-count);
-                    color: #585b70;
-                    font-size: 11px;
+                    color: Colors.surface2;
+                    font-size: Typography.size-md;
                 }
 
                 // Export button — opens a dropdown with CSV / JSON options
-                if root.columns.length > 0: Rectangle {
+                if root.columns.length > 0: ToolbarButton {
                     x: parent.width - 266px;
                     y: (parent.height - self.height) / 2;
                     width: 80px;
-                    height: 20px;
-                    border-radius: 3px;
-                    background: export-btn-ta.has-hover ? #45475a : #313244;
-                    export-btn-ta := TouchArea {
-                        clicked => { export-popup.show(); }
-                    }
-                    Text {
-                        text: @tr("Export") + " \u{25BE}";
-                        color: #9399b2;
-                        font-size: 11px;
-                        horizontal-alignment: center;
-                        vertical-alignment: center;
-                    }
+                    text: @tr("Export") + " \u{25BE}";
+                    clicked => { export-popup.show(); }
                 }
 
                 // Page-size selector: four toggle buttons aligned to the right
@@ -538,80 +474,29 @@ export component ResultTable inherits Rectangle {
                     height: 20px;
                     spacing: 2px;
 
-                    // 100
-                    Rectangle {
+                    ToolbarButton {
                         width: 38px;
-                        height: 20px;
-                        border-radius: 3px;
-                        background: ps100-ta.has-hover ? #45475a
-                            : root.page-size == 100 ? #89b4fa : #313244;
-                        ps100-ta := TouchArea {
-                            clicked => { root.change-page-size(100); }
-                        }
-                        Text {
-                            text: "100";
-                            color: root.page-size == 100 ? #1e1e2e : #9399b2;
-                            font-size: 11px;
-                            horizontal-alignment: center;
-                            vertical-alignment: center;
-                        }
+                        text: "100";
+                        active: root.page-size == 100;
+                        clicked => { root.change-page-size(100); }
                     }
-
-                    // 500
-                    Rectangle {
+                    ToolbarButton {
                         width: 38px;
-                        height: 20px;
-                        border-radius: 3px;
-                        background: ps500-ta.has-hover ? #45475a
-                            : root.page-size == 500 ? #89b4fa : #313244;
-                        ps500-ta := TouchArea {
-                            clicked => { root.change-page-size(500); }
-                        }
-                        Text {
-                            text: "500";
-                            color: root.page-size == 500 ? #1e1e2e : #9399b2;
-                            font-size: 11px;
-                            horizontal-alignment: center;
-                            vertical-alignment: center;
-                        }
+                        text: "500";
+                        active: root.page-size == 500;
+                        clicked => { root.change-page-size(500); }
                     }
-
-                    // 1000
-                    Rectangle {
+                    ToolbarButton {
                         width: 46px;
-                        height: 20px;
-                        border-radius: 3px;
-                        background: ps1000-ta.has-hover ? #45475a
-                            : root.page-size == 1000 ? #89b4fa : #313244;
-                        ps1000-ta := TouchArea {
-                            clicked => { root.change-page-size(1000); }
-                        }
-                        Text {
-                            text: "1000";
-                            color: root.page-size == 1000 ? #1e1e2e : #9399b2;
-                            font-size: 11px;
-                            horizontal-alignment: center;
-                            vertical-alignment: center;
-                        }
+                        text: "1000";
+                        active: root.page-size == 1000;
+                        clicked => { root.change-page-size(1000); }
                     }
-
-                    // ALL (0 = no LIMIT)
-                    Rectangle {
+                    ToolbarButton {
                         width: 38px;
-                        height: 20px;
-                        border-radius: 3px;
-                        background: psall-ta.has-hover ? #45475a
-                            : root.page-size == 0 ? #89b4fa : #313244;
-                        psall-ta := TouchArea {
-                            clicked => { root.change-page-size(0); }
-                        }
-                        Text {
-                            text: @tr("ALL");
-                            color: root.page-size == 0 ? #1e1e2e : #9399b2;
-                            font-size: 11px;
-                            horizontal-alignment: center;
-                            vertical-alignment: center;
-                        }
+                        text: @tr("ALL");
+                        active: root.page-size == 0;
+                        clicked => { root.change-page-size(0); }
                     }
                 }
             }
@@ -631,7 +516,7 @@ export component ResultTable inherits Rectangle {
                             ? root.col-widths[i] * 1px
                             : root.default-col-w;
                         height: root.row-height;
-                        background: sort-hdr-ta.has-hover ? #383850 : #313244;
+                        background: sort-hdr-ta.has-hover ? Colors.header-hover : Colors.surface0;
                         clip: true;
 
                         // Sort click area — covers the full cell except the 4px resize handle.
@@ -650,8 +535,8 @@ export component ResultTable inherits Rectangle {
                                 ? parent.width - 28px
                                 : parent.width - 12px;
                             text: col;
-                            color: #cdd6f4;
-                            font-size: 12px;
+                            color: Colors.text;
+                            font-size: Typography.size-base;
                             overflow: elide;
                         }
 
@@ -660,8 +545,8 @@ export component ResultTable inherits Rectangle {
                             x: parent.width - 20px;
                             y: (parent.height - self.height) / 2;
                             text: root.sort-asc ? "▲" : "▼";
-                            color: #89b4fa;
-                            font-size: 10px;
+                            color: Colors.blue;
+                            font-size: Typography.size-sm;
                         }
 
                         // ── Column resize drag handle ─────────────────────────
@@ -671,7 +556,7 @@ export component ResultTable inherits Rectangle {
                             width:  4px;
                             height: parent.height;
                             background: col-resize-ta.has-hover || col-resize-ta.pressed
-                                ? #89b4fa : #45475a;
+                                ? Colors.blue : Colors.surface1;
 
                             col-resize-ta := TouchArea {
                                 mouse-cursor: ew-resize;
@@ -710,14 +595,14 @@ export component ResultTable inherits Rectangle {
                         height: root.row-height;
                         width:  root.vp-w;
                         background: i == root.selected-row
-                            ? #264f78
-                            : (mod(i, 2) == 0 ? #1e1e2e : #181825);
+                            ? Colors.selection
+                            : (mod(i, 2) == 0 ? Colors.base : Colors.mantle);
 
                         Rectangle {   // bottom border
                             y: parent.height - 1px;
                             width: parent.width;
                             height: 1px;
-                            background: #313244;
+                            background: Colors.surface0;
                         }
 
                         HorizontalLayout {
@@ -735,14 +620,14 @@ export component ResultTable inherits Rectangle {
                                         && root.nav-mode == 1: Rectangle {
                                     width:  parent.width;
                                     height: parent.height;
-                                    background: #89b4fa44;
+                                    background: Colors.cell-highlight;
                                 }
 
                                 Rectangle {   // right border
                                     x: parent.width - 1px;
                                     width: 1px;
                                     height: parent.height;
-                                    background: #313244;
+                                    background: Colors.surface0;
                                 }
 
                                 // NULL badge — shown only when cell.is-null is true.
@@ -752,13 +637,13 @@ export component ResultTable inherits Rectangle {
                                     width: 36px;
                                     height: 16px;
                                     border-radius: 3px;
-                                    background: #45475a;
+                                    background: Colors.surface1;
                                     Text {
                                         width: parent.width;
                                         height: parent.height;
                                         text: @tr("NULL");
-                                        color: #9399b2;
-                                        font-size: 10px;
+                                        color: Colors.overlay2;
+                                        font-size: Typography.size-sm;
                                         horizontal-alignment: center;
                                         vertical-alignment: center;
                                     }
@@ -770,8 +655,8 @@ export component ResultTable inherits Rectangle {
                                     y: (parent.height - self.height) / 2;
                                     width: parent.width - 16px;
                                     text: cell.value;
-                                    color: i == root.selected-row ? #ffffff : #a6adc8;
-                                    font-size: 12px;
+                                    color: i == root.selected-row ? Colors.selected-text : Colors.subtext0;
+                                    font-size: Typography.size-base;
                                     overflow: elide;
                                 }
 
@@ -820,8 +705,8 @@ export component ResultTable inherits Rectangle {
                         x: (parent.width  - self.width)  / 2;
                         y: (parent.height - self.height) / 2;
                         text: @tr("0 rows");
-                        color: #585b70;
-                        font-size: 13px;
+                        color: Colors.surface2;
+                        font-size: Typography.size-lg;
                     }
                 }
             }
@@ -835,21 +720,21 @@ export component ResultTable inherits Rectangle {
             y: root.height - root.filter-banner-h - root.search-bar-h;
             width:  root.width;
             height: root.search-bar-h;
-            background: #1e1e2e;
+            background: Colors.base;
             clip: true;
 
             Rectangle {   // top separator
                 x: 0; y: 0;
                 width: parent.width; height: 1px;
-                background: #45475a;
+                background: Colors.surface1;
             }
 
             Text {
                 x: 10px;
                 y: (parent.height - self.height) / 2;
                 text: "/";
-                color: #89b4fa;
-                font-size: 13px;
+                color: Colors.blue;
+                font-size: Typography.size-lg;
                 font-weight: 700;
             }
 
@@ -859,10 +744,10 @@ export component ResultTable inherits Rectangle {
                 width: parent.width - 34px;
                 text <=> root.search-query;
                 single-line: true;
-                color: #cdd6f4;
-                selection-background-color: #264f78;
-                selection-foreground-color: #ffffff;
-                font-size: 12px;
+                color: Colors.text;
+                selection-background-color: Colors.selection;
+                selection-foreground-color: Colors.selected-text;
+                font-size: Typography.size-base;
             }
         }
 
@@ -873,13 +758,13 @@ export component ResultTable inherits Rectangle {
             y: root.height - root.filter-banner-h;
             width:  root.width;
             height: root.filter-banner-h;
-            background: #1e3a5f;
+            background: Colors.filter-bg;
             clip: true;
 
             Rectangle {   // top separator
                 x: 0; y: 0;
                 width: parent.width; height: 1px;
-                background: #2a5298;
+                background: Colors.filter-accent;
             }
 
             HorizontalLayout {
@@ -889,23 +774,23 @@ export component ResultTable inherits Rectangle {
 
                 Text {
                     text: @tr("Filter:");
-                    color: #89b4fa;
-                    font-size: 11px;
+                    color: Colors.blue;
+                    font-size: Typography.size-md;
                     font-weight: 700;
                     vertical-alignment: center;
                 }
                 Text {
                     text: root.active-filter;
-                    color: #cdd6f4;
-                    font-size: 11px;
+                    color: Colors.text;
+                    font-size: Typography.size-md;
                     vertical-alignment: center;
                     overflow: elide;
                     horizontal-stretch: 1;
                 }
                 Text {
                     text: @tr("[Esc to clear]");
-                    color: #585b70;
-                    font-size: 11px;
+                    color: Colors.surface2;
+                    font-size: Typography.size-md;
                     vertical-alignment: center;
                 }
             }

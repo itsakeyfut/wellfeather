@@ -1,7 +1,8 @@
 import { SidebarNode } from "../globals.slint";
+import { Colors, Typography } from "../theme.slint";
 
 export component Sidebar inherits Rectangle {
-    background: #1e1e2e;
+    background: Colors.base;
 
     in property <[SidebarNode]> tree: [];
     in property <bool> is-loading: false;
@@ -113,8 +114,8 @@ export component Sidebar inherits Rectangle {
                     clip: true;
 
                     background: i == root.kb-focus
-                        ? #3d3d5c
-                        : (node.is-active && node.level == 0 ? #313244 : transparent);
+                        ? Colors.sidebar-sel
+                        : (node.is-active && node.level == 0 ? Colors.surface0 : transparent);
 
                     ta := TouchArea {
                         width: parent.width;
@@ -142,7 +143,7 @@ export component Sidebar inherits Rectangle {
                         background: ta.has-hover
                             && i != root.kb-focus
                             && !(node.is-active && node.level == 0)
-                            ? #ffffff0d : transparent;
+                            ? Colors.hover-subtle : transparent;
                         width: parent.width;
                         height: parent.height;
                     }
@@ -158,8 +159,8 @@ export component Sidebar inherits Rectangle {
                         // Expand/collapse toggle icon for connection and category nodes
                         if node.level < 2 : Text {
                             text: node.is-expanded ? "▼" : "▶";
-                            color: #585b70;
-                            font-size: 9px;
+                            color: Colors.surface2;
+                            font-size: Typography.size-xs;
                             vertical-alignment: center;
                             width: 14px;
                         }
@@ -170,9 +171,9 @@ export component Sidebar inherits Rectangle {
                         Text {
                             text: node.label;
                             color: node.level == 0
-                                ? (node.is-active ? #cdd6f4 : #bac2de)
-                                : (node.level == 1 ? #7f849c : #a6adc8);
-                            font-size: node.level == 0 ? 13px : 12px;
+                                ? (node.is-active ? Colors.text : Colors.subtext1)
+                                : (node.level == 1 ? Colors.overlay1 : Colors.subtext0);
+                            font-size: node.level == 0 ? Typography.size-lg : Typography.size-base;
                             vertical-alignment: center;
                             overflow: elide;
                             horizontal-stretch: 1;
@@ -181,8 +182,8 @@ export component Sidebar inherits Rectangle {
                         // Sub-label badge (db-type for connection nodes)
                         if node.sub-label != "" : Text {
                             text: node.sub-label;
-                            color: #585b70;
-                            font-size: 10px;
+                            color: Colors.surface2;
+                            font-size: Typography.size-sm;
                             vertical-alignment: center;
                         }
                     }
@@ -195,8 +196,8 @@ export component Sidebar inherits Rectangle {
                         padding-left: 24px;
                         Text {
                             text: @tr("Loading\u{2026}");
-                            color: #585b70;
-                            font-size: 11px;
+                            color: Colors.surface2;
+                            font-size: Typography.size-md;
                             vertical-alignment: center;
                             font-italic: true;
                         }
@@ -206,7 +207,7 @@ export component Sidebar inherits Rectangle {
                 // ── Divider ───────────────────────────────────────────────────────────
                 Rectangle {
                     height: 1px;
-                    background: #313244;
+                    background: Colors.surface0;
                 }
 
                 // ── Add connection button ─────────────────────────────────────────────
@@ -218,7 +219,7 @@ export component Sidebar inherits Rectangle {
                         padding-left: 12px;
                         Text {
                             text: @tr("＋ Add connection");
-                            color: #89b4fa;
+                            color: Colors.blue;
                             vertical-alignment: center;
                         }
                     }
