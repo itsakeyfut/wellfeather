@@ -16,6 +16,32 @@ const COMPLETION_DEBOUNCE_MS: u64 = 300;
 const ERROR_TRUNCATION_CHARS: usize = 80;
 const DEFAULT_COLUMN_WIDTH: f32 = 150.0;
 
+// ── UI-thread helpers ────────────────────────────────────────────────────────
+
+/// Upgrade `weak`, run `f` against the UiState global; no-op if window is gone.
+fn with_ui<F: FnOnce(&crate::UiState)>(weak: &slint::Weak<crate::AppWindow>, f: F) {
+    let Some(window) = weak.upgrade() else {
+        return;
+    };
+    let ui = window.global::<crate::UiState>();
+    f(&ui);
+}
+
+/// Fire-and-forget: send `cmd` on `tx` from a new tokio task.
+fn send_cmd(tx: &mpsc::Sender<Command>, cmd: Command) {
+    let tx = tx.clone(); // clone required: tokio::spawn needs 'static
+    tokio::spawn(async move {
+        let _ = tx.send(cmd).await;
+    });
+}
+
+/// Post a status-bar update to the UI thread from any thread.
+fn set_status(weak: slint::Weak<crate::AppWindow>, msg: String) {
+    let _ = slint::invoke_from_event_loop(move || {
+        with_ui(&weak, |ui| ui.set_status_message(msg.into()));
+    });
+}
+
 // ---------------------------------------------------------------------------
 // Original query result — retained for client-side filtering
 // ---------------------------------------------------------------------------
@@ -353,78 +379,68 @@ impl UI {
         };
         // clone required: invoke_from_event_loop closure must be 'static
         let _ = slint::invoke_from_event_loop(move || {
-            let Some(window) = ww.upgrade() else {
-                return;
-            };
-            let ui = window.global::<crate::UiState>();
-            let model = Rc::new(slint::VecModel::from(entries));
-            ui.set_connection_list(model.into());
-            ui.set_active_connection_id(id.into());
-            ui.set_show_connection_form(false);
-            ui.set_form_testing(false);
-            ui.set_form_status("".into());
-            ui.set_error_message("".into());
-            ui.set_status_connection(status_conn.into());
-            ui.set_sidebar_tree(Rc::new(slint::VecModel::from(sidebar_nodes)).into());
-            ui.set_sidebar_loading(true);
+            with_ui(&ww, move |ui| {
+                let model = Rc::new(slint::VecModel::from(entries));
+                ui.set_connection_list(model.into());
+                ui.set_active_connection_id(id.into());
+                ui.set_show_connection_form(false);
+                ui.set_form_testing(false);
+                ui.set_form_status("".into());
+                ui.set_error_message("".into());
+                ui.set_status_connection(status_conn.into());
+                ui.set_sidebar_tree(Rc::new(slint::VecModel::from(sidebar_nodes)).into());
+                ui.set_sidebar_loading(true);
+            });
         });
     }
 
     fn handle_test_ok(ww: slint::Weak<crate::AppWindow>) {
         // clone required: invoke_from_event_loop closure must be 'static
         let _ = slint::invoke_from_event_loop(move || {
-            let Some(window) = ww.upgrade() else {
-                return;
-            };
-            let ui = window.global::<crate::UiState>();
-            ui.set_form_testing(false);
-            ui.set_form_test_ok(true);
-            ui.set_test_result_ok(true);
-            ui.set_test_result_message("".into());
-            ui.set_show_test_result_popup(true);
+            with_ui(&ww, |ui| {
+                ui.set_form_testing(false);
+                ui.set_form_test_ok(true);
+                ui.set_test_result_ok(true);
+                ui.set_test_result_message("".into());
+                ui.set_show_test_result_popup(true);
+            });
         });
     }
 
     fn handle_test_failed(msg: String, ww: slint::Weak<crate::AppWindow>) {
         // clone required: invoke_from_event_loop closure must be 'static
         let _ = slint::invoke_from_event_loop(move || {
-            let Some(window) = ww.upgrade() else {
-                return;
-            };
-            let ui = window.global::<crate::UiState>();
-            ui.set_form_testing(false);
-            ui.set_form_test_ok(false);
-            ui.set_test_result_ok(false);
-            ui.set_test_result_message(msg.into());
-            ui.set_show_test_result_popup(true);
+            with_ui(&ww, move |ui| {
+                ui.set_form_testing(false);
+                ui.set_form_test_ok(false);
+                ui.set_test_result_ok(false);
+                ui.set_test_result_message(msg.into());
+                ui.set_show_test_result_popup(true);
+            });
         });
     }
 
     fn handle_connect_error(msg: String, ww: slint::Weak<crate::AppWindow>) {
         // clone required: invoke_from_event_loop closure must be 'static
         let _ = slint::invoke_from_event_loop(move || {
-            let Some(window) = ww.upgrade() else {
-                return;
-            };
-            let ui = window.global::<crate::UiState>();
-            ui.set_form_testing(false);
-            ui.set_form_status(msg.clone().into());
-            ui.set_status_message(format!("Connection failed: {msg}").into());
-            ui.set_sidebar_loading(false);
+            with_ui(&ww, |ui| {
+                ui.set_form_testing(false);
+                ui.set_form_status(msg.clone().into());
+                ui.set_status_message(format!("Connection failed: {msg}").into());
+                ui.set_sidebar_loading(false);
+            });
         });
     }
 
     fn handle_query_started(ww: slint::Weak<crate::AppWindow>) {
         // clone required: invoke_from_event_loop closure must be 'static
         let _ = slint::invoke_from_event_loop(move || {
-            let Some(window) = ww.upgrade() else {
-                return;
-            };
-            let ui = window.global::<crate::UiState>();
-            ui.set_is_loading(true);
-            ui.set_error_message("".into());
-            ui.set_status_message("Running\u{2026}".into());
-            ui.set_result_panel_open(true);
+            with_ui(&ww, |ui| {
+                ui.set_is_loading(true);
+                ui.set_error_message("".into());
+                ui.set_status_message("Running\u{2026}".into());
+                ui.set_result_panel_open(true);
+            });
         });
     }
 
@@ -451,38 +467,34 @@ impl UI {
         }
         // clone required: invoke_from_event_loop closure must be 'static
         let _ = slint::invoke_from_event_loop(move || {
-            let Some(window) = ww.upgrade() else {
-                return;
-            };
-            let ui = window.global::<crate::UiState>();
-            ui.set_is_loading(false);
-            ui.set_result_active_filter("".into());
-            ui.set_result_sort_col(-1);
-            ui.set_result_sort_asc(true);
-            let col_model = Rc::new(slint::VecModel::from(columns));
-            ui.set_result_columns(col_model.into());
-            let rows: Vec<crate::RowData> = raw_rows.into_iter().map(rows_to_ui).collect();
-            ui.set_result_rows(Rc::new(slint::VecModel::from(rows)).into());
-            ui.set_result_row_count(row_count);
-            ui.set_result_total_rows(row_count);
-            let widths: Vec<f32> = vec![DEFAULT_COLUMN_WIDTH; col_count];
-            let total_w = col_count as f32 * DEFAULT_COLUMN_WIDTH;
-            ui.set_result_col_widths(Rc::new(slint::VecModel::from(widths)).into());
-            ui.set_result_total_col_width(total_w);
-            ui.set_status_message(format!("{exec_ms} ms  ·  {row_count} rows").into());
-            ui.set_result_panel_open(true);
+            with_ui(&ww, move |ui| {
+                ui.set_is_loading(false);
+                ui.set_result_active_filter("".into());
+                ui.set_result_sort_col(-1);
+                ui.set_result_sort_asc(true);
+                let col_model = Rc::new(slint::VecModel::from(columns));
+                ui.set_result_columns(col_model.into());
+                let rows: Vec<crate::RowData> = raw_rows.into_iter().map(rows_to_ui).collect();
+                ui.set_result_rows(Rc::new(slint::VecModel::from(rows)).into());
+                ui.set_result_row_count(row_count);
+                ui.set_result_total_rows(row_count);
+                let widths: Vec<f32> = vec![DEFAULT_COLUMN_WIDTH; col_count];
+                let total_w = col_count as f32 * DEFAULT_COLUMN_WIDTH;
+                ui.set_result_col_widths(Rc::new(slint::VecModel::from(widths)).into());
+                ui.set_result_total_col_width(total_w);
+                ui.set_status_message(format!("{exec_ms} ms  ·  {row_count} rows").into());
+                ui.set_result_panel_open(true);
+            });
         });
     }
 
     fn handle_query_cancelled(ww: slint::Weak<crate::AppWindow>) {
         // clone required: invoke_from_event_loop closure must be 'static
         let _ = slint::invoke_from_event_loop(move || {
-            let Some(window) = ww.upgrade() else {
-                return;
-            };
-            let ui = window.global::<crate::UiState>();
-            ui.set_is_loading(false);
-            ui.set_status_message("Cancelled".into());
+            with_ui(&ww, |ui| {
+                ui.set_is_loading(false);
+                ui.set_status_message("Cancelled".into());
+            });
         });
     }
 
@@ -496,28 +508,24 @@ impl UI {
             .collect::<String>();
         // clone required: invoke_from_event_loop closure must be 'static
         let _ = slint::invoke_from_event_loop(move || {
-            let Some(window) = ww.upgrade() else {
-                return;
-            };
-            let ui = window.global::<crate::UiState>();
-            ui.set_is_loading(false);
-            ui.set_form_status(msg.clone().into());
-            ui.set_form_testing(false);
-            ui.set_error_message(msg.into());
-            ui.set_status_message(format!("Error: {summary}").into());
-            ui.set_result_panel_open(true);
+            with_ui(&ww, move |ui| {
+                ui.set_is_loading(false);
+                ui.set_form_status(msg.clone().into());
+                ui.set_form_testing(false);
+                ui.set_error_message(msg.into());
+                ui.set_status_message(format!("Error: {summary}").into());
+                ui.set_result_panel_open(true);
+            });
         });
     }
 
     fn handle_disconnected(id: String, ww: slint::Weak<crate::AppWindow>) {
         // clone required: invoke_from_event_loop closure must be 'static
         let _ = slint::invoke_from_event_loop(move || {
-            let Some(window) = ww.upgrade() else {
-                return;
-            };
-            let ui = window.global::<crate::UiState>();
-            ui.set_status_message(format!("Disconnected: {id}").into());
-            ui.set_status_connection("Not connected".into());
+            with_ui(&ww, move |ui| {
+                ui.set_status_message(format!("Disconnected: {id}").into());
+                ui.set_status_connection("Not connected".into());
+            });
         });
     }
 
@@ -544,36 +552,30 @@ impl UI {
         };
         // clone required: invoke_from_event_loop closure must be 'static
         let _ = slint::invoke_from_event_loop(move || {
-            let Some(window) = ww.upgrade() else {
-                return;
-            };
-            let ui = window.global::<crate::UiState>();
-            ui.set_sidebar_tree(Rc::new(slint::VecModel::from(nodes)).into());
-            ui.set_sidebar_loading(false);
+            with_ui(&ww, move |ui| {
+                ui.set_sidebar_tree(Rc::new(slint::VecModel::from(nodes)).into());
+                ui.set_sidebar_loading(false);
+            });
         });
     }
 
     fn handle_metadata_fetch_failed(msg: String, ww: slint::Weak<crate::AppWindow>) {
         // clone required: invoke_from_event_loop closure must be 'static
         let _ = slint::invoke_from_event_loop(move || {
-            let Some(window) = ww.upgrade() else {
-                return;
-            };
-            let ui = window.global::<crate::UiState>();
-            ui.set_sidebar_loading(false);
-            ui.set_status_message(format!("Metadata unavailable: {msg}").into());
+            with_ui(&ww, move |ui| {
+                ui.set_sidebar_loading(false);
+                ui.set_status_message(format!("Metadata unavailable: {msg}").into());
+            });
         });
     }
 
     fn handle_insert_text(text: String, ww: slint::Weak<crate::AppWindow>) {
         // clone required: invoke_from_event_loop closure must be 'static
         let _ = slint::invoke_from_event_loop(move || {
-            let Some(window) = ww.upgrade() else {
-                return;
-            };
-            let ui = window.global::<crate::UiState>();
-            let current = ui.get_editor_text().to_string();
-            ui.set_editor_text(append_editor_text(&current, &text).into());
+            with_ui(&ww, move |ui| {
+                let current = ui.get_editor_text().to_string();
+                ui.set_editor_text(append_editor_text(&current, &text).into());
+            });
         });
     }
 
@@ -592,18 +594,16 @@ impl UI {
             .collect();
         // clone required: invoke_from_event_loop closure must be 'static
         let _ = slint::invoke_from_event_loop(move || {
-            let Some(window) = ww.upgrade() else {
-                return;
-            };
-            let ui = window.global::<crate::UiState>();
-            if rows.is_empty() {
-                ui.set_completion_visible(false);
-            } else {
-                let model = Rc::new(slint::VecModel::from(rows));
-                ui.set_completion_items(model.into());
-                ui.set_completion_selected(0);
-                ui.set_completion_visible(true);
-            }
+            with_ui(&ww, move |ui| {
+                if rows.is_empty() {
+                    ui.set_completion_visible(false);
+                } else {
+                    let model = Rc::new(slint::VecModel::from(rows));
+                    ui.set_completion_items(model.into());
+                    ui.set_completion_selected(0);
+                    ui.set_completion_visible(true);
+                }
+            });
         });
     }
 
@@ -622,25 +622,23 @@ impl UI {
         {
             let window_weak = window.as_weak();
             ui_state.on_open_connection_form(move || {
-                let Some(window) = window_weak.upgrade() else {
-                    return;
-                };
-                let ui = window.global::<crate::UiState>();
-                ui.set_form_name("".into());
-                ui.set_form_conn_string("".into());
-                ui.set_form_host("".into());
-                ui.set_form_port("".into());
-                ui.set_form_user("".into());
-                ui.set_form_password("".into());
-                ui.set_form_database("".into());
-                ui.set_form_status("".into());
-                ui.set_form_testing(false);
-                ui.set_form_tab_index(0);
-                ui.set_form_db_type(0);
-                ui.set_form_test_ok(false);
-                ui.set_show_test_result_popup(false);
-                ui.set_show_add_confirm_popup(false);
-                ui.set_show_connection_form(true);
+                with_ui(&window_weak, |ui| {
+                    ui.set_form_name("".into());
+                    ui.set_form_conn_string("".into());
+                    ui.set_form_host("".into());
+                    ui.set_form_port("".into());
+                    ui.set_form_user("".into());
+                    ui.set_form_password("".into());
+                    ui.set_form_database("".into());
+                    ui.set_form_status("".into());
+                    ui.set_form_testing(false);
+                    ui.set_form_tab_index(0);
+                    ui.set_form_db_type(0);
+                    ui.set_form_test_ok(false);
+                    ui.set_show_test_result_popup(false);
+                    ui.set_show_add_confirm_popup(false);
+                    ui.set_show_connection_form(true);
+                });
             });
         }
 
@@ -668,11 +666,7 @@ impl UI {
                                 .password_encrypted
                                 .as_ref()
                                 .and_then(|enc| crypto::decrypt(enc, &enc_key).ok());
-                            // clone required: tokio::spawn requires 'static
-                            let tx_cmd = tx_cmd.clone();
-                            tokio::spawn(async move {
-                                let _ = tx_cmd.send(Command::Connect(conn, password)).await;
-                            });
+                            send_cmd(&tx_cmd, Command::Connect(conn, password));
                         }
                         // Return early — Event::Connected will auto-expand the newly active node.
                         return;
@@ -698,12 +692,9 @@ impl UI {
                         .unwrap_or_default();
                     build_sidebar_tree(&connections, &active_id, &sb.metadata, &sb.expanded)
                 };
-                let Some(window) = window_weak.upgrade() else {
-                    return;
-                };
-                window
-                    .global::<crate::UiState>()
-                    .set_sidebar_tree(Rc::new(slint::VecModel::from(nodes)).into());
+                with_ui(&window_weak, |ui| {
+                    ui.set_sidebar_tree(Rc::new(slint::VecModel::from(nodes)).into());
+                });
             });
         }
 
@@ -715,18 +706,11 @@ impl UI {
             let tx_cmd = tx_cmd.clone(); // clone required: callback closure needs owned tx_cmd
             ui_state.on_table_double_clicked(move |name| {
                 let sql = format!("SELECT * FROM {}", name);
-                let Some(window) = window_weak.upgrade() else {
-                    return;
-                };
-                let ui = window.global::<crate::UiState>();
-                let current = ui.get_editor_text().to_string();
-                ui.set_editor_text(append_editor_text(&current, &sql).into());
-                // Auto-execute so the result is visible immediately.
-                let tx_cmd = tx_cmd.clone(); // clone required: tokio::spawn requires 'static
-                let sql_run = sql.clone();
-                tokio::spawn(async move {
-                    let _ = tx_cmd.send(Command::RunQuery(sql_run)).await;
+                with_ui(&window_weak, |ui| {
+                    let current = ui.get_editor_text().to_string();
+                    ui.set_editor_text(append_editor_text(&current, &sql).into());
                 });
+                send_cmd(&tx_cmd, Command::RunQuery(sql));
             });
         }
     }
@@ -744,12 +728,7 @@ impl UI {
         {
             let window_weak = window.as_weak();
             ui_state.on_close_connection_form(move || {
-                let Some(window) = window_weak.upgrade() else {
-                    return;
-                };
-                window
-                    .global::<crate::UiState>()
-                    .set_show_connection_form(false);
+                with_ui(&window_weak, |ui| ui.set_show_connection_form(false));
             });
         }
 
@@ -759,19 +738,12 @@ impl UI {
             // clone required: callback closure needs owned tx_cmd
             let tx_cmd = tx_cmd.clone();
             ui_state.on_test_connection(move || {
-                let Some(window) = window_weak.upgrade() else {
-                    return;
-                };
-                let ui = window.global::<crate::UiState>();
-                ui.set_form_testing(true);
-                ui.set_form_status("".into());
-                ui.set_form_test_ok(false); // reset stale test state
-
-                let (conn, password) = build_conn_from_form(&ui, &enc_key);
-                // clone required: tokio::spawn requires 'static
-                let tx_cmd = tx_cmd.clone();
-                tokio::spawn(async move {
-                    let _ = tx_cmd.send(Command::TestConnection(conn, password)).await;
+                with_ui(&window_weak, |ui| {
+                    ui.set_form_testing(true);
+                    ui.set_form_status("".into());
+                    ui.set_form_test_ok(false);
+                    let (conn, password) = build_conn_from_form(ui, &enc_key);
+                    send_cmd(&tx_cmd, Command::TestConnection(conn, password));
                 });
             });
         }
@@ -782,23 +754,15 @@ impl UI {
             // clone required: callback closure needs owned tx_cmd
             let tx_cmd = tx_cmd.clone();
             ui_state.on_add_connection(move || {
-                let Some(window) = window_weak.upgrade() else {
-                    return;
-                };
-                let ui = window.global::<crate::UiState>();
-                if ui.get_form_test_ok() {
-                    // Test was successful — add directly
-                    ui.set_form_testing(true);
-                    let (conn, password) = build_conn_from_form(&ui, &enc_key);
-                    // clone required: tokio::spawn requires 'static
-                    let tx_cmd = tx_cmd.clone();
-                    tokio::spawn(async move {
-                        let _ = tx_cmd.send(Command::Connect(conn, password)).await;
-                    });
-                } else {
-                    // Not tested or failed — show confirmation first
-                    ui.set_show_add_confirm_popup(true);
-                }
+                with_ui(&window_weak, |ui| {
+                    if ui.get_form_test_ok() {
+                        ui.set_form_testing(true);
+                        let (conn, password) = build_conn_from_form(ui, &enc_key);
+                        send_cmd(&tx_cmd, Command::Connect(conn, password));
+                    } else {
+                        ui.set_show_add_confirm_popup(true);
+                    }
+                });
             });
         }
 
@@ -808,17 +772,11 @@ impl UI {
             // clone required: callback closure needs owned tx_cmd
             let tx_cmd = tx_cmd.clone();
             ui_state.on_confirm_add_connection(move || {
-                let Some(window) = window_weak.upgrade() else {
-                    return;
-                };
-                let ui = window.global::<crate::UiState>();
-                ui.set_show_add_confirm_popup(false);
-                ui.set_form_testing(true);
-                let (conn, password) = build_conn_from_form(&ui, &enc_key);
-                // clone required: tokio::spawn requires 'static
-                let tx_cmd = tx_cmd.clone();
-                tokio::spawn(async move {
-                    let _ = tx_cmd.send(Command::Connect(conn, password)).await;
+                with_ui(&window_weak, |ui| {
+                    ui.set_show_add_confirm_popup(false);
+                    ui.set_form_testing(true);
+                    let (conn, password) = build_conn_from_form(ui, &enc_key);
+                    send_cmd(&tx_cmd, Command::Connect(conn, password));
                 });
             });
         }
@@ -827,12 +785,7 @@ impl UI {
         {
             let window_weak = window.as_weak();
             ui_state.on_dismiss_test_popup(move || {
-                let Some(window) = window_weak.upgrade() else {
-                    return;
-                };
-                window
-                    .global::<crate::UiState>()
-                    .set_show_test_result_popup(false);
+                with_ui(&window_weak, |ui| ui.set_show_test_result_popup(false));
             });
         }
 
@@ -840,12 +793,7 @@ impl UI {
         {
             let window_weak = window.as_weak();
             ui_state.on_dismiss_add_confirm(move || {
-                let Some(window) = window_weak.upgrade() else {
-                    return;
-                };
-                window
-                    .global::<crate::UiState>()
-                    .set_show_add_confirm_popup(false);
+                with_ui(&window_weak, |ui| ui.set_show_add_confirm_popup(false));
             });
         }
     }
@@ -912,20 +860,13 @@ impl UI {
         {
             let tx_cmd = tx_cmd.clone(); // clone required: callback closure needs owned tx_cmd
             ui.on_run_query(move |sql| {
-                let sql = sql.to_string();
-                let tx_cmd = tx_cmd.clone(); // clone required: tokio::spawn requires 'static
-                tokio::spawn(async move {
-                    let _ = tx_cmd.send(Command::RunQuery(sql)).await;
-                });
+                send_cmd(&tx_cmd, Command::RunQuery(sql.to_string()));
             });
         }
         {
             let tx_cmd = tx_cmd.clone(); // clone required: callback closure needs owned tx_cmd
             ui.on_cancel_query(move || {
-                let tx_cmd = tx_cmd.clone(); // clone required: tokio::spawn requires 'static
-                tokio::spawn(async move {
-                    let _ = tx_cmd.send(Command::CancelQuery).await;
-                });
+                send_cmd(&tx_cmd, Command::CancelQuery);
             });
         }
     }
@@ -954,13 +895,8 @@ impl UI {
                     slint::TimerMode::SingleShot,
                     Duration::from_millis(COMPLETION_DEBOUNCE_MS),
                     move || {
-                        let tx = tx.clone(); // clone required: tokio::spawn
                         let sql = sql.clone();
-                        tokio::spawn(async move {
-                            let _ = tx
-                                .send(Command::FetchCompletion(sql, cursor_pos as usize))
-                                .await;
-                        });
+                        send_cmd(&tx, Command::FetchCompletion(sql, cursor_pos as usize));
                     },
                 );
                 *debounce.borrow_mut() = Some(timer);
@@ -970,13 +906,10 @@ impl UI {
         // Immediate path (Ctrl+Space → FetchCompletion without delay).
         {
             ui.on_trigger_completion(move |sql, cursor_pos| {
-                let tx = tx_cmd.clone(); // clone required: tokio::spawn
-                let sql = sql.to_string();
-                tokio::spawn(async move {
-                    let _ = tx
-                        .send(Command::FetchCompletion(sql, cursor_pos as usize))
-                        .await;
-                });
+                send_cmd(
+                    &tx_cmd,
+                    Command::FetchCompletion(sql.to_string(), cursor_pos as usize),
+                );
             });
         }
     }
@@ -986,128 +919,127 @@ impl UI {
         let window_weak = window.as_weak(); // clone required: on_accept_completion closure
         ui.on_accept_completion(
             move |insert_text, cursor_pos, cursor_offset_val, table_name| {
-                let Some(window) = window_weak.upgrade() else {
-                    return;
-                };
-                let ui = window.global::<crate::UiState>();
-                let current = ui.get_editor_text().to_string();
-                let pos = (cursor_pos as usize).min(current.len());
-                let mut prefix_start = find_prefix_start(&current, pos);
-                // When accepting a disambiguated column candidate (table_name is set), the
-                // user may have typed "colname tableprefix" with a space.  Extend the
-                // replacement range backward to cover the entire "colname tableprefix" so the
-                // insertion replaces both words, not just the current word after the space.
-                let table_name_str = table_name.to_string();
-                if !table_name_str.is_empty() {
-                    let before_prefix = &current[..prefix_start];
-                    let pattern = format!("{} ", insert_text.as_str());
-                    if before_prefix.ends_with(&pattern) {
-                        let extended = prefix_start - pattern.len();
-                        let at_boundary = extended == 0
-                            || matches!(
-                                current.as_bytes().get(extended - 1),
-                                Some(b' ') | Some(b'\t') | Some(b'\n')
-                            );
-                        if at_boundary {
-                            prefix_start = extended;
+                with_ui(&window_weak, move |ui| {
+                    let current = ui.get_editor_text().to_string();
+                    let pos = (cursor_pos as usize).min(current.len());
+                    let mut prefix_start = find_prefix_start(&current, pos);
+                    // When accepting a disambiguated column candidate (table_name is set), the
+                    // user may have typed "colname tableprefix" with a space.  Extend the
+                    // replacement range backward to cover the entire "colname tableprefix" so the
+                    // insertion replaces both words, not just the current word after the space.
+                    let table_name_str = table_name.to_string();
+                    if !table_name_str.is_empty() {
+                        let before_prefix = &current[..prefix_start];
+                        let pattern = format!("{} ", insert_text.as_str());
+                        if before_prefix.ends_with(&pattern) {
+                            let extended = prefix_start - pattern.len();
+                            let at_boundary = extended == 0
+                                || matches!(
+                                    current.as_bytes().get(extended - 1),
+                                    Some(b' ') | Some(b'\t') | Some(b'\n')
+                                );
+                            if at_boundary {
+                                prefix_start = extended;
+                            }
                         }
                     }
-                }
 
-                // If the accepted text is a SQL keyword (FROM, WHERE, AND …), treat it as
-                // a plain insertion even inside a SELECT list — no comma should be added.
-                let is_keyword = wf_completion::parser::is_sql_keyword(insert_text.as_str());
-                let in_select = !is_keyword && wf_completion::parser::in_select_list(&current, pos);
+                    // If the accepted text is a SQL keyword (FROM, WHERE, AND …), treat it as
+                    // a plain insertion even inside a SELECT list — no comma should be added.
+                    let is_keyword = wf_completion::parser::is_sql_keyword(insert_text.as_str());
+                    let in_select =
+                        !is_keyword && wf_completion::parser::in_select_list(&current, pos);
 
-                let (new_text, new_cursor): (String, i32) = if in_select {
-                    // In SELECT list: auto-insert ", " between columns.
-                    let trimmed = current[..prefix_start].trim_end_matches([' ', '\t']);
-                    let last_char = trimmed.chars().last();
-                    let last_word_start = trimmed
-                        .rfind(|c: char| !c.is_alphanumeric() && c != '_')
-                        .map(|i| i + 1)
-                        .unwrap_or(0);
-                    let last_word = trimmed[last_word_start..].to_ascii_uppercase();
-                    let needs_comma = !matches!(last_char, None | Some(',') | Some('('))
-                        && !matches!(last_word.as_str(), "SELECT" | "DISTINCT");
-                    if needs_comma {
-                        let text = format!("{}, {}{}", trimmed, insert_text, &current[pos..]);
-                        let cur = (trimmed.len() + 2 + insert_text.len()) as i32;
-                        (text, cur)
+                    let (new_text, new_cursor): (String, i32) = if in_select {
+                        // In SELECT list: auto-insert ", " between columns.
+                        let trimmed = current[..prefix_start].trim_end_matches([' ', '\t']);
+                        let last_char = trimmed.chars().last();
+                        let last_word_start = trimmed
+                            .rfind(|c: char| !c.is_alphanumeric() && c != '_')
+                            .map(|i| i + 1)
+                            .unwrap_or(0);
+                        let last_word = trimmed[last_word_start..].to_ascii_uppercase();
+                        let needs_comma = !matches!(last_char, None | Some(',') | Some('('))
+                            && !matches!(last_word.as_str(), "SELECT" | "DISTINCT");
+                        if needs_comma {
+                            let text = format!("{}, {}{}", trimmed, insert_text, &current[pos..]);
+                            let cur = (trimmed.len() + 2 + insert_text.len()) as i32;
+                            (text, cur)
+                        } else {
+                            let text = format!(
+                                "{}{}{}",
+                                &current[..prefix_start],
+                                insert_text,
+                                &current[pos..]
+                            );
+                            let cur = (prefix_start + insert_text.len()) as i32;
+                            (text, cur)
+                        }
                     } else {
+                        // Determine whether to replace the typed prefix or insert at cursor.
+                        // When the accepted text is unrelated to the prefix (e.g. user finished
+                        // typing "users" and now accepts a NextClause keyword like "WHERE"),
+                        // insert at the cursor position with a leading space rather than
+                        // overwriting the table/column name.
+                        let prefix_word = &current[prefix_start..pos];
+                        let (actual_start, add_leading_space) = if prefix_word.is_empty() {
+                            // Cursor is at whitespace or string start — plain insert.
+                            (pos, false)
+                        } else if insert_text
+                            .as_str()
+                            .to_ascii_uppercase()
+                            .starts_with(&prefix_word.to_ascii_uppercase())
+                        {
+                            // Prefix is a partial match of insert_text — replace it.
+                            (prefix_start, false)
+                        } else {
+                            // Prefix is unrelated (e.g. "users" + "WHERE") — insert at cursor.
+                            let needs_space =
+                                !current[..pos].ends_with(|c: char| c.is_ascii_whitespace());
+                            (pos, needs_space)
+                        };
+                        let leading = if add_leading_space { " " } else { "" };
                         let text = format!(
-                            "{}{}{}",
-                            &current[..prefix_start],
+                            "{}{}{}{}",
+                            &current[..actual_start],
+                            leading,
                             insert_text,
                             &current[pos..]
                         );
-                        let cur = (prefix_start + insert_text.len()) as i32;
+                        let cur = if cursor_offset_val > 0 {
+                            actual_start as i32 + add_leading_space as i32 + cursor_offset_val
+                        } else {
+                            (actual_start + leading.len() + insert_text.len()) as i32
+                        };
                         (text, cur)
+                    };
+
+                    // Auto-append FROM <table> when a column with a known table was accepted
+                    // inside a SELECT list that has no FROM clause yet.
+                    let appended_from =
+                        in_select && !table_name_str.is_empty() && !sql_has_from(&current);
+                    let (final_text, final_cursor) = if appended_from {
+                        let appended = format!("{} FROM {}", new_text.trim_end(), table_name_str);
+                        let cur = appended.len() as i32;
+                        (appended, cur)
+                    } else {
+                        (new_text, new_cursor)
+                    };
+
+                    // inserted text, e.g. between the quotes in `''`).
+                    let at_end = final_cursor as usize == final_text.len();
+                    ui.set_editor_text(final_text.clone().into());
+                    ui.set_editor_cursor_target(final_cursor);
+                    // Re-trigger only when the cursor is at end of inserted text AND the text
+                    // does not end at a syntactically terminal expression (IS NULL, TRUE, FALSE,
+                    // a string/numeric literal, ASC/DESC).  Terminal positions use a virtual
+                    // trailing space so the parser sees the next context without polluting the
+                    // editor with a stale space the user would have to delete before typing `;`.
+                    if cursor_offset_val == 0 && at_end && !is_terminal_expression(&final_text) {
+                        let trigger_sql = format!("{} ", final_text);
+                        ui.invoke_trigger_completion(trigger_sql.into(), final_cursor + 1);
                     }
-                } else {
-                    // Determine whether to replace the typed prefix or insert at cursor.
-                    // When the accepted text is unrelated to the prefix (e.g. user finished
-                    // typing "users" and now accepts a NextClause keyword like "WHERE"),
-                    // insert at the cursor position with a leading space rather than
-                    // overwriting the table/column name.
-                    let prefix_word = &current[prefix_start..pos];
-                    let (actual_start, add_leading_space) = if prefix_word.is_empty() {
-                        // Cursor is at whitespace or string start — plain insert.
-                        (pos, false)
-                    } else if insert_text
-                        .as_str()
-                        .to_ascii_uppercase()
-                        .starts_with(&prefix_word.to_ascii_uppercase())
-                    {
-                        // Prefix is a partial match of insert_text — replace it.
-                        (prefix_start, false)
-                    } else {
-                        // Prefix is unrelated (e.g. "users" + "WHERE") — insert at cursor.
-                        let needs_space =
-                            !current[..pos].ends_with(|c: char| c.is_ascii_whitespace());
-                        (pos, needs_space)
-                    };
-                    let leading = if add_leading_space { " " } else { "" };
-                    let text = format!(
-                        "{}{}{}{}",
-                        &current[..actual_start],
-                        leading,
-                        insert_text,
-                        &current[pos..]
-                    );
-                    let cur = if cursor_offset_val > 0 {
-                        actual_start as i32 + add_leading_space as i32 + cursor_offset_val
-                    } else {
-                        (actual_start + leading.len() + insert_text.len()) as i32
-                    };
-                    (text, cur)
-                };
-
-                // Auto-append FROM <table> when a column with a known table was accepted
-                // inside a SELECT list that has no FROM clause yet.
-                let appended_from =
-                    in_select && !table_name_str.is_empty() && !sql_has_from(&current);
-                let (final_text, final_cursor) = if appended_from {
-                    let appended = format!("{} FROM {}", new_text.trim_end(), table_name_str);
-                    let cur = appended.len() as i32;
-                    (appended, cur)
-                } else {
-                    (new_text, new_cursor)
-                };
-
-                // inserted text, e.g. between the quotes in `''`).
-                let at_end = final_cursor as usize == final_text.len();
-                ui.set_editor_text(final_text.clone().into());
-                ui.set_editor_cursor_target(final_cursor);
-                // Re-trigger only when the cursor is at end of inserted text AND the text
-                // does not end at a syntactically terminal expression (IS NULL, TRUE, FALSE,
-                // a string/numeric literal, ASC/DESC).  Terminal positions use a virtual
-                // trailing space so the parser sees the next context without polluting the
-                // editor with a stale space the user would have to delete before typing `;`.
-                if cursor_offset_val == 0 && at_end && !is_terminal_expression(&final_text) {
-                    let trigger_sql = format!("{} ", final_text);
-                    ui.invoke_trigger_completion(trigger_sql.into(), final_cursor + 1);
-                }
+                });
             },
         );
     }
@@ -1116,13 +1048,11 @@ impl UI {
         let ui = window.global::<crate::UiState>();
         let window_weak = window.as_weak(); // clone required: on_format_sql closure
         ui.on_format_sql(move || {
-            let Some(window) = window_weak.upgrade() else {
-                return;
-            };
-            let ui = window.global::<crate::UiState>();
-            let text = ui.get_editor_text().to_string();
-            let formatted = wf_query::formatter::format_sql(&text);
-            ui.set_editor_text(formatted.into());
+            with_ui(&window_weak, |ui| {
+                let text = ui.get_editor_text().to_string();
+                let formatted = wf_query::formatter::format_sql(&text);
+                ui.set_editor_text(formatted.into());
+            });
         });
     }
 
@@ -1165,14 +1095,7 @@ impl UI {
                         Ok(()) => format!("Saved CSV: {}", path.display()),
                         Err(e) => format!("CSV export failed: {e}"),
                     };
-                    let _ = slint::invoke_from_event_loop(move || {
-                        let Some(window) = window_weak.upgrade() else {
-                            return;
-                        };
-                        window
-                            .global::<crate::UiState>()
-                            .set_status_message(msg.into());
-                    });
+                    set_status(window_weak, msg);
                 });
             });
         }
@@ -1209,14 +1132,7 @@ impl UI {
                         Ok(()) => format!("Saved JSON: {}", path.display()),
                         Err(e) => format!("JSON export failed: {e}"),
                     };
-                    let _ = slint::invoke_from_event_loop(move || {
-                        let Some(window) = window_weak.upgrade() else {
-                            return;
-                        };
-                        window
-                            .global::<crate::UiState>()
-                            .set_status_message(msg.into());
-                    });
+                    set_status(window_weak, msg);
                 });
             });
         }
@@ -1239,17 +1155,15 @@ impl UI {
             // clone required: callback closure must be 'static
             let window_weak = window_weak.clone();
             ui_state.on_resize_result_column(move |i, w| {
-                let Some(window) = window_weak.upgrade() else {
-                    return;
-                };
-                let ui = window.global::<crate::UiState>();
-                let model = ui.get_result_col_widths();
-                let n = model.row_count();
-                if (i as usize) < n {
-                    model.set_row_data(i as usize, w);
-                    let total: f32 = (0..n).filter_map(|j| model.row_data(j)).sum();
-                    ui.set_result_total_col_width(total);
-                }
+                with_ui(&window_weak, |ui| {
+                    let model = ui.get_result_col_widths();
+                    let n = model.row_count();
+                    if (i as usize) < n {
+                        model.set_row_data(i as usize, w);
+                        let total: f32 = (0..n).filter_map(|j| model.row_data(j)).sum();
+                        ui.set_result_total_col_width(total);
+                    }
+                });
             });
         }
 
@@ -1259,23 +1173,21 @@ impl UI {
             let window_weak = window_weak.clone();
             let original_data = Arc::clone(&original_data);
             ui_state.on_filter_result_rows(move |query| {
-                let Some(window) = window_weak.upgrade() else {
-                    return;
-                };
-                let ui = window.global::<crate::UiState>();
-                let orig = original_data.lock().unwrap_or_else(|p| p.into_inner());
-                let Some(ref data) = *orig else {
-                    return;
-                };
-                let mut filtered = filter_rows(&data.columns, &data.rows, query.as_str());
-                if let Some(col) = data.sort_col {
-                    sort_rows(&mut filtered, col, data.sort_asc);
-                }
-                let row_count = filtered.len() as i32;
-                let rows: Vec<crate::RowData> = filtered.into_iter().map(rows_to_ui).collect();
-                ui.set_result_rows(Rc::new(slint::VecModel::from(rows)).into());
-                ui.set_result_row_count(row_count);
-                ui.set_result_active_filter(query);
+                with_ui(&window_weak, |ui| {
+                    let orig = original_data.lock().unwrap_or_else(|p| p.into_inner());
+                    let Some(ref data) = *orig else {
+                        return;
+                    };
+                    let mut filtered = filter_rows(&data.columns, &data.rows, query.as_str());
+                    if let Some(col) = data.sort_col {
+                        sort_rows(&mut filtered, col, data.sort_asc);
+                    }
+                    let row_count = filtered.len() as i32;
+                    let rows: Vec<crate::RowData> = filtered.into_iter().map(rows_to_ui).collect();
+                    ui.set_result_rows(Rc::new(slint::VecModel::from(rows)).into());
+                    ui.set_result_row_count(row_count);
+                    ui.set_result_active_filter(query);
+                });
             });
         }
 
@@ -1285,23 +1197,21 @@ impl UI {
             let window_weak = window_weak.clone();
             let original_data = Arc::clone(&original_data);
             ui_state.on_clear_result_filter(move || {
-                let Some(window) = window_weak.upgrade() else {
-                    return;
-                };
-                let ui = window.global::<crate::UiState>();
-                let orig = original_data.lock().unwrap_or_else(|p| p.into_inner());
-                let Some(ref data) = *orig else {
-                    return;
-                };
-                let mut rows: Vec<Vec<Option<String>>> = data.rows.clone();
-                if let Some(col) = data.sort_col {
-                    sort_rows(&mut rows, col, data.sort_asc);
-                }
-                let row_count = rows.len() as i32;
-                let ui_rows: Vec<crate::RowData> = rows.into_iter().map(rows_to_ui).collect();
-                ui.set_result_rows(Rc::new(slint::VecModel::from(ui_rows)).into());
-                ui.set_result_row_count(row_count);
-                ui.set_result_active_filter("".into());
+                with_ui(&window_weak, |ui| {
+                    let orig = original_data.lock().unwrap_or_else(|p| p.into_inner());
+                    let Some(ref data) = *orig else {
+                        return;
+                    };
+                    let mut rows: Vec<Vec<Option<String>>> = data.rows.clone();
+                    if let Some(col) = data.sort_col {
+                        sort_rows(&mut rows, col, data.sort_asc);
+                    }
+                    let row_count = rows.len() as i32;
+                    let ui_rows: Vec<crate::RowData> = rows.into_iter().map(rows_to_ui).collect();
+                    ui.set_result_rows(Rc::new(slint::VecModel::from(ui_rows)).into());
+                    ui.set_result_row_count(row_count);
+                    ui.set_result_active_filter("".into());
+                });
             });
         }
 
@@ -1319,49 +1229,10 @@ impl UI {
             // clone required: callback closure must be 'static
             let window_weak = window_weak.clone();
             ui_state.on_copy_result_row(move |row_i| {
-                let Some(window) = window_weak.upgrade() else {
-                    return;
-                };
-                let ui = window.global::<crate::UiState>();
-                let rows_model = ui.get_result_rows();
-                if let Some(row) = rows_model.row_data(row_i as usize) {
-                    let cells: Vec<Option<String>> = (0..row.cells.row_count())
-                        .filter_map(|j| row.cells.row_data(j))
-                        .map(|c| {
-                            if c.is_null {
-                                None
-                            } else {
-                                Some(c.value.to_string())
-                            }
-                        })
-                        .collect();
-                    let tsv = cells_to_tsv(&cells);
-                    if let Ok(mut clip) = arboard::Clipboard::new() {
-                        let _ = clip.set_text(tsv);
-                    }
-                }
-            });
-        }
-
-        // copy-result-tsv: export all visible rows as TSV with column headers.
-        {
-            // clone required: callback closure must be 'static
-            let window_weak = window_weak.clone();
-            ui_state.on_copy_result_tsv(move || {
-                let Some(window) = window_weak.upgrade() else {
-                    return;
-                };
-                let ui = window.global::<crate::UiState>();
-                let cols_model = ui.get_result_columns();
-                let rows_model = ui.get_result_rows();
-                let columns: Vec<String> = (0..cols_model.row_count())
-                    .filter_map(|i| cols_model.row_data(i))
-                    .map(|s| s.to_string())
-                    .collect();
-                let rows: Vec<Vec<Option<String>>> = (0..rows_model.row_count())
-                    .filter_map(|i| rows_model.row_data(i))
-                    .map(|row| {
-                        (0..row.cells.row_count())
+                with_ui(&window_weak, |ui| {
+                    let rows_model = ui.get_result_rows();
+                    if let Some(row) = rows_model.row_data(row_i as usize) {
+                        let cells: Vec<Option<String>> = (0..row.cells.row_count())
                             .filter_map(|j| row.cells.row_data(j))
                             .map(|c| {
                                 if c.is_null {
@@ -1370,14 +1241,49 @@ impl UI {
                                     Some(c.value.to_string())
                                 }
                             })
-                            .collect()
-                    })
-                    .collect();
-                let col_strs: Vec<&str> = columns.iter().map(String::as_str).collect();
-                let tsv = result_to_tsv(&col_strs, &rows);
-                if let Ok(mut clip) = arboard::Clipboard::new() {
-                    let _ = clip.set_text(tsv);
-                }
+                            .collect();
+                        let tsv = cells_to_tsv(&cells);
+                        if let Ok(mut clip) = arboard::Clipboard::new() {
+                            let _ = clip.set_text(tsv);
+                        }
+                    }
+                });
+            });
+        }
+
+        // copy-result-tsv: export all visible rows as TSV with column headers.
+        {
+            // clone required: callback closure must be 'static
+            let window_weak = window_weak.clone();
+            ui_state.on_copy_result_tsv(move || {
+                with_ui(&window_weak, |ui| {
+                    let cols_model = ui.get_result_columns();
+                    let rows_model = ui.get_result_rows();
+                    let columns: Vec<String> = (0..cols_model.row_count())
+                        .filter_map(|i| cols_model.row_data(i))
+                        .map(|s| s.to_string())
+                        .collect();
+                    let rows: Vec<Vec<Option<String>>> = (0..rows_model.row_count())
+                        .filter_map(|i| rows_model.row_data(i))
+                        .map(|row| {
+                            (0..row.cells.row_count())
+                                .filter_map(|j| row.cells.row_data(j))
+                                .map(|c| {
+                                    if c.is_null {
+                                        None
+                                    } else {
+                                        Some(c.value.to_string())
+                                    }
+                                })
+                                .collect()
+                        })
+                        .collect();
+                    let col_strs: Vec<&str> = columns.iter().map(String::as_str).collect();
+                    let tsv = result_to_tsv(&col_strs, &rows);
+                    if let Ok(mut clip) = arboard::Clipboard::new() {
+                        let _ = clip.set_text(tsv);
+                    }
+                });
             });
         }
 
@@ -1395,26 +1301,13 @@ impl UI {
             ui_state.on_update_page_size(move |n| {
                 let size = n as usize;
                 state_rerun.ui.set_page_size(size);
-                // Update the Slint property so button highlights refresh on the UI thread.
-                if let Some(window) = window_weak.upgrade() {
-                    window.global::<crate::UiState>().set_page_size(n);
-                }
+                with_ui(&window_weak, |ui| ui.set_page_size(n));
                 if let Ok(ps) = wf_config::models::PageSize::try_from(n as u32) {
-                    // clone required: tokio::spawn requires 'static
-                    let tx_cmd_cfg = tx_cmd.clone();
-                    tokio::spawn(async move {
-                        let _ = tx_cmd_cfg
-                            .send(Command::UpdateConfig(ConfigUpdate::PageSize(ps)))
-                            .await;
-                    });
+                    send_cmd(&tx_cmd, Command::UpdateConfig(ConfigUpdate::PageSize(ps)));
                 }
                 // Auto-rerun the last query so results reflect the new limit immediately.
                 if let Some(last_sql) = state_rerun.query.last_sql() {
-                    // clone required: tokio::spawn requires 'static
-                    let tx_cmd_run = tx_cmd.clone();
-                    tokio::spawn(async move {
-                        let _ = tx_cmd_run.send(Command::RunQuery(last_sql)).await;
-                    });
+                    send_cmd(&tx_cmd, Command::RunQuery(last_sql));
                 }
             });
         }
@@ -1428,17 +1321,12 @@ impl UI {
             let state_all = state.clone(); // clone required: captured by callback
             ui_state.on_confirm_all_rows(move || {
                 state_all.ui.set_page_size(0);
-                if let Some(window) = window_weak.upgrade() {
-                    let ui = window.global::<crate::UiState>();
+                with_ui(&window_weak, |ui| {
                     ui.set_page_size(0);
                     ui.set_show_all_rows_confirm(false);
-                }
+                });
                 if let Some(last_sql) = state_all.query.last_sql() {
-                    // clone required: tokio::spawn requires 'static
-                    let tx_cmd = tx_cmd.clone();
-                    tokio::spawn(async move {
-                        let _ = tx_cmd.send(Command::RunQuery(last_sql)).await;
-                    });
+                    send_cmd(&tx_cmd, Command::RunQuery(last_sql));
                 }
             });
         }
@@ -1448,11 +1336,7 @@ impl UI {
             // clone required: callback closure must be 'static
             let window_weak = window_weak.clone();
             ui_state.on_dismiss_all_rows_confirm(move || {
-                if let Some(window) = window_weak.upgrade() {
-                    window
-                        .global::<crate::UiState>()
-                        .set_show_all_rows_confirm(false);
-                }
+                with_ui(&window_weak, |ui| ui.set_show_all_rows_confirm(false));
             });
         }
 
@@ -1477,37 +1361,34 @@ impl UI {
             let window_weak = window_weak.clone();
             let original_data = Arc::clone(&original_data);
             ui_state.on_sort_result_col(move |col_i| {
-                let Some(window) = window_weak.upgrade() else {
-                    return;
-                };
-                let ui = window.global::<crate::UiState>();
-                // Read active filter before taking the lock.
-                let filter_q = ui.get_result_active_filter().to_string();
-                let (new_col, new_asc, mut rows) = {
-                    let mut orig = original_data.lock().unwrap_or_else(|p| p.into_inner());
-                    let Some(ref mut data) = *orig else {
-                        return;
+                with_ui(&window_weak, |ui| {
+                    let filter_q = ui.get_result_active_filter().to_string();
+                    let (new_col, new_asc, mut rows) = {
+                        let mut orig = original_data.lock().unwrap_or_else(|p| p.into_inner());
+                        let Some(ref mut data) = *orig else {
+                            return;
+                        };
+                        let col = col_i as usize;
+                        let (new_col, new_asc) = if data.sort_col == Some(col) {
+                            (Some(col), !data.sort_asc)
+                        } else {
+                            (Some(col), true)
+                        };
+                        data.sort_col = new_col;
+                        data.sort_asc = new_asc;
+                        let filtered = filter_rows(&data.columns, &data.rows, &filter_q);
+                        (new_col, new_asc, filtered)
                     };
-                    let col = col_i as usize;
-                    let (new_col, new_asc) = if data.sort_col == Some(col) {
-                        (Some(col), !data.sort_asc)
-                    } else {
-                        (Some(col), true)
-                    };
-                    data.sort_col = new_col;
-                    data.sort_asc = new_asc;
-                    let filtered = filter_rows(&data.columns, &data.rows, &filter_q);
-                    (new_col, new_asc, filtered)
-                };
-                if let Some(col) = new_col {
-                    sort_rows(&mut rows, col, new_asc);
-                }
-                let row_count = rows.len() as i32;
-                let ui_rows: Vec<crate::RowData> = rows.into_iter().map(rows_to_ui).collect();
-                ui.set_result_rows(Rc::new(slint::VecModel::from(ui_rows)).into());
-                ui.set_result_row_count(row_count);
-                ui.set_result_sort_col(new_col.map(|c| c as i32).unwrap_or(-1));
-                ui.set_result_sort_asc(new_asc);
+                    if let Some(col) = new_col {
+                        sort_rows(&mut rows, col, new_asc);
+                    }
+                    let row_count = rows.len() as i32;
+                    let ui_rows: Vec<crate::RowData> = rows.into_iter().map(rows_to_ui).collect();
+                    ui.set_result_rows(Rc::new(slint::VecModel::from(ui_rows)).into());
+                    ui.set_result_row_count(row_count);
+                    ui.set_result_sort_col(new_col.map(|c| c as i32).unwrap_or(-1));
+                    ui.set_result_sort_asc(new_asc);
+                });
             });
         }
     }
@@ -1783,377 +1664,5 @@ fn parse_col_eq(query: &str) -> Option<(String, &str)> {
     Some((col.to_string(), val))
 }
 
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
-
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use wf_db::models::{DbMetadata, DbType, TableInfo};
-
-    // ── find_prefix_start ────────────────────────────────────────────────────
-
-    #[test]
-    fn find_prefix_start_should_return_word_start_before_cursor() {
-        assert_eq!(find_prefix_start("SELECT sel", 10), 7);
-    }
-
-    #[test]
-    fn find_prefix_start_should_return_cursor_when_at_space() {
-        assert_eq!(find_prefix_start("SELECT ", 7), 7);
-    }
-
-    #[test]
-    fn find_prefix_start_should_return_after_dot_for_qualified_name() {
-        assert_eq!(find_prefix_start("u.em", 4), 2);
-    }
-
-    #[test]
-    fn find_prefix_start_should_return_cursor_when_no_prefix() {
-        assert_eq!(find_prefix_start("SELECT * FROM ", 14), 14);
-    }
-
-    // ── sql_has_from ─────────────────────────────────────────────────────────
-
-    #[test]
-    fn sql_has_from_should_return_true_when_from_present() {
-        assert!(sql_has_from("SELECT id FROM users"));
-    }
-
-    #[test]
-    fn sql_has_from_should_return_false_when_no_from() {
-        assert!(!sql_has_from("SELECT id, name"));
-    }
-
-    #[test]
-    fn sql_has_from_should_return_true_for_multiline_from() {
-        assert!(sql_has_from("SELECT id\nFROM users"));
-    }
-
-    #[test]
-    fn sql_has_from_should_return_false_for_from_in_column_name() {
-        // "from" inside a word like "transform" should not match
-        assert!(!sql_has_from("SELECT transform_id"));
-    }
-
-    // ── is_terminal_expression ────────────────────────────────────────────────
-
-    #[test]
-    fn is_terminal_expression_should_return_true_for_is_not_null() {
-        assert!(is_terminal_expression(
-            "SELECT name FROM users WHERE deleted_at IS NOT NULL"
-        ));
-        assert!(is_terminal_expression("WHERE col IS NULL"));
-    }
-
-    #[test]
-    fn is_terminal_expression_should_return_true_for_boolean_keywords() {
-        assert!(is_terminal_expression("WHERE active = TRUE"));
-        assert!(is_terminal_expression("WHERE active = FALSE"));
-    }
-
-    #[test]
-    fn is_terminal_expression_should_return_true_for_direction_keywords() {
-        assert!(is_terminal_expression("ORDER BY id ASC"));
-        assert!(is_terminal_expression("ORDER BY id DESC"));
-    }
-
-    #[test]
-    fn is_terminal_expression_should_return_true_for_string_literal() {
-        assert!(is_terminal_expression("WHERE name = 'alice'"));
-    }
-
-    #[test]
-    fn is_terminal_expression_should_return_true_for_numeric_literal() {
-        assert!(is_terminal_expression("WHERE id = 5"));
-        assert!(is_terminal_expression("LIMIT 10"));
-    }
-
-    #[test]
-    fn is_terminal_expression_should_return_false_for_non_terminal_positions() {
-        assert!(!is_terminal_expression("FROM users WHERE"));
-        assert!(!is_terminal_expression("SELECT * FROM users"));
-        assert!(!is_terminal_expression("SELECT id"));
-    }
-
-    #[test]
-    fn is_terminal_expression_should_not_match_word_ending_with_null_suffix() {
-        // "nullify" last word is "NULLIFY" — not the keyword "NULL"
-        assert!(!is_terminal_expression("WHERE nullify"));
-        // "is_not_null_col" is a column name, not the keyword NULL
-        assert!(!is_terminal_expression("SELECT is_not_null_col"));
-    }
-
-    fn make_conn(id: &str, name: &str) -> DbConnection {
-        DbConnection {
-            id: id.to_string(),
-            name: name.to_string(),
-            db_type: DbType::SQLite,
-            connection_string: None,
-            host: None,
-            port: None,
-            user: None,
-            password_encrypted: None,
-            database: None,
-        }
-    }
-
-    fn make_meta(tables: &[&str]) -> DbMetadata {
-        DbMetadata {
-            tables: tables
-                .iter()
-                .map(|n| TableInfo {
-                    name: n.to_string(),
-                    columns: vec![],
-                })
-                .collect(),
-            views: vec![],
-            stored_procs: vec![],
-            indexes: vec![],
-        }
-    }
-
-    #[test]
-    fn build_sidebar_tree_should_render_connection_nodes() {
-        let conns = vec![make_conn("a", "Alpha"), make_conn("b", "Beta")];
-        let nodes = build_sidebar_tree(&conns, "", &HashMap::new(), &HashSet::new());
-        assert_eq!(nodes.len(), 2);
-        assert_eq!(nodes[0].label.as_str(), "Alpha");
-        assert_eq!(nodes[0].level, 0);
-        assert_eq!(nodes[0].node_kind.as_str(), "connection");
-        assert_eq!(nodes[1].label.as_str(), "Beta");
-    }
-
-    #[test]
-    fn build_sidebar_tree_should_show_categories_when_connection_expanded() {
-        let conns = vec![make_conn("a", "Alpha")];
-        let mut expanded = HashSet::new();
-        expanded.insert("conn:a".to_string());
-        let mut metadata = HashMap::new();
-        metadata.insert("a".to_string(), make_meta(&["users"]));
-        let nodes = build_sidebar_tree(&conns, "a", &metadata, &expanded);
-        // conn + Tables + Views + Stored Procedures + Indexes = 5 nodes
-        assert_eq!(nodes.len(), 5);
-        assert_eq!(nodes[1].label.as_str(), "Tables");
-        assert_eq!(nodes[1].level, 1);
-        assert_eq!(nodes[1].node_kind.as_str(), "category");
-    }
-
-    #[test]
-    fn build_sidebar_tree_should_show_items_when_category_expanded() {
-        let conns = vec![make_conn("a", "Alpha")];
-        let mut expanded = HashSet::new();
-        expanded.insert("conn:a".to_string());
-        expanded.insert("cat:a:Tables".to_string());
-        let mut metadata = HashMap::new();
-        metadata.insert("a".to_string(), make_meta(&["users", "orders"]));
-        let nodes = build_sidebar_tree(&conns, "a", &metadata, &expanded);
-        // conn + Tables + users + orders + Views + Stored Procedures + Indexes = 7
-        assert_eq!(nodes.len(), 7);
-        assert_eq!(nodes[2].label.as_str(), "users");
-        assert_eq!(nodes[2].level, 2);
-        assert_eq!(nodes[2].node_kind.as_str(), "table");
-        assert_eq!(nodes[3].label.as_str(), "orders");
-    }
-
-    #[test]
-    fn build_sidebar_tree_should_hide_children_when_collapsed() {
-        let conns = vec![make_conn("a", "Alpha")];
-        let nodes = build_sidebar_tree(&conns, "a", &HashMap::new(), &HashSet::new());
-        assert_eq!(nodes.len(), 1);
-        assert_eq!(nodes[0].level, 0);
-    }
-
-    #[test]
-    fn build_sidebar_tree_should_mark_active_connection() {
-        let conns = vec![make_conn("a", "Alpha"), make_conn("b", "Beta")];
-        let nodes = build_sidebar_tree(&conns, "b", &HashMap::new(), &HashSet::new());
-        assert!(!nodes[0].is_active);
-        assert!(nodes[1].is_active);
-    }
-
-    // ── filter_rows tests ─────────────────────────────────────────────────────
-
-    fn ss(s: &str) -> slint::SharedString {
-        s.into()
-    }
-
-    fn sv(s: &str) -> Option<String> {
-        Some(s.to_string())
-    }
-
-    #[test]
-    fn filter_rows_should_return_all_when_query_empty() {
-        let cols = vec![ss("id"), ss("name")];
-        let rows = vec![vec![sv("1"), sv("Alice")], vec![sv("2"), sv("Bob")]];
-        assert_eq!(filter_rows(&cols, &rows, "").len(), 2);
-        assert_eq!(filter_rows(&cols, &rows, "   ").len(), 2);
-    }
-
-    #[test]
-    fn filter_rows_should_match_substring_across_all_columns() {
-        let cols = vec![ss("name"), ss("city")];
-        let rows = vec![
-            vec![sv("Alice"), sv("Tokyo")],
-            vec![sv("Bob"), sv("Osaka")],
-            vec![sv("Alice Smith"), sv("Kyoto")],
-        ];
-        let result = filter_rows(&cols, &rows, "alice");
-        assert_eq!(result.len(), 2);
-        assert_eq!(result[0][0].as_deref(), Some("Alice"));
-        assert_eq!(result[1][0].as_deref(), Some("Alice Smith"));
-    }
-
-    #[test]
-    fn filter_rows_should_match_exact_column_value() {
-        let cols = vec![ss("name"), ss("city")];
-        let rows = vec![vec![sv("Alice"), sv("Tokyo")], vec![sv("Bob"), sv("Osaka")]];
-        let result = filter_rows(&cols, &rows, "city = 'Tokyo'");
-        assert_eq!(result.len(), 1);
-        assert_eq!(result[0][1].as_deref(), Some("Tokyo"));
-    }
-
-    #[test]
-    fn filter_rows_should_return_empty_when_column_not_found() {
-        let cols = vec![ss("name")];
-        let rows = vec![vec![sv("Alice")]];
-        let result = filter_rows(&cols, &rows, "missing = 'x'");
-        assert!(result.is_empty());
-    }
-
-    #[test]
-    fn filter_rows_should_not_match_null_with_eq_predicate() {
-        let cols = vec![ss("name")];
-        let rows = vec![vec![None], vec![sv("Alice")]];
-        let result = filter_rows(&cols, &rows, "name = ''");
-        // NULL != '' — only the non-null empty string row should match, but here
-        // there is none, so result is empty.
-        assert!(result.is_empty());
-    }
-
-    #[test]
-    fn filter_rows_should_treat_null_as_empty_for_substring_match() {
-        let cols = vec![ss("name")];
-        // NULL treated as "" for substring search — empty query prefix matches all.
-        let rows = vec![vec![None], vec![sv("Alice")]];
-        // Substring "" matches everything (but we trim, so empty query returns all).
-        let result = filter_rows(&cols, &rows, "Alice");
-        assert_eq!(result.len(), 1);
-        assert_eq!(result[0][0].as_deref(), Some("Alice"));
-    }
-
-    // ── sort_rows tests ───────────────────────────────────────────────────────
-
-    #[test]
-    fn sort_rows_should_sort_strings_ascending() {
-        let mut rows = vec![vec![sv("banana")], vec![sv("apple")], vec![sv("cherry")]];
-        sort_rows(&mut rows, 0, true);
-        assert_eq!(rows[0][0].as_deref(), Some("apple"));
-        assert_eq!(rows[1][0].as_deref(), Some("banana"));
-        assert_eq!(rows[2][0].as_deref(), Some("cherry"));
-    }
-
-    #[test]
-    fn sort_rows_should_sort_strings_descending() {
-        let mut rows = vec![vec![sv("banana")], vec![sv("apple")], vec![sv("cherry")]];
-        sort_rows(&mut rows, 0, false);
-        assert_eq!(rows[0][0].as_deref(), Some("cherry"));
-        assert_eq!(rows[1][0].as_deref(), Some("banana"));
-        assert_eq!(rows[2][0].as_deref(), Some("apple"));
-    }
-
-    #[test]
-    fn sort_rows_should_sort_numerically_when_values_are_numbers() {
-        let mut rows = vec![vec![sv("10")], vec![sv("2")], vec![sv("20")]];
-        sort_rows(&mut rows, 0, true);
-        assert_eq!(rows[0][0].as_deref(), Some("2"));
-        assert_eq!(rows[1][0].as_deref(), Some("10"));
-        assert_eq!(rows[2][0].as_deref(), Some("20"));
-    }
-
-    #[test]
-    fn sort_rows_should_put_nulls_last_ascending() {
-        let mut rows = vec![vec![None], vec![sv("b")], vec![sv("a")]];
-        sort_rows(&mut rows, 0, true);
-        assert_eq!(rows[0][0].as_deref(), Some("a"));
-        assert_eq!(rows[1][0].as_deref(), Some("b"));
-        assert!(rows[2][0].is_none());
-    }
-
-    #[test]
-    fn sort_rows_should_put_nulls_last_descending() {
-        let mut rows = vec![vec![None], vec![sv("b")], vec![sv("a")]];
-        sort_rows(&mut rows, 0, false);
-        assert_eq!(rows[0][0].as_deref(), Some("b"));
-        assert_eq!(rows[1][0].as_deref(), Some("a"));
-        assert!(rows[2][0].is_none());
-    }
-
-    // ── cells_to_tsv / result_to_tsv tests ───────────────────────────────────
-
-    #[test]
-    fn cells_to_tsv_should_join_values_with_tabs() {
-        let cells = vec![sv("a"), sv("b"), sv("c")];
-        assert_eq!(cells_to_tsv(&cells), "a\tb\tc");
-    }
-
-    #[test]
-    fn cells_to_tsv_should_render_null_as_empty_string() {
-        let cells = vec![sv("a"), None, sv("c")];
-        assert_eq!(cells_to_tsv(&cells), "a\t\tc");
-    }
-
-    #[test]
-    fn cells_to_tsv_should_handle_empty_row() {
-        let cells: Vec<Option<String>> = vec![];
-        assert_eq!(cells_to_tsv(&cells), "");
-    }
-
-    #[test]
-    fn result_to_tsv_should_include_header_and_rows() {
-        let cols = vec!["id", "name"];
-        let rows = vec![vec![sv("1"), sv("Alice")], vec![sv("2"), sv("Bob")]];
-        let tsv = result_to_tsv(&cols, &rows);
-        assert_eq!(tsv, "id\tname\n1\tAlice\n2\tBob");
-    }
-
-    #[test]
-    fn result_to_tsv_should_render_null_cells_as_empty_string() {
-        let cols = vec!["id", "name"];
-        let rows = vec![vec![sv("1"), None]];
-        let tsv = result_to_tsv(&cols, &rows);
-        assert_eq!(tsv, "id\tname\n1\t");
-    }
-
-    #[test]
-    fn result_to_tsv_should_produce_header_only_when_no_rows() {
-        let cols = vec!["id", "name"];
-        let rows: Vec<Vec<Option<String>>> = vec![];
-        let tsv = result_to_tsv(&cols, &rows);
-        assert_eq!(tsv, "id\tname");
-    }
-
-    // ── append_editor_text tests ──────────────────────────────────────────────
-
-    #[test]
-    fn append_editor_text_should_set_text_when_editor_is_empty() {
-        assert_eq!(append_editor_text("", "SELECT * FROM t"), "SELECT * FROM t");
-    }
-
-    #[test]
-    fn append_editor_text_should_prepend_newline_when_content_exists() {
-        assert_eq!(
-            append_editor_text("SELECT 1", "SELECT * FROM t"),
-            "SELECT 1\nSELECT * FROM t"
-        );
-    }
-
-    #[test]
-    fn append_editor_text_should_not_double_newline_when_content_ends_with_newline() {
-        assert_eq!(
-            append_editor_text("SELECT 1\n", "SELECT * FROM t"),
-            "SELECT 1\nSELECT * FROM t"
-        );
-    }
-}
+mod tests;

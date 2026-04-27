@@ -1,0 +1,82 @@
+import { Colors, Typography } from "../theme.slint";
+
+// Column header row with sort indicators and drag-to-resize handles.
+export component ResultTableHeader inherits Flickable {
+    interactive: false;
+    viewport-width: root.vp-w;
+    viewport-x: root.body-vp-x;
+
+    in property <[string]> columns:       [];
+    in property <[float]>  col-widths:    [];
+    in property <int>      sort-col:      -1;
+    in property <bool>     sort-asc:      true;
+    in property <length>   default-col-w: 150px;
+    in property <length>   min-col-w:     48px;
+    in property <length>   vp-w:          0;
+    in property <length>   body-vp-x:     0;
+
+    callback sort-col-clicked(int);
+    callback resize-column(int, float);
+
+    HorizontalLayout {
+        spacing: 0;
+        for col[i] in root.columns: Rectangle {
+            width: root.col-widths.length > i && root.col-widths[i] > 0
+                ? root.col-widths[i] * 1px
+                : root.default-col-w;
+            height: root.height;
+            background: sort-hdr-ta.has-hover ? Colors.header-hover : Colors.surface0;
+            clip: true;
+
+            sort-hdr-ta := TouchArea {
+                width: parent.width - 4px;
+                height: parent.height;
+                mouse-cursor: pointer;
+                clicked => { root.sort-col-clicked(i); }
+            }
+
+            Text {
+                x: 8px;
+                y: (parent.height - self.height) / 2;
+                width: root.sort-col == i
+                    ? parent.width - 28px
+                    : parent.width - 12px;
+                text: col;
+                color: Colors.text;
+                font-size: Typography.size-base;
+                overflow: elide;
+            }
+
+            if root.sort-col == i: Text {
+                x: parent.width - 20px;
+                y: (parent.height - self.height) / 2;
+                text: root.sort-asc ? "▲" : "▼";
+                color: Colors.blue;
+                font-size: Typography.size-sm;
+            }
+
+            Rectangle {
+                x: parent.width - 4px;
+                y: 0;
+                width: 4px;
+                height: parent.height;
+                background: col-resize-ta.has-hover || col-resize-ta.pressed
+                    ? Colors.blue : Colors.surface1;
+
+                col-resize-ta := TouchArea {
+                    mouse-cursor: ew-resize;
+                    moved => {
+                        let cw = root.col-widths.length > i && root.col-widths[i] > 0
+                            ? root.col-widths[i] * 1px
+                            : root.default-col-w;
+                        let new-w = max(
+                            cw + (self.mouse-x - self.pressed-x),
+                            root.min-col-w
+                        );
+                        root.resize-column(i, new-w / 1px);
+                    }
+                }
+            }
+        }
+    }
+}

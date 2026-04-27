@@ -1,0 +1,98 @@
+import { Colors, Typography } from "../theme.slint";
+
+// Search bar (shown when in search mode) + active-filter indicator banner.
+export component ResultTableSearch inherits Rectangle {
+    clip: true;
+
+    in property <string>     active-filter:  "";
+    in property <bool>       in-search-mode: false;
+    in-out property <string> search-query:   "";
+
+    out property <bool>   has-focus:    search-input.has-focus;
+    out property <length> total-height: search-bar-h + filter-banner-h;
+
+    public function grab-focus() { search-input.focus(); }
+
+    property <length> search-bar-h:    root.in-search-mode ? 32px : 0px;
+    property <length> filter-banner-h: root.active-filter != "" ? 24px : 0px;
+
+    // Search bar
+    Rectangle {
+        x: 0; y: 0;
+        width: parent.width;
+        height: root.search-bar-h;
+        background: Colors.base;
+        clip: true;
+
+        Rectangle {
+            x: 0; y: 0;
+            width: parent.width; height: 1px;
+            background: Colors.surface1;
+        }
+
+        Text {
+            x: 10px;
+            y: (parent.height - self.height) / 2;
+            text: "/";
+            color: Colors.blue;
+            font-size: Typography.size-lg;
+            font-weight: 700;
+        }
+
+        search-input := TextInput {
+            x: 26px;
+            y: (parent.height - self.height) / 2;
+            width: parent.width - 34px;
+            text <=> root.search-query;
+            single-line: true;
+            color: Colors.text;
+            selection-background-color: Colors.selection;
+            selection-foreground-color: Colors.selected-text;
+            font-size: Typography.size-base;
+        }
+    }
+
+    // Active-filter indicator banner
+    Rectangle {
+        x: 0;
+        y: root.search-bar-h;
+        width: parent.width;
+        height: root.filter-banner-h;
+        background: Colors.filter-bg;
+        clip: true;
+
+        Rectangle {
+            x: 0; y: 0;
+            width: parent.width; height: 1px;
+            background: Colors.filter-accent;
+        }
+
+        HorizontalLayout {
+            padding-left: 10px;
+            padding-right: 10px;
+            spacing: 6px;
+
+            Text {
+                text: @tr("Filter:");
+                color: Colors.blue;
+                font-size: Typography.size-md;
+                font-weight: 700;
+                vertical-alignment: center;
+            }
+            Text {
+                text: root.active-filter;
+                color: Colors.text;
+                font-size: Typography.size-md;
+                vertical-alignment: center;
+                overflow: elide;
+                horizontal-stretch: 1;
+            }
+            Text {
+                text: @tr("[Esc to clear]");
+                color: Colors.surface2;
+                font-size: Typography.size-md;
+                vertical-alignment: center;
+            }
+        }
+    }
+}

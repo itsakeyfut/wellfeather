@@ -1,0 +1,376 @@
+import { ListView } from "std-widgets.slint";
+import { RowData } from "../globals.slint";
+import { Colors, Typography } from "../theme.slint";
+import { MenuItem } from "common.slint";
+
+// Data body: keyboard handler (FocusScope), virtualised row list, and right-click context menu.
+export component ResultTableBody inherits Rectangle {
+    clip: true;
+    preferred-height: 0;
+    min-height: 0;
+
+    in property <[string]>  columns:       [];
+    in property <[RowData]> rows:          [];
+    in property <int>       row-count:     0;
+    in property <[float]>   col-widths:    [];
+    in property <length>    default-col-w: 150px;
+    in property <length>    vp-w:          0;
+    in property <length>    row-height:    28px;
+    in property <string>    active-filter: "";
+    in property <bool>      is-loading:    false;
+    in property <string>    error-message: "";
+
+    in-out property <string> search-query: "";
+    in-out property <length> body-vp-x:    0;
+
+    out property <int>    nav-mode:              0;
+    out property <string> selected-cell-value:   "";
+    out property <bool>   selected-cell-is-null: false;
+    out property <bool>   has-focus:             table-fs.has-focus;
+
+    callback filter-rows(string);
+    callback clear-filter();
+    callback copy-cell(string);
+    callback copy-row(int);
+    callback copy-all-tsv();
+    /// Called when the keyboard "f" shortcut requests search mode; root wires to search.grab-focus().
+    callback focus-search();
+    pure callback col-x-offset(int) -> float;
+
+    public function grab-focus() {
+        table-fs.focus();
+        if (root.selected-row < 0 && root.row-count > 0) {
+            root.selected-row = 0;
+        }
+    }
+
+    property <int>    selected-row:       -1;
+    property <int>    selected-col:       -1;
+    property <length> body-vp-y:          0;
+    property <length> ctx-menu-x:         0;
+    property <length> ctx-menu-y:         0;
+    property <int>    ctx-row:            -1;
+    property <string> ctx-cell-value:     "";
+    property <bool>   ctx-cell-is-null:   false;
+    property <int>    page-rows: max(1, root.height / root.row-height);
+
+    changed rows => {
+        root.selected-row          = -1;
+        root.selected-col          = -1;
+        root.nav-mode              = 0;
+        root.selected-cell-value   = "";
+        root.selected-cell-is-null = false;
+        root.body-vp-y             = 0;
+        root.body-vp-x             = 0;
+    }
+
+    changed selected-row => {
+        if (root.selected-row >= 0) {
+            let row-top = root.selected-row * root.row-height;
+            let row-bot = row-top + root.row-height;
+            if (row-top < -root.body-vp-y) {
+                root.body-vp-y = -row-top;
+            } else if (row-bot > -root.body-vp-y + root.height) {
+                root.body-vp-y = -(row-bot - root.height);
+            }
+        }
+    }
+
+    changed selected-col => {
+        if (root.selected-col >= 0) {
+            let col-left  = root.col-x-offset(root.selected-col) * 1px;
+            let col-w     = root.col-widths.length > root.selected-col
+                            && root.col-widths[root.selected-col] > 0
+                ? root.col-widths[root.selected-col] * 1px
+                : root.default-col-w;
+            let col-right = col-left + col-w;
+            if (col-left < -root.body-vp-x) {
+                root.body-vp-x = -col-left;
+            } else if (col-right > -root.body-vp-x + root.width) {
+                root.body-vp-x = -(col-right - root.width);
+            }
+        }
+    }
+
+    table-fs := FocusScope {
+        x: 0; y: 0;
+        width: parent.width; height: parent.height;
+        focus-on-click: true;
+
+        capture-key-pressed(event) => {
+            if (root.is-loading || root.error-message != "" || root.columns.length == 0) {
+                EventResult.reject
+            } else if (root.nav-mode == 2) {
+                if (event.text == Key.Return) {
+                    root.filter-rows(root.search-query);
+                    root.nav-mode = 0;
+                    table-fs.focus();
+                    EventResult.accept
+                } else if (event.text == Key.Escape) {
+                    root.nav-mode = 0;
+                    table-fs.focus();
+                    EventResult.accept
+                } else {
+                    EventResult.reject
+                }
+            } else if (root.nav-mode == 1) {
+                if (event.text == Key.LeftArrow) {
+                    if (root.selected-col > 0) { root.selected-col -= 1; }
+                    EventResult.accept
+                } else if (event.text == Key.RightArrow) {
+                    if (root.selected-col < root.columns.length - 1) {
+                        root.selected-col += 1;
+                    }
+                    EventResult.accept
+                } else if (event.text == Key.Home) {
+                    root.selected-col = 0;
+                    EventResult.accept
+                } else if (event.text == Key.End) {
+                    if (root.columns.length > 0) {
+                        root.selected-col = root.columns.length - 1;
+                    }
+                    EventResult.accept
+                } else if (event.text == Key.Escape) {
+                    root.nav-mode = 0;
+                    root.selected-col = -1;
+                    EventResult.accept
+                } else if (event.text == "c" && event.modifiers.control) {
+                    if (root.selected-row >= 0 && root.selected-col >= 0
+                            && root.selected-row < root.rows.length
+                            && root.selected-col < root.rows[root.selected-row].cells.length) {
+                        root.copy-cell(root.rows[root.selected-row].cells[root.selected-col].value);
+                    }
+                    EventResult.accept
+                } else {
+                    EventResult.reject
+                }
+            } else {
+                if (event.text == Key.UpArrow) {
+                    root.selected-cell-value   = "";
+                    root.selected-cell-is-null = false;
+                    if (root.selected-row > 0) {
+                        root.selected-row -= 1;
+                    } else if (root.row-count > 0) {
+                        root.selected-row = 0;
+                    }
+                    EventResult.accept
+                } else if (event.text == Key.DownArrow) {
+                    root.selected-cell-value   = "";
+                    root.selected-cell-is-null = false;
+                    if (root.selected-row < 0 && root.row-count > 0) {
+                        root.selected-row = 0;
+                    } else if (root.selected-row < root.row-count - 1) {
+                        root.selected-row += 1;
+                    }
+                    EventResult.accept
+                } else if (event.text == Key.Home) {
+                    root.selected-cell-value   = "";
+                    root.selected-cell-is-null = false;
+                    if (root.row-count > 0) { root.selected-row = 0; }
+                    EventResult.accept
+                } else if (event.text == Key.End) {
+                    root.selected-cell-value   = "";
+                    root.selected-cell-is-null = false;
+                    if (root.row-count > 0) { root.selected-row = root.row-count - 1; }
+                    EventResult.accept
+                } else if (event.text == Key.PageUp) {
+                    root.selected-cell-value   = "";
+                    root.selected-cell-is-null = false;
+                    if (root.selected-row > 0) {
+                        root.selected-row = max(0, root.selected-row - root.page-rows);
+                    }
+                    EventResult.accept
+                } else if (event.text == Key.PageDown) {
+                    root.selected-cell-value   = "";
+                    root.selected-cell-is-null = false;
+                    if (root.selected-row < root.row-count - 1) {
+                        root.selected-row = min(
+                            root.row-count - 1, root.selected-row + root.page-rows);
+                    }
+                    EventResult.accept
+                } else if (event.text == Key.Return) {
+                    if (root.selected-row >= 0 && root.columns.length > 0) {
+                        root.nav-mode = 1;
+                        root.selected-col = 0;
+                    }
+                    EventResult.accept
+                } else if (event.text == "f"
+                        && !event.modifiers.control
+                        && !event.modifiers.alt
+                        && !event.modifiers.shift) {
+                    root.search-query = "";
+                    root.nav-mode = 2;
+                    root.focus-search();
+                    EventResult.accept
+                } else if (event.text == Key.Escape) {
+                    if (root.active-filter != "") {
+                        root.clear-filter();
+                    } else {
+                        root.selected-row          = -1;
+                        root.selected-cell-value   = "";
+                        root.selected-cell-is-null = false;
+                    }
+                    EventResult.accept
+                } else if (event.text == "c" && event.modifiers.control) {
+                    if (root.selected-cell-value != "") {
+                        root.copy-cell(root.selected-cell-value);
+                    }
+                    EventResult.accept
+                } else {
+                    EventResult.reject
+                }
+            }
+        }
+
+        ctx-popup := PopupWindow {
+            x: root.ctx-menu-x;
+            y: root.ctx-menu-y;
+            width: 204px;
+            height: 90px;
+            close-policy: PopupClosePolicy.close-on-click;
+
+            Rectangle {
+                width: 204px;
+                height: 90px;
+                background: Colors.surface0;
+                border-radius: 4px;
+                border-width: 1px;
+                border-color: Colors.surface2;
+                drop-shadow-blur: 8px;
+                drop-shadow-color: Colors.shadow;
+                clip: true;
+
+                VerticalLayout {
+                    spacing: 0;
+                    MenuItem {
+                        text: @tr("Copy cell value");
+                        clicked => { root.copy-cell(root.ctx-cell-value); }
+                    }
+                    MenuItem {
+                        text: @tr("Copy row (tab-separated)");
+                        clicked => { root.copy-row(root.ctx-row); }
+                    }
+                    MenuItem {
+                        text: @tr("Copy as TSV (with headers)");
+                        clicked => { root.copy-all-tsv(); }
+                    }
+                }
+            }
+        }
+
+        body-scroll := ListView {
+            width:          parent.width;
+            height:         parent.height;
+            viewport-width: root.vp-w;
+            viewport-y <=> root.body-vp-y;
+            viewport-x <=> root.body-vp-x;
+
+            for row[i] in root.rows: Rectangle {
+                height: root.row-height;
+                width:  root.vp-w;
+                background: i == root.selected-row
+                    ? Colors.selection
+                    : (mod(i, 2) == 0 ? Colors.base : Colors.mantle);
+
+                Rectangle {
+                    y: parent.height - 1px;
+                    width: parent.width; height: 1px;
+                    background: Colors.surface0;
+                }
+
+                HorizontalLayout {
+                    spacing: 0;
+                    for cell[j] in row.cells: Rectangle {
+                        width: root.col-widths.length > j && root.col-widths[j] > 0
+                            ? root.col-widths[j] * 1px
+                            : root.default-col-w;
+                        height: root.row-height;
+                        clip: true;
+
+                        if i == root.selected-row && j == root.selected-col
+                                && root.nav-mode == 1: Rectangle {
+                            width: parent.width; height: parent.height;
+                            background: Colors.cell-highlight;
+                        }
+
+                        Rectangle {
+                            x: parent.width - 1px;
+                            width: 1px; height: parent.height;
+                            background: Colors.surface0;
+                        }
+
+                        if cell.is-null: Rectangle {
+                            x: 8px;
+                            y: (parent.height - self.height) / 2;
+                            width: 36px; height: 16px;
+                            border-radius: 3px;
+                            background: Colors.surface1;
+                            Text {
+                                width: parent.width; height: parent.height;
+                                text: @tr("NULL");
+                                color: Colors.overlay2;
+                                font-size: Typography.size-sm;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+                        }
+
+                        if !cell.is-null: Text {
+                            x: 8px;
+                            y: (parent.height - self.height) / 2;
+                            width: parent.width - 16px;
+                            text: cell.value;
+                            color: i == root.selected-row ? Colors.selected-text : Colors.subtext0;
+                            font-size: Typography.size-base;
+                            overflow: elide;
+                        }
+
+                        TouchArea {
+                            clicked => {
+                                root.selected-row          = i;
+                                root.selected-cell-value   = cell.value;
+                                root.selected-cell-is-null = cell.is-null;
+                                table-fs.focus();
+                            }
+                            pointer-event(event) => {
+                                if (event.button == PointerEventButton.right
+                                        && event.kind == PointerEventKind.down) {
+                                    root.selected-row          = i;
+                                    root.ctx-row               = i;
+                                    root.ctx-cell-value        = cell.value;
+                                    root.ctx-cell-is-null      = cell.is-null;
+                                    root.selected-cell-value   = cell.value;
+                                    root.selected-cell-is-null = cell.is-null;
+                                    root.ctx-menu-x = clamp(
+                                        root.col-x-offset(j) * 1px + root.body-vp-x + self.mouse-x,
+                                        0,
+                                        root.width - 208px
+                                    );
+                                    root.ctx-menu-y = clamp(
+                                        i * root.row-height + root.body-vp-y + self.mouse-y,
+                                        0,
+                                        root.height - 96px
+                                    );
+                                    ctx-popup.show();
+                                    table-fs.focus();
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if root.row-count == 0 && root.columns.length > 0: Rectangle {
+            x: 0; y: 0;
+            width: parent.width; height: parent.height;
+            Text {
+                x: (parent.width  - self.width)  / 2;
+                y: (parent.height - self.height) / 2;
+                text: @tr("0 rows");
+                color: Colors.surface2;
+                font-size: Typography.size-lg;
+            }
+        }
+    }
+}
