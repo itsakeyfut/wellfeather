@@ -63,6 +63,7 @@ use crate::{
     app::{
         command::{Command, ConfigUpdate},
         event::{Event, StateEvent},
+        session::SessionManager,
     },
     state::SharedState,
 };
@@ -258,6 +259,7 @@ impl UI {
         Self::register_formatter_callback(&window);
         Self::register_export_callbacks(&window, Arc::clone(&original_data));
         Self::register_theme_callback(&window, state.clone(), tx_cmd.clone());
+        Self::register_close_handler(&window);
         // Set initial page size and theme on the Slint window from shared state.
         let ui_global = window.global::<crate::UiState>();
         ui_global.set_page_size(state.ui.page_size() as i32);
@@ -267,6 +269,10 @@ impl UI {
             .unwrap_or_default();
         ui_global.set_font_family(config.appearance.font_family.into());
         ui_global.set_font_size(config.appearance.font_size as i32);
+        // Restore last editor query from previous session (last_query.sql).
+        if let Ok(Some(query)) = SessionManager::new().restore_query_file() {
+            ui_global.set_editor_text(query.into());
+        }
 
         Self::register_result_callbacks(
             &window,
@@ -647,6 +653,23 @@ impl UI {
                     Command::UpdateConfig(ConfigUpdate::Theme(new_theme)),
                 );
             });
+        });
+    }
+
+    // ── Window lifecycle ──────────────────────────────────────────────────────
+
+    fn register_close_handler(window: &crate::AppWindow) {
+        let window_weak = window.as_weak(); // clone required: on_close_requested closure
+        window.window().on_close_requested(move || {
+            let text = window_weak
+                .upgrade()
+                .map(|w| w.global::<crate::UiState>().get_editor_text().to_string())
+                .unwrap_or_default();
+            let sm = SessionManager::new();
+            if let Err(e) = sm.save_query_file(&text) {
+                tracing::warn!(error = %e, "failed to save last_query.sql on close");
+            }
+            slint::CloseRequestResponse::HideWindow
         });
     }
 

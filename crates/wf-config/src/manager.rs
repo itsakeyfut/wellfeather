@@ -44,6 +44,18 @@ impl ConfigManager {
             .to_path_buf()
     }
 
+    /// Returns the directory that contains `config.toml`.
+    ///
+    /// Equivalent to `app_dir()` for the default instance; when created with
+    /// [`ConfigManager::with_path`] the directory of the supplied path is returned
+    /// instead — useful for tests that point at a temp directory.
+    pub fn dir(&self) -> PathBuf {
+        self.path
+            .parent()
+            .unwrap_or_else(|| std::path::Path::new("."))
+            .to_path_buf()
+    }
+
     /// Loads configuration from `config.toml`.
     ///
     /// Returns `Config::default()` when the file does not exist.
