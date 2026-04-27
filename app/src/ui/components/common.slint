@@ -1,0 +1,86 @@
+// Shared UI primitives used across multiple components.
+// All components here depend only on theme.slint — no circular imports.
+
+import { Colors, Typography } from "../theme.slint";
+
+// ── ToolbarButton ─────────────────────────────────────────────────────────────
+// Small toggle button used in the result-table toolbar (page-size selector,
+// Export button).  Height is fixed at 20px; caller sets width.
+// active: true → blue background + dark text (selected page size)
+// active: false → surface0 background + muted text (default)
+
+export component ToolbarButton inherits Rectangle {
+    in property <string> text;
+    in property <bool>   active: false;
+    callback clicked;
+
+    height: 20px;
+    border-radius: 3px;
+    background: ta.has-hover ? Colors.surface1
+        : root.active ? Colors.blue : Colors.surface0;
+
+    ta := TouchArea {
+        clicked => { root.clicked(); }
+    }
+    Text {
+        text: root.text;
+        color: root.active ? Colors.base : Colors.overlay2;
+        font-size: Typography.size-md;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+}
+
+// ── ActionButton ──────────────────────────────────────────────────────────────
+// Full-height button for forms and modal dialogs.  Height is fixed at 32px;
+// caller sets width and supplies bg / fg colours to express intent:
+//   primary   → bg: Colors.blue,    fg: Colors.base
+//   secondary → bg: Colors.surface1, fg: Colors.text  (default)
+//   success   → bg: Colors.green,   fg: Colors.base
+//   danger    → bg: Colors.red,     fg: Colors.base
+
+export component ActionButton inherits Rectangle {
+    in property <string> text;
+    in property <bool>   enabled: true;
+    in property <color>  bg: Colors.surface1;
+    in property <color>  fg: Colors.text;
+    callback clicked;
+
+    height: 32px;
+    border-radius: 4px;
+    background: root.bg;
+
+    Text {
+        text: root.text;
+        color: root.fg;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+    TouchArea {
+        enabled: root.enabled;
+        clicked => { root.clicked(); }
+    }
+}
+
+// ── MenuItem ──────────────────────────────────────────────────────────────────
+// One row inside a popup / context menu.  Height is fixed at 30px; the
+// containing PopupWindow / Rectangle sets the overall popup dimensions.
+
+export component MenuItem inherits Rectangle {
+    in property <string> text;
+    callback clicked;
+
+    height: 30px;
+    background: ta.has-hover ? Colors.surface1 : transparent;
+
+    ta := TouchArea {
+        clicked => { root.clicked(); }
+    }
+    Text {
+        x: 12px;
+        y: (parent.height - self.height) / 2;
+        text: root.text;
+        color: Colors.text;
+        font-size: Typography.size-base;
+    }
+}

@@ -1,4 +1,5 @@
 import { CompletionRow } from "../globals.slint";
+import { Colors, Typography } from "../theme.slint";
 
 export component CompletionPopup inherits Rectangle {
     in property    <[CompletionRow]> items: [];
@@ -6,12 +7,12 @@ export component CompletionPopup inherits Rectangle {
 
     property <length> item-h: 22px;
 
-    background: #313244;
+    background: Colors.surface0;
     border-radius: 4px;
     border-width: 1px;
-    border-color: #585b70;
+    border-color: Colors.surface2;
     drop-shadow-blur: 10px;
-    drop-shadow-color: #00000088;
+    drop-shadow-color: Colors.shadow;
     width: 320px;
     height: min(items.length, 8) * item-h;
     clip: true;
@@ -26,14 +27,14 @@ export component CompletionPopup inherits Rectangle {
             y: i * root.item-h;
             height: root.item-h;
             width: root.width;
-            background: i == root.selected-index ? #45475a : transparent;
+            background: i == root.selected-index ? Colors.surface1 : transparent;
 
             Text {
                 x: 8px;
                 y: (parent.height - self.preferred-height) / 2;
                 text: item.label;
-                color: #cdd6f4;
-                font-size: 13px;
+                color: Colors.text;
+                font-size: Typography.size-lg;
                 font-family: "JetBrains Mono";
             }
 
@@ -41,8 +42,8 @@ export component CompletionPopup inherits Rectangle {
                 x: 200px;
                 y: (parent.height - self.preferred-height) / 2;
                 text: item.kind;
-                color: #6c7086;
-                font-size: 11px;
+                color: Colors.overlay0;
+                font-size: Typography.size-md;
             }
         }
     }

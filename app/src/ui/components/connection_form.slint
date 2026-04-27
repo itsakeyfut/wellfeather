@@ -3,6 +3,9 @@
 // Does not import UiState directly to avoid circular imports
 // (app.slint imports this file; UiState is defined in app.slint).
 
+import { Colors, Typography } from "../theme.slint";
+import { ActionButton } from "common.slint";
+
 // ── Helper: labelled text field row ──────────────────────────────────────────
 
 component FieldRow inherits HorizontalLayout {
@@ -14,13 +17,13 @@ component FieldRow inherits HorizontalLayout {
     spacing: 8px;
     Text {
         text: label-text;
-        color: #a6adc8;
+        color: Colors.subtext0;
         width: 80px;
         vertical-alignment: center;
     }
     Rectangle {
         horizontal-stretch: 1;
-        background: #1e1e2e;
+        background: Colors.base;
         border-radius: 4px;
         height: 28px;
         // Placeholder overlaid at the same position as TextInput.
@@ -32,7 +35,7 @@ component FieldRow inherits HorizontalLayout {
             width: parent.width - 12px;
             height: parent.height;
             text: root.placeholder;
-            color: #585b70;
+            color: Colors.surface2;
             vertical-alignment: center;
         }
         // TextInput rendered last → on top → receives all pointer/focus events.
@@ -43,7 +46,7 @@ component FieldRow inherits HorizontalLayout {
             height: parent.height;
             vertical-alignment: center;
             text <=> value;
-            color: #cdd6f4;
+            color: Colors.text;
             input-type: is-password ? InputType.password : InputType.text;
         }
     }
@@ -59,14 +62,14 @@ component TabButton inherits VerticalLayout {
     horizontal-stretch: 1;
     Text {
         text: label-text;
-        color: active ? #89b4fa : #a6adc8;
+        color: active ? Colors.blue : Colors.subtext0;
         horizontal-alignment: center;
         vertical-alignment: center;
         height: 28px;
     }
     Rectangle {
         height: 2px;
-        background: active ? #89b4fa : #45475a;
+        background: active ? Colors.blue : Colors.surface1;
     }
     TouchArea { clicked => { root.clicked(); } }
 }
@@ -78,13 +81,13 @@ component DbTypeButton inherits Rectangle {
     in property <bool>   active;
     callback clicked;
 
-    background: active ? #89b4fa : #45475a;
+    background: active ? Colors.blue : Colors.surface1;
     border-radius: 4px;
     height: 28px;
     horizontal-stretch: 1;
     Text {
         text: label-text;
-        color: active ? #1e1e2e : #cdd6f4;
+        color: active ? Colors.base : Colors.text;
         horizontal-alignment: center;
         vertical-alignment: center;
     }
@@ -116,12 +119,12 @@ export component ConnectionForm inherits Rectangle {
     callback add-connection();
 
     // ── Layout ────────────────────────────────────────────────────────────────
-    background: #313244;
+    background: Colors.surface0;
     border-radius: 8px;
     border-width: 1px;
-    border-color: #585b70;
+    border-color: Colors.surface2;
     drop-shadow-blur: 24px;
-    drop-shadow-color: #00000066;
+    drop-shadow-color: Colors.shadow-light;
     width: 480px;
 
     VerticalLayout {
@@ -131,8 +134,8 @@ export component ConnectionForm inherits Rectangle {
         // Title
         Text {
             text: @tr("Add Connection");
-            color: #cdd6f4;
-            font-size: 16px;
+            color: Colors.text;
+            font-size: Typography.size-2xl;
             font-weight: 700;
         }
 
@@ -179,7 +182,7 @@ export component ConnectionForm inherits Rectangle {
 
         // Connection String tab
         if root.tab-index == 0: Rectangle {
-            background: #1e1e2e;
+            background: Colors.base;
             border-radius: 4px;
             height: 28px;
             if root.conn-string == "": Text {
@@ -188,7 +191,7 @@ export component ConnectionForm inherits Rectangle {
                 width: parent.width - 12px;
                 height: parent.height;
                 text: "postgres://user:pass@host:5432/db";
-                color: #585b70;
+                color: Colors.surface2;
                 vertical-alignment: center;
             }
             TextInput {
@@ -198,7 +201,7 @@ export component ConnectionForm inherits Rectangle {
                 height: parent.height;
                 vertical-alignment: center;
                 text <=> root.conn-string;
-                color: #cdd6f4;
+                color: Colors.text;
             }
         }
 
@@ -235,9 +238,9 @@ export component ConnectionForm inherits Rectangle {
         // Status message (shown only when not empty)
         Text {
             text: root.status;
-            color: root.status == "" ? transparent : #f38ba8;
+            color: root.status == "" ? transparent : Colors.red;
             height: 20px;
-            font-size: 12px;
+            font-size: Typography.size-base;
             overflow: elide;
         }
 
@@ -246,59 +249,31 @@ export component ConnectionForm inherits Rectangle {
             spacing: 8px;
             alignment: end;
 
-            // Cancel
-            Rectangle {
+            ActionButton {
                 width: 80px;
-                height: 32px;
-                background: #45475a;
-                border-radius: 4px;
-                Text {
-                    text: @tr("Cancel");
-                    color: #cdd6f4;
-                    horizontal-alignment: center;
-                    vertical-alignment: center;
-                }
-                TouchArea {
-                    clicked => { root.cancel(); }
-                }
+                text: @tr("Cancel");
+                clicked => { root.cancel(); }
             }
 
-            // Test Connection
-            Rectangle {
+            ActionButton {
                 width: 150px;
-                height: 32px;
-                background: root.testing ? #585b70 : #89b4fa;
-                border-radius: 4px;
-                Text {
-                    text: root.testing ? @tr("Testing\u{2026}") : @tr("Test Connection");
-                    color: root.testing ? #a6adc8 : #1e1e2e;
-                    horizontal-alignment: center;
-                    vertical-alignment: center;
-                }
-                TouchArea {
-                    enabled: !root.testing;
-                    clicked => { root.test-connection(); }
-                }
+                text: root.testing ? @tr("Testing\u{2026}") : @tr("Test Connection");
+                bg: root.testing ? Colors.surface2 : Colors.blue;
+                fg: root.testing ? Colors.subtext0 : Colors.base;
+                enabled: !root.testing;
+                clicked => { root.test-connection(); }
             }
 
             // Add — green when test passed, muted when not yet tested / failed
-            Rectangle {
+            ActionButton {
                 width: 80px;
-                height: 32px;
-                background: root.testing ? #585b70
-                          : root.test-ok  ? #a6e3a1
-                          :                 #6c7086;
-                border-radius: 4px;
-                Text {
-                    text: @tr("Add");
-                    color: root.testing ? #a6adc8 : #1e1e2e;
-                    horizontal-alignment: center;
-                    vertical-alignment: center;
-                }
-                TouchArea {
-                    enabled: !root.testing;
-                    clicked => { root.add-connection(); }
-                }
+                text: @tr("Add");
+                bg: root.testing ? Colors.surface2
+                  : root.test-ok  ? Colors.green
+                  :                 Colors.overlay0;
+                fg: root.testing ? Colors.subtext0 : Colors.base;
+                enabled: !root.testing;
+                clicked => { root.add-connection(); }
             }
         }
     }

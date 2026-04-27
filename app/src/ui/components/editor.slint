@@ -1,4 +1,5 @@
 import { CompletionRow } from "../globals.slint";
+import { Colors } from "../theme.slint";
 
 // SQL editor component — multi-line TextInput with synchronised line numbers.
 //
@@ -37,7 +38,7 @@ import { CompletionRow } from "../globals.slint";
 // This component does NOT import app.slint to avoid circular dependencies.
 
 export component Editor inherits Rectangle {
-    background: #181825;
+    background: Colors.mantle;
     clip: true;
     // preferred-height: 0 and min-height: 0 prevent content from propagating
     // up through the layout chain and resizing the window.
@@ -202,7 +203,7 @@ export component Editor inherits Rectangle {
         y: root.current-line * root.line-h + editor-scroll.viewport-y;
         width: root.width;
         height: root.line-h;
-        background: #2a2a3e;
+        background: Colors.current-line;
     }
 
     // ── Scrollable text area ─────────────────────────────────────────────────
@@ -369,9 +370,9 @@ export component Editor inherits Rectangle {
                 height: max(self.preferred-height, editor-scroll.height);
                 single-line: false;
                 wrap:        no-wrap;
-                color:                      #cdd6f4;
-                selection-background-color: #264f78;
-                selection-foreground-color: #cdd6f4;
+                color:                      Colors.text;
+                selection-background-color: Colors.selection;
+                selection-foreground-color: Colors.text;
                 font-family: root.font-family;
                 font-size:   root.font-size-px * 1px;
 
