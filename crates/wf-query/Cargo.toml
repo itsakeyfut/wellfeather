@@ -15,4 +15,5 @@ serde     = { workspace = true }
 anyhow    = { workspace = true }
 thiserror = { workspace = true }
 sqlformat = "0.5.0"
-csv       = "1.4.0"
+csv        = "1.4.0"
+serde_json = { version = "1.0.149", features = ["preserve_order"] }
