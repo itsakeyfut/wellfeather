@@ -10,7 +10,7 @@
 //! UI callbacks  ──(tx_cmd)──▶  AppController::run  ──(tx_event)──▶  UI event handler
 //! ```
 //!
-//! Both channels are bounded (`capacity = 64`). The controller task exits cleanly
+//! Both channels are bounded (`capacity = CMD_CHANNEL_CAPACITY`). The controller task exits cleanly
 //! when all `Sender<Command>` clones are dropped (i.e. when the UI window closes).
 
 use std::path::PathBuf;
@@ -34,6 +34,8 @@ use crate::{
 
 /// Async command loop that drives the application backend.
 ///
+const CMD_CHANNEL_CAPACITY: usize = 64;
+
 /// Owns the [`DbService`] pool, the [`SessionManager`] for config persistence,
 /// and the [`SharedState`] shared with the UI layer. Created by [`AppController::new`]
 /// and consumed by [`AppController::run`], which is spawned as a tokio task.
@@ -69,8 +71,8 @@ impl AppController {
         history_path: PathBuf,
         metadata_cache_path: PathBuf,
     ) -> (Self, mpsc::Sender<Command>, mpsc::Receiver<Event>) {
-        let (tx_cmd, rx_cmd) = mpsc::channel(64);
-        let (tx_event, rx_event) = mpsc::channel(64);
+        let (tx_cmd, rx_cmd) = mpsc::channel(CMD_CHANNEL_CAPACITY);
+        let (tx_event, rx_event) = mpsc::channel(CMD_CHANNEL_CAPACITY);
         (
             Self {
                 state,
