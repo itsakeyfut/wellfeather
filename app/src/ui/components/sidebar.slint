@@ -167,6 +167,14 @@ export component Sidebar inherits Rectangle {
                         // Spacer for item nodes
                         if node.level >= 2 : Rectangle { width: 14px; }
 
+                        // Connection status dot (● active / ○ inactive)
+                        if node.level == 0 : Text {
+                            text: node.is-active ? "●" : "○";
+                            color: node.is-active ? Colors.blue : Colors.surface2;
+                            font-size: Typography.size-sm;
+                            vertical-alignment: center;
+                        }
+
                         // Main label
                         Text {
                             text: node.label;

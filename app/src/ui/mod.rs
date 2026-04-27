@@ -626,7 +626,7 @@ impl UI {
         }
 
         // toggle-sidebar-node: expand/collapse a tree node; also switches active
-        // connection when a level-0 (connection) node is clicked.
+        // connection when an inactive level-0 (connection) node is clicked.
         {
             // clone required: callback closure needs owned captures
             let tx_cmd = tx_cmd.clone();
@@ -635,22 +635,31 @@ impl UI {
             let window_weak = window.as_weak();
             ui_state.on_toggle_sidebar_node(move |id| {
                 let id = id.to_string();
-                // If this is a connection node, send a Connect command.
+                // For connection nodes, switch only when not already active.
                 if let Some(conn_id) = id.strip_prefix("conn:") {
-                    let conn = state.conn.all().into_iter().find(|c| c.id == conn_id);
-                    if let Some(conn) = conn {
-                        let password = conn
-                            .password_encrypted
-                            .as_ref()
-                            .and_then(|enc| crypto::decrypt(enc, &enc_key).ok());
-                        // clone required: tokio::spawn requires 'static
-                        let tx_cmd = tx_cmd.clone();
-                        tokio::spawn(async move {
-                            let _ = tx_cmd.send(Command::Connect(conn, password)).await;
-                        });
+                    let active_id = state
+                        .conn
+                        .active()
+                        .map(|c| c.id.clone())
+                        .unwrap_or_default();
+                    if conn_id != active_id {
+                        let conn = state.conn.all().into_iter().find(|c| c.id == conn_id);
+                        if let Some(conn) = conn {
+                            let password = conn
+                                .password_encrypted
+                                .as_ref()
+                                .and_then(|enc| crypto::decrypt(enc, &enc_key).ok());
+                            // clone required: tokio::spawn requires 'static
+                            let tx_cmd = tx_cmd.clone();
+                            tokio::spawn(async move {
+                                let _ = tx_cmd.send(Command::Connect(conn, password)).await;
+                            });
+                        }
+                        // Return early — Event::Connected will auto-expand the newly active node.
+                        return;
                     }
                 }
-                // Toggle expanded state
+                // Toggle expanded state (active connection and category nodes).
                 {
                     let mut sb = sidebar_state.lock().unwrap_or_else(|p| p.into_inner());
                     if sb.expanded.contains(&id) {
