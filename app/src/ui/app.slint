@@ -54,6 +54,8 @@ export global UiState {
     callback copy-result-row(int);
     /// Copy all visible rows as TSV with column headers.
     callback copy-result-tsv();
+    /// Fired by the Export CSV button; Rust opens a save dialog and writes the file.
+    callback export-csv();
     /// Returns cumulative x-offset (logical px as float) of column j.
     pure callback col-x-offset(int) -> float;
 
@@ -520,6 +522,7 @@ export component AppWindow inherits Window {
                     copy-cell(v)         => { UiState.copy-result-cell(v); }
                     copy-row(i)          => { UiState.copy-result-row(i); }
                     copy-all-tsv         => { UiState.copy-result-tsv(); }
+                    export-csv           => { UiState.export-csv(); }
                     col-x-offset(j)      => { UiState.col-x-offset(j); }
                     sort-col:            UiState.result-sort-col;
                     sort-asc:            UiState.result-sort-asc;

@@ -15,3 +15,4 @@ serde     = { workspace = true }
 anyhow    = { workspace = true }
 thiserror = { workspace = true }
 sqlformat = "0.5.0"
+csv       = "1.4.0"

@@ -17,6 +17,7 @@ anyhow             = { workspace = true }
 tracing            = { workspace = true }
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 arboard             = "3.6.1"
+rfd                 = { version = "0.15", features = ["tokio"] }
 uuid               = { workspace = true }
 
 [dev-dependencies]
