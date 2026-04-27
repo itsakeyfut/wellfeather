@@ -116,6 +116,39 @@ impl SessionManager {
         Ok(())
     }
 
+    /// Write the current editor query to `last_query.sql` in the app config directory.
+    ///
+    /// An empty query writes an empty file (not an error); `restore_query_file`
+    /// treats an empty or absent file as "no saved query".
+    pub fn save_query_file(&self, query: &str) -> anyhow::Result<()> {
+        let path = self.config_manager.dir().join("last_query.sql");
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)
+                .with_context(|| format!("failed to create directory {}", parent.display()))?;
+        }
+        std::fs::write(&path, query.as_bytes())
+            .with_context(|| format!("failed to write {}", path.display()))?;
+        info!(len = query.len(), "last_query.sql saved");
+        Ok(())
+    }
+
+    /// Read `last_query.sql` from the app config directory.
+    ///
+    /// Returns `Ok(None)` when the file does not exist or is empty.
+    pub fn restore_query_file(&self) -> anyhow::Result<Option<String>> {
+        let path = self.config_manager.dir().join("last_query.sql");
+        if !path.exists() {
+            return Ok(None);
+        }
+        let query = std::fs::read_to_string(&path)
+            .with_context(|| format!("failed to read {}", path.display()))?;
+        if query.is_empty() {
+            return Ok(None);
+        }
+        info!(len = query.len(), "last_query.sql restored");
+        Ok(Some(query))
+    }
+
     /// Load the last session and return the connection to auto-connect to.
     ///
     /// Returns `Ok(None)` when:
@@ -302,5 +335,35 @@ mod tests {
             .load()
             .unwrap();
         assert_eq!(cfg.connections.len(), 1, "should not duplicate");
+    }
+
+    #[test]
+    fn save_query_file_should_persist_and_restore_query() {
+        let dir = tempdir().unwrap();
+        let sm = SessionManager::with_config_manager(ConfigManager::with_path(
+            dir.path().join("config.toml"),
+        ));
+        sm.save_query_file("SELECT 1").unwrap();
+
+        let restored = sm.restore_query_file().unwrap();
+        assert_eq!(restored, Some("SELECT 1".to_string()));
+        assert!(dir.path().join("last_query.sql").exists());
+    }
+
+    #[test]
+    fn save_query_file_should_not_affect_config_toml() {
+        let dir = tempdir().unwrap();
+        let sm = SessionManager::with_config_manager(ConfigManager::with_path(
+            dir.path().join("config.toml"),
+        ));
+        sm.save_connection(&sqlite_conn("c1")).unwrap();
+        sm.save_query_file("SELECT 2").unwrap();
+
+        let cfg = ConfigManager::with_path(dir.path().join("config.toml"))
+            .load()
+            .unwrap();
+        assert_eq!(cfg.session.last_connection_id, Some("c1".to_string()));
+        assert_eq!(cfg.session.last_query, None);
+        assert_eq!(cfg.connections.len(), 1);
     }
 }
