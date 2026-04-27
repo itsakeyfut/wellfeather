@@ -1099,49 +1099,99 @@ impl UI {
     }
 
     const CSV_DEFAULT_FILENAME: &str = "query_result.csv";
+    const JSON_DEFAULT_FILENAME: &str = "query_result.json";
 
     fn register_export_callbacks(window: &crate::AppWindow, original_data: SharedOriginalData) {
         let ui = window.global::<crate::UiState>();
+
+        // ── CSV export ────────────────────────────────────────────────────────
         let window_weak = window.as_weak(); // clone required: on_export_csv closure
-        ui.on_export_csv(move || {
-            // Snapshot columns + rows while still on the UI thread (Mutex is not Send).
-            let snapshot = {
-                let orig = original_data.lock().unwrap_or_else(|p| p.into_inner());
-                orig.as_ref().map(|d| {
-                    let cols: Vec<String> = d.columns.iter().map(|s| s.to_string()).collect();
-                    (cols, d.rows.clone())
-                })
-            };
-            let Some((columns, rows)) = snapshot else {
-                return;
-            };
-            let window_weak = window_weak.clone(); // clone required: tokio::spawn needs 'static
-            tokio::spawn(async move {
-                let Some(handle) = rfd::AsyncFileDialog::new()
-                    .set_title("Save CSV")
-                    .set_file_name(Self::CSV_DEFAULT_FILENAME)
-                    .add_filter("CSV files", &["csv"])
-                    .save_file()
-                    .await
-                else {
-                    return; // user cancelled
+        {
+            let original_data = Arc::clone(&original_data); // clone required: on_export_csv closure
+            ui.on_export_csv(move || {
+                // Snapshot columns + rows while still on the UI thread (Mutex is not Send).
+                let snapshot = {
+                    let orig = original_data.lock().unwrap_or_else(|p| p.into_inner());
+                    orig.as_ref().map(|d| {
+                        let cols: Vec<String> = d.columns.iter().map(|s| s.to_string()).collect();
+                        (cols, d.rows.clone())
+                    })
                 };
-                let path = handle.path().to_path_buf();
-                let result = wf_query::export::export_csv(&columns, &rows, &path);
-                let msg = match result {
-                    Ok(()) => format!("Saved CSV: {}", path.display()),
-                    Err(e) => format!("CSV export failed: {e}"),
+                let Some((columns, rows)) = snapshot else {
+                    return;
                 };
-                let _ = slint::invoke_from_event_loop(move || {
-                    let Some(window) = window_weak.upgrade() else {
-                        return;
+                let window_weak = window_weak.clone(); // clone required: tokio::spawn needs 'static
+                tokio::spawn(async move {
+                    let Some(handle) = rfd::AsyncFileDialog::new()
+                        .set_title("Save CSV")
+                        .set_file_name(Self::CSV_DEFAULT_FILENAME)
+                        .add_filter("CSV files", &["csv"])
+                        .save_file()
+                        .await
+                    else {
+                        return; // user cancelled
                     };
-                    window
-                        .global::<crate::UiState>()
-                        .set_status_message(msg.into());
+                    let path = handle.path().to_path_buf();
+                    let result = wf_query::export::export_csv(&columns, &rows, &path);
+                    let msg = match result {
+                        Ok(()) => format!("Saved CSV: {}", path.display()),
+                        Err(e) => format!("CSV export failed: {e}"),
+                    };
+                    let _ = slint::invoke_from_event_loop(move || {
+                        let Some(window) = window_weak.upgrade() else {
+                            return;
+                        };
+                        window
+                            .global::<crate::UiState>()
+                            .set_status_message(msg.into());
+                    });
                 });
             });
-        });
+        }
+
+        // ── JSON export ───────────────────────────────────────────────────────
+        {
+            let window_weak = window.as_weak(); // clone required: on_export_json closure
+            let original_data = Arc::clone(&original_data); // clone required: on_export_json closure
+            ui.on_export_json(move || {
+                let snapshot = {
+                    let orig = original_data.lock().unwrap_or_else(|p| p.into_inner());
+                    orig.as_ref().map(|d| {
+                        let cols: Vec<String> = d.columns.iter().map(|s| s.to_string()).collect();
+                        (cols, d.rows.clone())
+                    })
+                };
+                let Some((columns, rows)) = snapshot else {
+                    return;
+                };
+                let window_weak = window_weak.clone(); // clone required: tokio::spawn needs 'static
+                tokio::spawn(async move {
+                    let Some(handle) = rfd::AsyncFileDialog::new()
+                        .set_title("Save JSON")
+                        .set_file_name(Self::JSON_DEFAULT_FILENAME)
+                        .add_filter("JSON files", &["json"])
+                        .save_file()
+                        .await
+                    else {
+                        return; // user cancelled
+                    };
+                    let path = handle.path().to_path_buf();
+                    let result = wf_query::export::export_json(&columns, &rows, &path);
+                    let msg = match result {
+                        Ok(()) => format!("Saved JSON: {}", path.display()),
+                        Err(e) => format!("JSON export failed: {e}"),
+                    };
+                    let _ = slint::invoke_from_event_loop(move || {
+                        let Some(window) = window_weak.upgrade() else {
+                            return;
+                        };
+                        window
+                            .global::<crate::UiState>()
+                            .set_status_message(msg.into());
+                    });
+                });
+            });
+        }
     }
 
     // ── Result callbacks ──────────────────────────────────────────────────────

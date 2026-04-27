@@ -75,6 +75,8 @@ export component ResultTable inherits Rectangle {
     callback copy-all-tsv();
     /// Fired when the "Export CSV" button is clicked.
     callback export-csv();
+    /// Fired when the "Export JSON" button is clicked.
+    callback export-json();
     /// Returns cumulative x-offset (logical px as float) of column j.
     /// Implemented in Rust; used for horizontal auto-scroll in cell mode.
     pure callback col-x-offset(int) -> float;
@@ -313,6 +315,63 @@ export component ResultTable inherits Rectangle {
             }
         }
 
+        // ── Export dropdown menu ──────────────────────────────────────────────
+        // Positioned just below the Export button in the toolbar.
+        // x/y are relative to table-fs, which covers the full component.
+        export-popup := PopupWindow {
+            x: root.width - 266px;
+            y: root.toolbar-h + 2px;
+            width: 120px;
+            height: 60px;
+            close-policy: PopupClosePolicy.close-on-click;
+
+            Rectangle {
+                width: 120px;
+                height: 60px;
+                background: #313244;
+                border-radius: 4px;
+                border-width: 1px;
+                border-color: #585b70;
+                drop-shadow-blur: 8px;
+                drop-shadow-color: #00000088;
+                clip: true;
+
+                VerticalLayout {
+                    spacing: 0;
+
+                    Rectangle {
+                        height: 30px;
+                        background: exp-csv-mi.has-hover ? #45475a : transparent;
+                        exp-csv-mi := TouchArea {
+                            clicked => { root.export-csv(); }
+                        }
+                        Text {
+                            x: 12px;
+                            y: (parent.height - self.height) / 2;
+                            text: @tr("Export CSV");
+                            color: #cdd6f4;
+                            font-size: 12px;
+                        }
+                    }
+
+                    Rectangle {
+                        height: 30px;
+                        background: exp-json-mi.has-hover ? #45475a : transparent;
+                        exp-json-mi := TouchArea {
+                            clicked => { root.export-json(); }
+                        }
+                        Text {
+                            x: 12px;
+                            y: (parent.height - self.height) / 2;
+                            text: @tr("Export JSON");
+                            color: #cdd6f4;
+                            font-size: 12px;
+                        }
+                    }
+                }
+            }
+        }
+
         // ── Right-click context menu ──────────────────────────────────────────
         ctx-popup := PopupWindow {
             x: root.ctx-menu-x;
@@ -450,19 +509,19 @@ export component ResultTable inherits Rectangle {
                     font-size: 11px;
                 }
 
-                // Export CSV button (only when a result is loaded)
+                // Export button — opens a dropdown with CSV / JSON options
                 if root.columns.length > 0: Rectangle {
                     x: parent.width - 266px;
                     y: (parent.height - self.height) / 2;
                     width: 80px;
                     height: 20px;
                     border-radius: 3px;
-                    background: csv-ta.has-hover ? #45475a : #313244;
-                    csv-ta := TouchArea {
-                        clicked => { root.export-csv(); }
+                    background: export-btn-ta.has-hover ? #45475a : #313244;
+                    export-btn-ta := TouchArea {
+                        clicked => { export-popup.show(); }
                     }
                     Text {
-                        text: @tr("Export CSV");
+                        text: @tr("Export") + " \u{25BE}";
                         color: #9399b2;
                         font-size: 11px;
                         horizontal-alignment: center;
