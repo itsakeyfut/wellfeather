@@ -8,8 +8,9 @@ use anyhow::Result;
 use slint::ComponentHandle;
 use slint::Model as _;
 use tokio::sync::mpsc;
+use wf_completion::CompletionItem;
 use wf_config::crypto;
-use wf_db::models::{DbConnection, DbMetadata, DbType, TableInfo};
+use wf_db::models::{DbConnection, DbMetadata, DbType, QueryResult, TableInfo};
 
 const COMPLETION_DEBOUNCE_MS: u64 = 300;
 const ERROR_TRUNCATION_CHARS: usize = 80;
@@ -269,324 +270,339 @@ impl UI {
         tokio::spawn(async move {
             while let Some(event) = rx_event.recv().await {
                 match event {
-                    Event::Connected(ref id) => {
-                        let active_id = id.clone();
-                        // Build connection list from state outside invoke_from_event_loop
-                        // (Vec<ConnectionEntry> is Send; Rc<VecModel> is not).
-                        let entries: Vec<crate::ConnectionEntry> = state
-                            .conn
-                            .all()
-                            .into_iter()
-                            .map(|c| crate::ConnectionEntry {
-                                is_active: c.id == active_id,
-                                db_type: db_type_label(&c.db_type).into(),
-                                name: c.name.clone().into(),
-                                id: c.id.clone().into(),
-                            })
-                            .collect();
-
-                        // Build status-bar label outside the closure (state is not Send)
-                        let status_conn = state
-                            .conn
-                            .all()
-                            .into_iter()
-                            .find(|c| c.id == active_id)
-                            .map(|c| match c.database.as_deref() {
-                                Some(db) if !db.is_empty() => format!("{} / {}", c.name, db),
-                                _ => c.name.clone(),
-                            })
-                            .unwrap_or_else(|| active_id.clone());
-
-                        // Auto-expand the newly connected node
-                        {
-                            let mut sb = sidebar_state.lock().unwrap_or_else(|p| p.into_inner());
-                            sb.expanded.insert(format!("conn:{}", active_id));
-                        }
-                        // Build sidebar tree (Vec<SidebarNode> is Send)
-                        let sidebar_nodes = {
-                            let sb = sidebar_state.lock().unwrap_or_else(|p| p.into_inner());
-                            let connections = state.conn.all();
-                            build_sidebar_tree(&connections, &active_id, &sb.metadata, &sb.expanded)
-                        };
-
-                        // clone required: invoke_from_event_loop closure must be 'static
-                        let window_weak = window_weak.clone();
-                        let active_id = active_id.clone();
-                        let _ = slint::invoke_from_event_loop(move || {
-                            let Some(window) = window_weak.upgrade() else {
-                                return;
-                            };
-                            let ui = window.global::<crate::UiState>();
-                            // VecModel created on the UI thread (Rc is not Send)
-                            let model = Rc::new(slint::VecModel::from(entries));
-                            ui.set_connection_list(model.into());
-                            ui.set_active_connection_id(active_id.into());
-                            ui.set_show_connection_form(false);
-                            ui.set_form_testing(false);
-                            ui.set_form_status("".into());
-                            ui.set_error_message("".into());
-                            ui.set_status_connection(status_conn.into());
-                            ui.set_sidebar_tree(
-                                Rc::new(slint::VecModel::from(sidebar_nodes)).into(),
-                            );
-                            ui.set_sidebar_loading(true);
-                        });
+                    Event::Connected(id) => Self::handle_connected(
+                        id,
+                        window_weak.clone(),
+                        state.clone(),
+                        Arc::clone(&sidebar_state),
+                    ),
+                    Event::TestConnectionOk => Self::handle_test_ok(window_weak.clone()),
+                    Event::TestConnectionFailed(msg) => {
+                        Self::handle_test_failed(msg, window_weak.clone())
                     }
-                    Event::TestConnectionOk => {
-                        // clone required: invoke_from_event_loop closure must be 'static
-                        let window_weak = window_weak.clone();
-                        let _ = slint::invoke_from_event_loop(move || {
-                            let Some(window) = window_weak.upgrade() else {
-                                return;
-                            };
-                            let ui = window.global::<crate::UiState>();
-                            ui.set_form_testing(false);
-                            ui.set_form_test_ok(true);
-                            ui.set_test_result_ok(true);
-                            ui.set_test_result_message("".into());
-                            ui.set_show_test_result_popup(true);
-                        });
+                    Event::ConnectError(msg) => {
+                        Self::handle_connect_error(msg, window_weak.clone())
                     }
-                    Event::TestConnectionFailed(ref msg) => {
-                        let msg = msg.clone();
-                        // clone required: invoke_from_event_loop closure must be 'static
-                        let window_weak = window_weak.clone();
-                        let _ = slint::invoke_from_event_loop(move || {
-                            let Some(window) = window_weak.upgrade() else {
-                                return;
-                            };
-                            let ui = window.global::<crate::UiState>();
-                            ui.set_form_testing(false);
-                            ui.set_form_test_ok(false);
-                            ui.set_test_result_ok(false);
-                            ui.set_test_result_message(msg.into());
-                            ui.set_show_test_result_popup(true);
-                        });
+                    Event::QueryStarted => Self::handle_query_started(window_weak.clone()),
+                    Event::QueryFinished(result) => Self::handle_query_finished(
+                        result,
+                        window_weak.clone(),
+                        Arc::clone(&original_data),
+                    ),
+                    Event::QueryCancelled => Self::handle_query_cancelled(window_weak.clone()),
+                    Event::QueryError(msg) => Self::handle_query_error(msg, window_weak.clone()),
+                    Event::Disconnected(id) => Self::handle_disconnected(id, window_weak.clone()),
+                    Event::MetadataLoaded(conn_id, meta) => Self::handle_metadata_loaded(
+                        conn_id,
+                        meta,
+                        window_weak.clone(),
+                        state.clone(),
+                        Arc::clone(&sidebar_state),
+                    ),
+                    Event::MetadataFetchFailed(msg) => {
+                        Self::handle_metadata_fetch_failed(msg, window_weak.clone())
                     }
-                    Event::ConnectError(ref msg) => {
-                        let msg = msg.clone();
-                        // clone required: invoke_from_event_loop closure must be 'static
-                        let window_weak = window_weak.clone();
-                        let _ = slint::invoke_from_event_loop(move || {
-                            let Some(window) = window_weak.upgrade() else {
-                                return;
-                            };
-                            let ui = window.global::<crate::UiState>();
-                            ui.set_form_testing(false);
-                            ui.set_form_status(msg.clone().into());
-                            ui.set_status_message(format!("Connection failed: {msg}").into());
-                            ui.set_sidebar_loading(false);
-                        });
-                    }
-                    Event::QueryStarted => {
-                        // clone required: invoke_from_event_loop closure must be 'static
-                        let window_weak = window_weak.clone();
-                        let _ = slint::invoke_from_event_loop(move || {
-                            let Some(window) = window_weak.upgrade() else {
-                                return;
-                            };
-                            let ui = window.global::<crate::UiState>();
-                            ui.set_is_loading(true);
-                            ui.set_error_message("".into());
-                            ui.set_status_message("Running\u{2026}".into());
-                            // Reveal the result panel if it is currently hidden.
-                            ui.set_result_panel_open(true);
-                        });
-                    }
-                    Event::QueryFinished(result) => {
-                        // Build plain (Send) data outside the closure — Rc is not Send.
-                        let col_count = result.columns.len();
-                        let columns: Vec<slint::SharedString> =
-                            result.columns.iter().map(|c| c.clone().into()).collect();
-                        // Preserve None (SQL NULL) so the badge renderer can distinguish it
-                        // from an empty string.  Moved into OriginalQueryData for filtering.
-                        let raw_rows: Vec<Vec<Option<String>>> =
-                            result.rows.iter().map(|r| r.to_vec()).collect();
-                        let row_count = result.row_count as i32;
-                        let exec_ms = result.execution_time_ms;
-
-                        // Store original rows for client-side filtering/sorting.
-                        {
-                            let mut orig = original_data.lock().unwrap_or_else(|p| p.into_inner());
-                            *orig = Some(OriginalQueryData {
-                                columns: columns.clone(),
-                                rows: raw_rows.clone(),
-                                sort_col: None,
-                                sort_asc: true,
-                            });
-                        }
-
-                        // clone required: invoke_from_event_loop closure must be 'static
-                        let window_weak = window_weak.clone();
-                        let _ = slint::invoke_from_event_loop(move || {
-                            let Some(window) = window_weak.upgrade() else {
-                                return;
-                            };
-                            let ui = window.global::<crate::UiState>();
-                            ui.set_is_loading(false);
-                            ui.set_result_active_filter("".into()); // clear stale filter
-                            ui.set_result_sort_col(-1);
-                            ui.set_result_sort_asc(true);
-                            // VecModel created on UI thread (Rc is not Send)
-                            let col_model = Rc::new(slint::VecModel::from(columns));
-                            ui.set_result_columns(col_model.into());
-                            let rows: Vec<crate::RowData> =
-                                raw_rows.into_iter().map(rows_to_ui).collect();
-                            ui.set_result_rows(Rc::new(slint::VecModel::from(rows)).into());
-                            ui.set_result_row_count(row_count);
-                            ui.set_result_total_rows(row_count);
-                            // Initialise per-column widths.
-                            let widths: Vec<f32> = vec![DEFAULT_COLUMN_WIDTH; col_count];
-                            let total_w = col_count as f32 * DEFAULT_COLUMN_WIDTH;
-                            ui.set_result_col_widths(Rc::new(slint::VecModel::from(widths)).into());
-                            ui.set_result_total_col_width(total_w);
-                            ui.set_status_message(
-                                format!("{exec_ms} ms  ·  {row_count} rows").into(),
-                            );
-                            // Reveal the result panel if it is currently hidden.
-                            ui.set_result_panel_open(true);
-                        });
-                    }
-                    Event::QueryCancelled => {
-                        // clone required: invoke_from_event_loop closure must be 'static
-                        let window_weak = window_weak.clone();
-                        let _ = slint::invoke_from_event_loop(move || {
-                            let Some(window) = window_weak.upgrade() else {
-                                return;
-                            };
-                            let ui = window.global::<crate::UiState>();
-                            ui.set_is_loading(false);
-                            ui.set_status_message("Cancelled".into());
-                        });
-                    }
-                    Event::QueryError(ref msg) => {
-                        let msg = msg.clone();
-                        // Short summary: first non-empty line, truncated to ERROR_TRUNCATION_CHARS.
-                        let summary = msg
-                            .lines()
-                            .find(|l| !l.trim().is_empty())
-                            .unwrap_or(&msg)
-                            .chars()
-                            .take(ERROR_TRUNCATION_CHARS)
-                            .collect::<String>();
-                        // clone required: invoke_from_event_loop closure must be 'static
-                        let window_weak = window_weak.clone();
-                        let _ = slint::invoke_from_event_loop(move || {
-                            let Some(window) = window_weak.upgrade() else {
-                                return;
-                            };
-                            let ui = window.global::<crate::UiState>();
-                            ui.set_is_loading(false);
-                            ui.set_form_status(msg.clone().into());
-                            ui.set_form_testing(false);
-                            ui.set_error_message(msg.into());
-                            ui.set_status_message(format!("Error: {summary}").into());
-                            // Reveal the result panel so the error is visible.
-                            ui.set_result_panel_open(true);
-                        });
-                    }
-                    Event::Disconnected(ref id) => {
-                        let id = id.clone();
-                        // clone required: invoke_from_event_loop closure must be 'static
-                        let window_weak = window_weak.clone();
-                        let _ = slint::invoke_from_event_loop(move || {
-                            let Some(window) = window_weak.upgrade() else {
-                                return;
-                            };
-                            let ui = window.global::<crate::UiState>();
-                            ui.set_status_message(format!("Disconnected: {id}").into());
-                            ui.set_status_connection("Not connected".into());
-                        });
-                    }
-                    Event::MetadataLoaded(ref conn_id, ref meta) => {
-                        let conn_id = conn_id.clone();
-                        let meta = meta.clone(); // clone required: moved into sidebar_state
-                        // Store metadata in shared state
-                        {
-                            let mut sb = sidebar_state.lock().unwrap_or_else(|p| p.into_inner());
-                            sb.metadata.insert(conn_id.clone(), meta);
-                        }
-                        // Build updated tree outside invoke_from_event_loop (Vec is Send)
-                        let nodes = {
-                            let sb = sidebar_state.lock().unwrap_or_else(|p| p.into_inner());
-                            let connections = state.conn.all();
-                            let active_id = state
-                                .conn
-                                .active()
-                                .map(|c| c.id.clone())
-                                .unwrap_or_default();
-                            build_sidebar_tree(&connections, &active_id, &sb.metadata, &sb.expanded)
-                        };
-                        // clone required: invoke_from_event_loop closure must be 'static
-                        let window_weak = window_weak.clone();
-                        let _ = slint::invoke_from_event_loop(move || {
-                            let Some(window) = window_weak.upgrade() else {
-                                return;
-                            };
-                            let ui = window.global::<crate::UiState>();
-                            ui.set_sidebar_tree(Rc::new(slint::VecModel::from(nodes)).into());
-                            ui.set_sidebar_loading(false);
-                        });
-                    }
-                    Event::MetadataFetchFailed(ref msg) => {
-                        let msg = msg.clone();
-                        // clone required: invoke_from_event_loop closure must be 'static
-                        let window_weak = window_weak.clone();
-                        let _ = slint::invoke_from_event_loop(move || {
-                            let Some(window) = window_weak.upgrade() else {
-                                return;
-                            };
-                            let ui = window.global::<crate::UiState>();
-                            ui.set_sidebar_loading(false);
-                            ui.set_status_message(format!("Metadata unavailable: {msg}").into());
-                        });
-                    }
-                    Event::InsertText(ref text) => {
-                        let text = text.clone();
-                        // clone required: invoke_from_event_loop closure must be 'static
-                        let window_weak = window_weak.clone();
-                        let _ = slint::invoke_from_event_loop(move || {
-                            let Some(window) = window_weak.upgrade() else {
-                                return;
-                            };
-                            let ui = window.global::<crate::UiState>();
-                            let current = ui.get_editor_text().to_string();
-                            ui.set_editor_text(append_editor_text(&current, &text).into());
-                        });
-                    }
-                    Event::CompletionReady(ref items) => {
-                        // Build Vec<CompletionRow> outside invoke_from_event_loop —
-                        // Vec is Send, Rc is not.
-                        let rows: Vec<crate::CompletionRow> = items
-                            .iter()
-                            .map(|item| crate::CompletionRow {
-                                label: item.label.clone().into(),
-                                kind: completion_kind_label(&item.kind).into(),
-                                detail: item.detail.clone().unwrap_or_default().into(),
-                                insert_text: item.insert_text.clone().into(),
-                                cursor_offset: item.cursor_offset,
-                                table_name: item.table_name.clone().unwrap_or_default().into(),
-                            })
-                            .collect();
-                        // clone required: invoke_from_event_loop closure must be 'static
-                        let window_weak = window_weak.clone();
-                        let _ = slint::invoke_from_event_loop(move || {
-                            let Some(window) = window_weak.upgrade() else {
-                                return;
-                            };
-                            let ui = window.global::<crate::UiState>();
-                            if rows.is_empty() {
-                                ui.set_completion_visible(false);
-                            } else {
-                                let model = Rc::new(slint::VecModel::from(rows));
-                                ui.set_completion_items(model.into());
-                                ui.set_completion_selected(0);
-                                ui.set_completion_visible(true);
-                            }
-                        });
+                    Event::InsertText(text) => Self::handle_insert_text(text, window_weak.clone()),
+                    Event::CompletionReady(items) => {
+                        Self::handle_completion_ready(items, window_weak.clone())
                     }
                     _ => {}
                 }
+            }
+        });
+    }
+
+    // ── Per-event handlers ─────────────────────────────────────────────────────
+
+    fn handle_connected(
+        id: String,
+        ww: slint::Weak<crate::AppWindow>,
+        state: SharedState,
+        sidebar_state: Arc<Mutex<SidebarUiState>>,
+    ) {
+        // Build Send data outside invoke_from_event_loop (Rc<VecModel> is not Send).
+        let entries: Vec<crate::ConnectionEntry> = state
+            .conn
+            .all()
+            .into_iter()
+            .map(|c| crate::ConnectionEntry {
+                is_active: c.id == id,
+                db_type: db_type_label(&c.db_type).into(),
+                name: c.name.clone().into(),
+                id: c.id.clone().into(),
+            })
+            .collect();
+        let status_conn = state
+            .conn
+            .all()
+            .into_iter()
+            .find(|c| c.id == id)
+            .map(|c| match c.database.as_deref() {
+                Some(db) if !db.is_empty() => format!("{} / {}", c.name, db),
+                _ => c.name.clone(),
+            })
+            .unwrap_or_else(|| id.clone());
+        {
+            let mut sb = sidebar_state.lock().unwrap_or_else(|p| p.into_inner());
+            sb.expanded.insert(format!("conn:{}", id));
+        }
+        let sidebar_nodes = {
+            let sb = sidebar_state.lock().unwrap_or_else(|p| p.into_inner());
+            let connections = state.conn.all();
+            build_sidebar_tree(&connections, &id, &sb.metadata, &sb.expanded)
+        };
+        // clone required: invoke_from_event_loop closure must be 'static
+        let _ = slint::invoke_from_event_loop(move || {
+            let Some(window) = ww.upgrade() else {
+                return;
+            };
+            let ui = window.global::<crate::UiState>();
+            let model = Rc::new(slint::VecModel::from(entries));
+            ui.set_connection_list(model.into());
+            ui.set_active_connection_id(id.into());
+            ui.set_show_connection_form(false);
+            ui.set_form_testing(false);
+            ui.set_form_status("".into());
+            ui.set_error_message("".into());
+            ui.set_status_connection(status_conn.into());
+            ui.set_sidebar_tree(Rc::new(slint::VecModel::from(sidebar_nodes)).into());
+            ui.set_sidebar_loading(true);
+        });
+    }
+
+    fn handle_test_ok(ww: slint::Weak<crate::AppWindow>) {
+        // clone required: invoke_from_event_loop closure must be 'static
+        let _ = slint::invoke_from_event_loop(move || {
+            let Some(window) = ww.upgrade() else {
+                return;
+            };
+            let ui = window.global::<crate::UiState>();
+            ui.set_form_testing(false);
+            ui.set_form_test_ok(true);
+            ui.set_test_result_ok(true);
+            ui.set_test_result_message("".into());
+            ui.set_show_test_result_popup(true);
+        });
+    }
+
+    fn handle_test_failed(msg: String, ww: slint::Weak<crate::AppWindow>) {
+        // clone required: invoke_from_event_loop closure must be 'static
+        let _ = slint::invoke_from_event_loop(move || {
+            let Some(window) = ww.upgrade() else {
+                return;
+            };
+            let ui = window.global::<crate::UiState>();
+            ui.set_form_testing(false);
+            ui.set_form_test_ok(false);
+            ui.set_test_result_ok(false);
+            ui.set_test_result_message(msg.into());
+            ui.set_show_test_result_popup(true);
+        });
+    }
+
+    fn handle_connect_error(msg: String, ww: slint::Weak<crate::AppWindow>) {
+        // clone required: invoke_from_event_loop closure must be 'static
+        let _ = slint::invoke_from_event_loop(move || {
+            let Some(window) = ww.upgrade() else {
+                return;
+            };
+            let ui = window.global::<crate::UiState>();
+            ui.set_form_testing(false);
+            ui.set_form_status(msg.clone().into());
+            ui.set_status_message(format!("Connection failed: {msg}").into());
+            ui.set_sidebar_loading(false);
+        });
+    }
+
+    fn handle_query_started(ww: slint::Weak<crate::AppWindow>) {
+        // clone required: invoke_from_event_loop closure must be 'static
+        let _ = slint::invoke_from_event_loop(move || {
+            let Some(window) = ww.upgrade() else {
+                return;
+            };
+            let ui = window.global::<crate::UiState>();
+            ui.set_is_loading(true);
+            ui.set_error_message("".into());
+            ui.set_status_message("Running\u{2026}".into());
+            ui.set_result_panel_open(true);
+        });
+    }
+
+    fn handle_query_finished(
+        result: QueryResult,
+        ww: slint::Weak<crate::AppWindow>,
+        original_data: SharedOriginalData,
+    ) {
+        // Build Send data outside invoke_from_event_loop (Rc<VecModel> is not Send).
+        let col_count = result.columns.len();
+        let columns: Vec<slint::SharedString> =
+            result.columns.iter().map(|c| c.clone().into()).collect();
+        let raw_rows: Vec<Vec<Option<String>>> = result.rows.iter().map(|r| r.to_vec()).collect();
+        let row_count = result.row_count as i32;
+        let exec_ms = result.execution_time_ms;
+        {
+            let mut orig = original_data.lock().unwrap_or_else(|p| p.into_inner());
+            *orig = Some(OriginalQueryData {
+                columns: columns.clone(),
+                rows: raw_rows.clone(),
+                sort_col: None,
+                sort_asc: true,
+            });
+        }
+        // clone required: invoke_from_event_loop closure must be 'static
+        let _ = slint::invoke_from_event_loop(move || {
+            let Some(window) = ww.upgrade() else {
+                return;
+            };
+            let ui = window.global::<crate::UiState>();
+            ui.set_is_loading(false);
+            ui.set_result_active_filter("".into());
+            ui.set_result_sort_col(-1);
+            ui.set_result_sort_asc(true);
+            let col_model = Rc::new(slint::VecModel::from(columns));
+            ui.set_result_columns(col_model.into());
+            let rows: Vec<crate::RowData> = raw_rows.into_iter().map(rows_to_ui).collect();
+            ui.set_result_rows(Rc::new(slint::VecModel::from(rows)).into());
+            ui.set_result_row_count(row_count);
+            ui.set_result_total_rows(row_count);
+            let widths: Vec<f32> = vec![DEFAULT_COLUMN_WIDTH; col_count];
+            let total_w = col_count as f32 * DEFAULT_COLUMN_WIDTH;
+            ui.set_result_col_widths(Rc::new(slint::VecModel::from(widths)).into());
+            ui.set_result_total_col_width(total_w);
+            ui.set_status_message(format!("{exec_ms} ms  ·  {row_count} rows").into());
+            ui.set_result_panel_open(true);
+        });
+    }
+
+    fn handle_query_cancelled(ww: slint::Weak<crate::AppWindow>) {
+        // clone required: invoke_from_event_loop closure must be 'static
+        let _ = slint::invoke_from_event_loop(move || {
+            let Some(window) = ww.upgrade() else {
+                return;
+            };
+            let ui = window.global::<crate::UiState>();
+            ui.set_is_loading(false);
+            ui.set_status_message("Cancelled".into());
+        });
+    }
+
+    fn handle_query_error(msg: String, ww: slint::Weak<crate::AppWindow>) {
+        let summary = msg
+            .lines()
+            .find(|l| !l.trim().is_empty())
+            .unwrap_or(&msg)
+            .chars()
+            .take(ERROR_TRUNCATION_CHARS)
+            .collect::<String>();
+        // clone required: invoke_from_event_loop closure must be 'static
+        let _ = slint::invoke_from_event_loop(move || {
+            let Some(window) = ww.upgrade() else {
+                return;
+            };
+            let ui = window.global::<crate::UiState>();
+            ui.set_is_loading(false);
+            ui.set_form_status(msg.clone().into());
+            ui.set_form_testing(false);
+            ui.set_error_message(msg.into());
+            ui.set_status_message(format!("Error: {summary}").into());
+            ui.set_result_panel_open(true);
+        });
+    }
+
+    fn handle_disconnected(id: String, ww: slint::Weak<crate::AppWindow>) {
+        // clone required: invoke_from_event_loop closure must be 'static
+        let _ = slint::invoke_from_event_loop(move || {
+            let Some(window) = ww.upgrade() else {
+                return;
+            };
+            let ui = window.global::<crate::UiState>();
+            ui.set_status_message(format!("Disconnected: {id}").into());
+            ui.set_status_connection("Not connected".into());
+        });
+    }
+
+    fn handle_metadata_loaded(
+        conn_id: String,
+        meta: DbMetadata,
+        ww: slint::Weak<crate::AppWindow>,
+        state: SharedState,
+        sidebar_state: Arc<Mutex<SidebarUiState>>,
+    ) {
+        {
+            let mut sb = sidebar_state.lock().unwrap_or_else(|p| p.into_inner());
+            sb.metadata.insert(conn_id, meta);
+        }
+        let nodes = {
+            let sb = sidebar_state.lock().unwrap_or_else(|p| p.into_inner());
+            let connections = state.conn.all();
+            let active_id = state
+                .conn
+                .active()
+                .map(|c| c.id.clone())
+                .unwrap_or_default();
+            build_sidebar_tree(&connections, &active_id, &sb.metadata, &sb.expanded)
+        };
+        // clone required: invoke_from_event_loop closure must be 'static
+        let _ = slint::invoke_from_event_loop(move || {
+            let Some(window) = ww.upgrade() else {
+                return;
+            };
+            let ui = window.global::<crate::UiState>();
+            ui.set_sidebar_tree(Rc::new(slint::VecModel::from(nodes)).into());
+            ui.set_sidebar_loading(false);
+        });
+    }
+
+    fn handle_metadata_fetch_failed(msg: String, ww: slint::Weak<crate::AppWindow>) {
+        // clone required: invoke_from_event_loop closure must be 'static
+        let _ = slint::invoke_from_event_loop(move || {
+            let Some(window) = ww.upgrade() else {
+                return;
+            };
+            let ui = window.global::<crate::UiState>();
+            ui.set_sidebar_loading(false);
+            ui.set_status_message(format!("Metadata unavailable: {msg}").into());
+        });
+    }
+
+    fn handle_insert_text(text: String, ww: slint::Weak<crate::AppWindow>) {
+        // clone required: invoke_from_event_loop closure must be 'static
+        let _ = slint::invoke_from_event_loop(move || {
+            let Some(window) = ww.upgrade() else {
+                return;
+            };
+            let ui = window.global::<crate::UiState>();
+            let current = ui.get_editor_text().to_string();
+            ui.set_editor_text(append_editor_text(&current, &text).into());
+        });
+    }
+
+    fn handle_completion_ready(items: Vec<CompletionItem>, ww: slint::Weak<crate::AppWindow>) {
+        // Build Vec<CompletionRow> outside invoke_from_event_loop (Vec is Send, Rc is not).
+        let rows: Vec<crate::CompletionRow> = items
+            .iter()
+            .map(|item| crate::CompletionRow {
+                label: item.label.clone().into(),
+                kind: completion_kind_label(&item.kind).into(),
+                detail: item.detail.clone().unwrap_or_default().into(),
+                insert_text: item.insert_text.clone().into(),
+                cursor_offset: item.cursor_offset,
+                table_name: item.table_name.clone().unwrap_or_default().into(),
+            })
+            .collect();
+        // clone required: invoke_from_event_loop closure must be 'static
+        let _ = slint::invoke_from_event_loop(move || {
+            let Some(window) = ww.upgrade() else {
+                return;
+            };
+            let ui = window.global::<crate::UiState>();
+            if rows.is_empty() {
+                ui.set_completion_visible(false);
+            } else {
+                let model = Rc::new(slint::VecModel::from(rows));
+                ui.set_completion_items(model.into());
+                ui.set_completion_selected(0);
+                ui.set_completion_visible(true);
             }
         });
     }
