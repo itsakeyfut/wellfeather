@@ -136,6 +136,12 @@ export global UiState {
     /// Fired when user accepts a candidate (Enter key in popup).
     callback accept-completion(string, int, int, string);
 
+    // ── Theme ─────────────────────────────────────────────────────────────────
+    /// true = dark (Catppuccin Mocha), false = light (Catppuccin Latte).
+    in-out property <bool> is-dark: true;
+    /// Toggle between dark and light theme; Rust persists the choice.
+    callback toggle-theme();
+
     // ── UI → Controller callbacks ─────────────────────────────────────────────
     callback run-query(string);
     callback cancel-query();
@@ -176,6 +182,11 @@ export component AppWindow inherits Window {
     // avoids all layout-engine ambiguity.
     width:  1280px;
     height: 800px;
+
+    // ── Theme sync ───────────────────────────────────────────────────────────
+    // Mirror UiState.is-dark into Colors.is-dark so all reactive color bindings update.
+    property <bool> _theme-sync: UiState.is-dark;
+    changed _theme-sync => { Colors.is-dark = UiState.is-dark; }
 
     // ── Layout geometry helpers ───────────────────────────────────────────────
     property <length> content-height:    root.height - 24px;  // excludes status bar
@@ -565,6 +576,7 @@ export component AppWindow inherits Window {
             height: 24px;
             connection-text: UiState.status-connection;
             query-status:    UiState.status-message;
+            toggle-theme     => { UiState.toggle-theme(); }
         }
 
         // ── Pane focus border indicators ──────────────────────────────────────

@@ -57,10 +57,12 @@ struct OriginalQueryData {
 
 type SharedOriginalData = Arc<Mutex<Option<OriginalQueryData>>>;
 
+use wf_config::models::Theme;
+
 use crate::{
     app::{
         command::{Command, ConfigUpdate},
-        event::Event,
+        event::{Event, StateEvent},
     },
     state::SharedState,
 };
@@ -255,10 +257,14 @@ impl UI {
         Self::register_completion_accept_callback(&window);
         Self::register_formatter_callback(&window);
         Self::register_export_callbacks(&window, Arc::clone(&original_data));
-        // Set initial page size on the Slint window from shared state.
+        Self::register_theme_callback(&window, state.clone(), tx_cmd.clone());
+        // Set initial page size and theme on the Slint window from shared state.
         window
             .global::<crate::UiState>()
             .set_page_size(state.ui.page_size() as i32);
+        window
+            .global::<crate::UiState>()
+            .set_is_dark(state.ui.theme() == Theme::Dark);
 
         Self::register_result_callbacks(
             &window,
@@ -331,6 +337,9 @@ impl UI {
                     Event::InsertText(text) => Self::handle_insert_text(text, window_weak.clone()),
                     Event::CompletionReady(items) => {
                         Self::handle_completion_ready(items, window_weak.clone())
+                    }
+                    Event::StateChanged(StateEvent::ThemeChanged(t)) => {
+                        Self::handle_theme_changed(t, window_weak.clone())
                     }
                     _ => {}
                 }
@@ -603,6 +612,38 @@ impl UI {
                     ui.set_completion_selected(0);
                     ui.set_completion_visible(true);
                 }
+            });
+        });
+    }
+
+    fn handle_theme_changed(t: Theme, ww: slint::Weak<crate::AppWindow>) {
+        let is_dark = t == Theme::Dark;
+        // clone required: invoke_from_event_loop closure must be 'static
+        let _ = slint::invoke_from_event_loop(move || {
+            with_ui(&ww, |ui| ui.set_is_dark(is_dark));
+        });
+    }
+
+    // ── Theme callback ────────────────────────────────────────────────────────
+
+    fn register_theme_callback(
+        window: &crate::AppWindow,
+        state: SharedState,
+        tx_cmd: mpsc::Sender<Command>,
+    ) {
+        let ui = window.global::<crate::UiState>();
+        let window_weak = window.as_weak(); // clone required: on_toggle_theme closure
+        ui.on_toggle_theme(move || {
+            // Optimistic update: flip is-dark immediately on the UI thread.
+            with_ui(&window_weak, |ui| {
+                let was_dark = ui.get_is_dark();
+                ui.set_is_dark(!was_dark);
+                let new_theme = if was_dark { Theme::Light } else { Theme::Dark };
+                state.ui.set_theme(new_theme.clone());
+                send_cmd(
+                    &tx_cmd,
+                    Command::UpdateConfig(ConfigUpdate::Theme(new_theme)),
+                );
             });
         });
     }
