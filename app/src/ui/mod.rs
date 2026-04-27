@@ -223,6 +223,7 @@ impl UI {
         Self::register_completion_callbacks(&window, tx_cmd.clone());
         Self::register_completion_accept_callback(&window);
         Self::register_formatter_callback(&window);
+        Self::register_export_callbacks(&window, Arc::clone(&original_data));
         // Set initial page size on the Slint window from shared state.
         window
             .global::<crate::UiState>()
@@ -1094,6 +1095,52 @@ impl UI {
             let text = ui.get_editor_text().to_string();
             let formatted = wf_query::formatter::format_sql(&text);
             ui.set_editor_text(formatted.into());
+        });
+    }
+
+    const CSV_DEFAULT_FILENAME: &str = "query_result.csv";
+
+    fn register_export_callbacks(window: &crate::AppWindow, original_data: SharedOriginalData) {
+        let ui = window.global::<crate::UiState>();
+        let window_weak = window.as_weak(); // clone required: on_export_csv closure
+        ui.on_export_csv(move || {
+            // Snapshot columns + rows while still on the UI thread (Mutex is not Send).
+            let snapshot = {
+                let orig = original_data.lock().unwrap_or_else(|p| p.into_inner());
+                orig.as_ref().map(|d| {
+                    let cols: Vec<String> = d.columns.iter().map(|s| s.to_string()).collect();
+                    (cols, d.rows.clone())
+                })
+            };
+            let Some((columns, rows)) = snapshot else {
+                return;
+            };
+            let window_weak = window_weak.clone(); // clone required: tokio::spawn needs 'static
+            tokio::spawn(async move {
+                let Some(handle) = rfd::AsyncFileDialog::new()
+                    .set_title("Save CSV")
+                    .set_file_name(Self::CSV_DEFAULT_FILENAME)
+                    .add_filter("CSV files", &["csv"])
+                    .save_file()
+                    .await
+                else {
+                    return; // user cancelled
+                };
+                let path = handle.path().to_path_buf();
+                let result = wf_query::export::export_csv(&columns, &rows, &path);
+                let msg = match result {
+                    Ok(()) => format!("Saved CSV: {}", path.display()),
+                    Err(e) => format!("CSV export failed: {e}"),
+                };
+                let _ = slint::invoke_from_event_loop(move || {
+                    let Some(window) = window_weak.upgrade() else {
+                        return;
+                    };
+                    window
+                        .global::<crate::UiState>()
+                        .set_status_message(msg.into());
+                });
+            });
         });
     }
 

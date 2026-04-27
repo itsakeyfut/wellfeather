@@ -73,6 +73,8 @@ export component ResultTable inherits Rectangle {
     callback copy-row(int);
     /// Copy all visible rows as TSV with column headers.
     callback copy-all-tsv();
+    /// Fired when the "Export CSV" button is clicked.
+    callback export-csv();
     /// Returns cumulative x-offset (logical px as float) of column j.
     /// Implemented in Rust; used for horizontal auto-scroll in cell mode.
     pure callback col-x-offset(int) -> float;
@@ -446,6 +448,26 @@ export component ResultTable inherits Rectangle {
                         : @tr("{0} rows", root.row-count);
                     color: #585b70;
                     font-size: 11px;
+                }
+
+                // Export CSV button (only when a result is loaded)
+                if root.columns.length > 0: Rectangle {
+                    x: parent.width - 266px;
+                    y: (parent.height - self.height) / 2;
+                    width: 80px;
+                    height: 20px;
+                    border-radius: 3px;
+                    background: csv-ta.has-hover ? #45475a : #313244;
+                    csv-ta := TouchArea {
+                        clicked => { root.export-csv(); }
+                    }
+                    Text {
+                        text: @tr("Export CSV");
+                        color: #9399b2;
+                        font-size: 11px;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
                 }
 
                 // Page-size selector: four toggle buttons aligned to the right
