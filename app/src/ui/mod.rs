@@ -11,6 +11,10 @@ use tokio::sync::mpsc;
 use wf_config::crypto;
 use wf_db::models::{DbConnection, DbMetadata, DbType, TableInfo};
 
+const COMPLETION_DEBOUNCE_MS: u64 = 300;
+const ERROR_TRUNCATION_CHARS: usize = 80;
+const DEFAULT_COLUMN_WIDTH: f32 = 150.0;
+
 // ---------------------------------------------------------------------------
 // Original query result — retained for client-side filtering
 // ---------------------------------------------------------------------------
@@ -431,10 +435,9 @@ impl UI {
                             ui.set_result_rows(Rc::new(slint::VecModel::from(rows)).into());
                             ui.set_result_row_count(row_count);
                             ui.set_result_total_rows(row_count);
-                            // Initialise per-column widths (150 px each).
-                            const DEFAULT_COL_W: f32 = 150.0;
-                            let widths: Vec<f32> = vec![DEFAULT_COL_W; col_count];
-                            let total_w = col_count as f32 * DEFAULT_COL_W;
+                            // Initialise per-column widths.
+                            let widths: Vec<f32> = vec![DEFAULT_COLUMN_WIDTH; col_count];
+                            let total_w = col_count as f32 * DEFAULT_COLUMN_WIDTH;
                             ui.set_result_col_widths(Rc::new(slint::VecModel::from(widths)).into());
                             ui.set_result_total_col_width(total_w);
                             ui.set_status_message(
@@ -458,13 +461,13 @@ impl UI {
                     }
                     Event::QueryError(ref msg) => {
                         let msg = msg.clone();
-                        // Short summary: first non-empty line, truncated to 80 chars.
+                        // Short summary: first non-empty line, truncated to ERROR_TRUNCATION_CHARS.
                         let summary = msg
                             .lines()
                             .find(|l| !l.trim().is_empty())
                             .unwrap_or(&msg)
                             .chars()
-                            .take(80)
+                            .take(ERROR_TRUNCATION_CHARS)
                             .collect::<String>();
                         // clone required: invoke_from_event_loop closure must be 'static
                         let window_weak = window_weak.clone();
@@ -933,7 +936,7 @@ impl UI {
                 let timer = slint::Timer::default();
                 timer.start(
                     slint::TimerMode::SingleShot,
-                    Duration::from_millis(300),
+                    Duration::from_millis(COMPLETION_DEBOUNCE_MS),
                     move || {
                         let tx = tx.clone(); // clone required: tokio::spawn
                         let sql = sql.clone();
