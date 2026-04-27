@@ -1,0 +1,97 @@
+import { Colors, Typography } from "../theme.slint";
+import { ToolbarButton, MenuItem } from "common.slint";
+
+// Toolbar strip for the result table: row-count display, Export button, page-size selector.
+export component ResultTableToolbar inherits Rectangle {
+    height: 28px;
+    background: Colors.mantle;
+    clip: true;
+
+    in property <int> col-count:  0;
+    in property <int> row-count:  0;
+    in property <int> total-rows: 0;
+    in property <int> page-size:  500;
+
+    callback change-page-size(int);
+    callback export-csv();
+    callback export-json();
+
+    Rectangle {
+        x: 0; y: parent.height - 1px;
+        width: parent.width; height: 1px;
+        background: Colors.surface0;
+    }
+
+    if root.col-count > 0: Text {
+        x: 10px;
+        y: (parent.height - self.height) / 2;
+        text: root.row-count != root.total-rows
+            ? @tr("{0} / {1} rows", root.row-count, root.total-rows)
+            : @tr("{0} rows", root.row-count);
+        color: Colors.surface2;
+        font-size: Typography.size-md;
+    }
+
+    if root.col-count > 0: ToolbarButton {
+        x: parent.width - 266px;
+        y: (parent.height - self.height) / 2;
+        width: 80px;
+        text: @tr("Export") + " \u{25BE}";
+        clicked => { export-popup.show(); }
+    }
+
+    HorizontalLayout {
+        x: parent.width - 178px;
+        y: (parent.height - self.height) / 2;
+        width: 170px;
+        height: 20px;
+        spacing: 2px;
+
+        ToolbarButton {
+            width: 38px; text: "100";
+            active: root.page-size == 100;
+            clicked => { root.change-page-size(100); }
+        }
+        ToolbarButton {
+            width: 38px; text: "500";
+            active: root.page-size == 500;
+            clicked => { root.change-page-size(500); }
+        }
+        ToolbarButton {
+            width: 46px; text: "1000";
+            active: root.page-size == 1000;
+            clicked => { root.change-page-size(1000); }
+        }
+        ToolbarButton {
+            width: 38px; text: @tr("ALL");
+            active: root.page-size == 0;
+            clicked => { root.change-page-size(0); }
+        }
+    }
+
+    export-popup := PopupWindow {
+        x: root.width - 266px;
+        y: root.height + 2px;
+        width: 120px;
+        height: 60px;
+        close-policy: PopupClosePolicy.close-on-click;
+
+        Rectangle {
+            width: 120px;
+            height: 60px;
+            background: Colors.surface0;
+            border-radius: 4px;
+            border-width: 1px;
+            border-color: Colors.surface2;
+            drop-shadow-blur: 8px;
+            drop-shadow-color: Colors.shadow;
+            clip: true;
+
+            VerticalLayout {
+                spacing: 0;
+                MenuItem { text: @tr("Export CSV");  clicked => { root.export-csv(); } }
+                MenuItem { text: @tr("Export JSON"); clicked => { root.export-json(); } }
+            }
+        }
+    }
+}

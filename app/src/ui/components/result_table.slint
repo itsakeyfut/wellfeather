@@ -1,800 +1,150 @@
-import { ListView } from "std-widgets.slint";
-import { RowData, RowCellData } from "../globals.slint";
+import { RowData } from "../globals.slint";
 import { Colors, Typography } from "../theme.slint";
-import { ToolbarButton, MenuItem } from "common.slint";
-
-// Result table — column headers + scrollable data rows.
-//
-// Features:
-//   • Per-column widths, adjustable by dragging the right-edge divider on each header.
-//   • Overflow text is elided (…) within the cell.
-//   • Three navigation modes: row (default), cell (Enter), search (F).
-//   • Client-side row filtering via search bar; active-filter banner shows applied filter.
-//
-// Scroll architecture:
-//   header-scroll (Flickable, interactive: false) + body-scroll (ListView, H+V).
-//   ListView only renders visible rows for smooth scrolling with large result sets.
-//   `changed viewport-x =>` in body-scroll syncs header-scroll so headers
-//   track horizontal scroll without scrolling vertically.
-//
-// Keyboard navigation:
-//   Row mode:  ↑↓ Home End PgUp PgDn — move selected row
-//              Enter — enter cell mode at column 0
-//              F     — enter search mode
-//              Esc   — clear filter (if active) or deselect row
-//              Ctrl+C — copy selected cell value to clipboard
-//   Cell mode: ←→ Home End — move selected column within current row
-//              Esc  — return to row mode
-//              Ctrl+C — copy current cell value to clipboard
-//   Search:    type to build query; Enter — apply; Esc — cancel
+import { ResultTableToolbar } from "result_table_toolbar.slint";
+import { ResultTableHeader } from "result_table_header.slint";
+import { ResultTableBody }   from "result_table_body.slint";
+import { ResultTableSearch } from "result_table_search.slint";
 
 export component ResultTable inherits Rectangle {
     background: Colors.base;
     clip: true;
     preferred-height: 0;
     min-height: 0;
-
-    // ── In properties ─────────────────────────────────────────────────────────
-    in property <[string]>  columns:       [];
-    in property <[RowData]> rows:          [];
-    in property <int>       row-count:     0;
-    in property <bool>      is-loading:    false;
-    in property <string>    error-message: "";
-    in property <[float]>   col-widths:    [];
+    in property <[string]>  columns:         [];
+    in property <[RowData]> rows:            [];
+    in property <int>       row-count:       0;
+    in property <bool>      is-loading:      false;
+    in property <string>    error-message:   "";
+    in property <[float]>   col-widths:      [];
     in property <float>     total-col-width: 0.0;
-    /// Currently active filter text (empty = no filter). Set by Rust after filter-rows fires.
-    in property <string>    active-filter: "";
-
-    // ── Focus API ─────────────────────────────────────────────────────────────
-    /// True when this table (or its search input) holds focus.
-    out property <bool> result-focused:
-        table-fs.has-focus
-        || (root.nav-mode == 2 && search-input.has-focus);
-
-    public function grab-focus() {
-        table-fs.focus();
-        if (root.selected-row < 0 && root.row-count > 0) {
-            root.selected-row = 0;
-        }
-    }
-
-    // ── Pagination / row-count state ─────────────────────────────────────────
-    /// Active page size (100 / 500 / 1000). Driven from Rust; reflects config.
-    in property <int> page-size:   500;
-    /// Total rows returned by the last query (before client-side filtering).
-    in property <int> total-rows:  0;
-    /// User selected a new page size; Rust persists to config and updates state.
-    callback change-page-size(int);
-
-    // ── Callbacks ─────────────────────────────────────────────────────────────
+    in property <string>    active-filter:   "";
+    in property <int>       page-size:       500;
+    in property <int>       total-rows:      0;
+    in property <int>       sort-col:        -1;
+    in property <bool>      sort-asc:        true;
     callback resize-column(int, float);
     callback filter-rows(string);
     callback clear-filter();
     callback copy-cell(string);
-    /// Copy row i cells to clipboard (tab-separated, NULL → empty string).
     callback copy-row(int);
-    /// Copy all visible rows as TSV with column headers.
     callback copy-all-tsv();
-    /// Fired when the "Export CSV" menu item is clicked.
     callback export-csv();
-    /// Fired when the "Export JSON" menu item is clicked.
     callback export-json();
-    /// Returns cumulative x-offset (logical px as float) of column j.
-    /// Implemented in Rust; used for horizontal auto-scroll in cell mode.
     pure callback col-x-offset(int) -> float;
-    /// Fired when a column header is clicked; Rust toggles sort direction and re-renders.
     callback sort-col-clicked(int);
-
-    // ── Sort state (driven from Rust via in properties) ───────────────────────
-    /// -1 = no active sort; ≥0 = index of the currently sorted column.
-    in property <int>  sort-col: -1;
-    /// true = ascending (▲), false = descending (▼).
-    in property <bool> sort-asc: true;
-
-    // ── Context menu state ────────────────────────────────────────────────────
-    property <length> ctx-menu-x:       0;
-    property <length> ctx-menu-y:       0;
-    property <int>    ctx-row:          -1;
-    property <string> ctx-cell-value:   "";
-    property <bool>   ctx-cell-is-null: false;
-
-    // ── Style constants ───────────────────────────────────────────────────────
+    callback change-page-size(int);
+    out property <bool>   result-focused:
+        body-inst.has-focus
+        || (body-inst.nav-mode == 2 && search-inst.has-focus);
+    out property <string> selected-cell-value:   body-inst.selected-cell-value;
+    out property <bool>   selected-cell-is-null: body-inst.selected-cell-is-null;
+    public function grab-focus() { body-inst.grab-focus(); }
     property <length> row-height:    28px;
-    property <length> toolbar-h:     28px;
     property <length> default-col-w: 150px;
     property <length> min-col-w:     48px;
-
-    // ── Selection / nav state ─────────────────────────────────────────────────
-    property <int>        selected-row:          -1;
-    /// Full value of the last clicked cell; "" when no specific cell is selected.
-    out property <string> selected-cell-value:   "";
-    /// true when the selected cell contains SQL NULL (distinct from empty string).
-    out property <bool>   selected-cell-is-null: false;
-    property <int>        selected-col:          -1;
-    /// 0 = row mode  1 = cell mode  2 = search mode
-    property <int>    nav-mode:    0;
-    property <string> search-query: "";
-
-    // ── Bottom strip heights ──────────────────────────────────────────────────
-    property <length> filter-banner-h: root.active-filter != "" ? 24px : 0px;
-    property <length> search-bar-h:    root.nav-mode == 2 ? 32px : 0px;
-    property <length> bottom-total:
-        root.filter-banner-h + root.search-bar-h;
-
-    // ── Viewport width ────────────────────────────────────────────────────────
     property <length> vp-w: root.total-col-width > 0
         ? max(root.total-col-width * 1px, root.width)
         : max(root.columns.length * root.default-col-w, root.width);
+    property <length> filter-banner-h: root.active-filter != "" ? 24px : 0px;
+    property <length> search-bar-h:    body-inst.nav-mode == 2 ? 32px : 0px;
+    property <length> bottom-total:    root.filter-banner-h + root.search-bar-h;
+    property <string> search-query: "";
 
-    // ── Page size for Page Up/Down ────────────────────────────────────────────
-    property <int> page-rows: max(1,
-        (root.height - root.row-height - root.bottom-total - root.toolbar-h) / root.row-height);
-
-    // ── Body viewport state ───────────────────────────────────────────────────
-    // Mirrored at component level so `changed` handlers can update them without
-    // referencing body-scroll (which lives inside a conditional if-block).
-    // Two-way bound to body-scroll.viewport-y/x inside the if-block.
-    property <length> body-vp-y: 0;
-    property <length> body-vp-x: 0;
-    // Visible body height (full height minus toolbar, header row, and collapsed strips).
-    property <length> body-h: max(1px, root.height - root.bottom-total - root.row-height - root.toolbar-h);
-
-    // Reset selection and nav state when a new query result arrives.
-    changed rows => {
-        root.selected-row          = -1;
-        root.selected-col          = -1;
-        root.nav-mode              = 0;
-        root.selected-cell-value   = "";
-        root.selected-cell-is-null = false;
-        root.body-vp-y             = 0;
-        root.body-vp-x             = 0;
-    }
-
-    // ── Auto-scroll: keep selected row visible ────────────────────────────────
-    changed selected-row => {
-        if (root.selected-row >= 0) {
-            let row-top = root.selected-row * root.row-height;
-            let row-bot = row-top + root.row-height;
-            if (row-top < -root.body-vp-y) {
-                root.body-vp-y = -row-top;
-            } else if (row-bot > -root.body-vp-y + root.body-h) {
-                root.body-vp-y = -(row-bot - root.body-h);
-            }
-        }
-    }
-
-    // ── Auto-scroll: keep selected column visible ─────────────────────────────
-    changed selected-col => {
-        if (root.selected-col >= 0) {
-            let col-left  = root.col-x-offset(root.selected-col) * 1px;
-            let col-w     = root.col-widths.length > root.selected-col
-                            && root.col-widths[root.selected-col] > 0
-                ? root.col-widths[root.selected-col] * 1px
-                : root.default-col-w;
-            let col-right = col-left + col-w;
-            if (col-left < -root.body-vp-x) {
-                root.body-vp-x = -col-left;
-            } else if (col-right > -root.body-vp-x + root.width) {
-                root.body-vp-x = -(col-right - root.width);
-            }
-        }
-    }
-
-    // ── Root FocusScope ───────────────────────────────────────────────────────
-    // capture-key-pressed fires root→focused so it intercepts keys regardless
-    // of which child (e.g. search-input) currently holds focus.
-    table-fs := FocusScope {
+    VerticalLayout {
         x: 0; y: 0;
-        width: parent.width; height: parent.height;
-        focus-on-click: true;
+        width: root.width;
+        height: root.height - root.bottom-total;
 
-        capture-key-pressed(event) => {
-            if (root.is-loading || root.error-message != "" || root.columns.length == 0) {
-                EventResult.reject
-            } else if (root.nav-mode == 2) {
-                // Search mode: intercept Enter and Esc; reject all other keys so
-                // search-input receives them for editing.
-                if (event.text == Key.Return) {
-                    root.filter-rows(root.search-query);
-                    root.nav-mode = 0;
-                    table-fs.focus();
-                    EventResult.accept
-                } else if (event.text == Key.Escape) {
-                    root.nav-mode = 0;
-                    table-fs.focus();
-                    EventResult.accept
-                } else {
-                    EventResult.reject
-                }
-            } else if (root.nav-mode == 1) {
-                // Cell mode
-                if (event.text == Key.LeftArrow) {
-                    if (root.selected-col > 0) { root.selected-col -= 1; }
-                    EventResult.accept
-                } else if (event.text == Key.RightArrow) {
-                    if (root.selected-col < root.columns.length - 1) {
-                        root.selected-col += 1;
-                    }
-                    EventResult.accept
-                } else if (event.text == Key.Home) {
-                    root.selected-col = 0;
-                    EventResult.accept
-                } else if (event.text == Key.End) {
-                    if (root.columns.length > 0) {
-                        root.selected-col = root.columns.length - 1;
-                    }
-                    EventResult.accept
-                } else if (event.text == Key.Escape) {
-                    root.nav-mode = 0;
-                    root.selected-col = -1;
-                    EventResult.accept
-                } else if (event.text == "c" && event.modifiers.control) {
-                    if (root.selected-row >= 0 && root.selected-col >= 0
-                            && root.selected-row < root.rows.length
-                            && root.selected-col < root.rows[root.selected-row].cells.length) {
-                        root.copy-cell(root.rows[root.selected-row].cells[root.selected-col].value);
-                    }
-                    EventResult.accept
-                } else {
-                    EventResult.reject
-                }
-            } else {
-                // Row mode
-                if (event.text == Key.UpArrow) {
-                    root.selected-cell-value   = "";
-                    root.selected-cell-is-null = false;
-                    if (root.selected-row > 0) {
-                        root.selected-row -= 1;
-                    } else if (root.row-count > 0) {
-                        root.selected-row = 0;
-                    }
-                    EventResult.accept
-                } else if (event.text == Key.DownArrow) {
-                    root.selected-cell-value   = "";
-                    root.selected-cell-is-null = false;
-                    if (root.selected-row < 0 && root.row-count > 0) {
-                        root.selected-row = 0;
-                    } else if (root.selected-row < root.row-count - 1) {
-                        root.selected-row += 1;
-                    }
-                    EventResult.accept
-                } else if (event.text == Key.Home) {
-                    root.selected-cell-value   = "";
-                    root.selected-cell-is-null = false;
-                    if (root.row-count > 0) { root.selected-row = 0; }
-                    EventResult.accept
-                } else if (event.text == Key.End) {
-                    root.selected-cell-value   = "";
-                    root.selected-cell-is-null = false;
-                    if (root.row-count > 0) { root.selected-row = root.row-count - 1; }
-                    EventResult.accept
-                } else if (event.text == Key.PageUp) {
-                    root.selected-cell-value   = "";
-                    root.selected-cell-is-null = false;
-                    if (root.selected-row > 0) {
-                        root.selected-row = max(0, root.selected-row - root.page-rows);
-                    }
-                    EventResult.accept
-                } else if (event.text == Key.PageDown) {
-                    root.selected-cell-value   = "";
-                    root.selected-cell-is-null = false;
-                    if (root.selected-row < root.row-count - 1) {
-                        root.selected-row = min(
-                            root.row-count - 1, root.selected-row + root.page-rows);
-                    }
-                    EventResult.accept
-                } else if (event.text == Key.Return) {
-                    if (root.selected-row >= 0 && root.columns.length > 0) {
-                        root.nav-mode = 1;
-                        root.selected-col = 0;
-                    }
-                    EventResult.accept
-                } else if (event.text == "f"
-                        && !event.modifiers.control
-                        && !event.modifiers.alt
-                        && !event.modifiers.shift) {
-                    root.search-query = "";
-                    root.nav-mode = 2;
-                    search-input.focus();
-                    EventResult.accept
-                } else if (event.text == Key.Escape) {
-                    if (root.active-filter != "") {
-                        root.clear-filter();
-                    } else {
-                        root.selected-row          = -1;
-                        root.selected-cell-value   = "";
-                        root.selected-cell-is-null = false;
-                    }
-                    EventResult.accept
-                } else if (event.text == "c" && event.modifiers.control) {
-                    if (root.selected-cell-value != "") {
-                        root.copy-cell(root.selected-cell-value);
-                    }
-                    EventResult.accept
-                } else {
-                    EventResult.reject
-                }
-            }
+        toolbar-inst := ResultTableToolbar {
+            col-count:  root.columns.length;
+            row-count:  root.row-count;
+            total-rows: root.total-rows;
+            page-size:  root.page-size;
+            change-page-size(n) => { root.change-page-size(n); }
+            export-csv  => { root.export-csv(); }
+            export-json => { root.export-json(); }
         }
 
-        // ── Export dropdown menu ──────────────────────────────────────────────
-        // Positioned just below the Export button in the toolbar.
-        // x/y are relative to table-fs, which covers the full component.
-        export-popup := PopupWindow {
-            x: root.width - 266px;
-            y: root.toolbar-h + 2px;
-            width: 120px;
-            height: 60px;
-            close-policy: PopupClosePolicy.close-on-click;
-
-            Rectangle {
-                width: 120px;
-                height: 60px;
-                background: Colors.surface0;
-                border-radius: 4px;
-                border-width: 1px;
-                border-color: Colors.surface2;
-                drop-shadow-blur: 8px;
-                drop-shadow-color: Colors.shadow;
-                clip: true;
-
-                VerticalLayout {
-                    spacing: 0;
-                    MenuItem {
-                        text: @tr("Export CSV");
-                        clicked => { root.export-csv(); }
-                    }
-                    MenuItem {
-                        text: @tr("Export JSON");
-                        clicked => { root.export-json(); }
-                    }
-                }
-            }
+        header-inst := ResultTableHeader {
+            height:        root.row-height;
+            columns:       root.columns;
+            col-widths:    root.col-widths;
+            sort-col:      root.sort-col;
+            sort-asc:      root.sort-asc;
+            default-col-w: root.default-col-w;
+            min-col-w:     root.min-col-w;
+            vp-w:          root.vp-w;
+            body-vp-x:     body-inst.body-vp-x;
+            sort-col-clicked(i) => { root.sort-col-clicked(i); }
+            resize-column(i, w) => { root.resize-column(i, w); }
         }
 
-        // ── Right-click context menu ──────────────────────────────────────────
-        ctx-popup := PopupWindow {
-            x: root.ctx-menu-x;
-            y: root.ctx-menu-y;
-            width: 204px;
-            height: 90px;
-            close-policy: PopupClosePolicy.close-on-click;
-
-            Rectangle {
-                width: 204px;
-                height: 90px;
-                background: Colors.surface0;
-                border-radius: 4px;
-                border-width: 1px;
-                border-color: Colors.surface2;
-                drop-shadow-blur: 8px;
-                drop-shadow-color: Colors.shadow;
-                clip: true;
-
-                VerticalLayout {
-                    spacing: 0;
-                    MenuItem {
-                        text: @tr("Copy cell value");
-                        clicked => { root.copy-cell(root.ctx-cell-value); }
-                    }
-                    MenuItem {
-                        text: @tr("Copy row (tab-separated)");
-                        clicked => { root.copy-row(root.ctx-row); }
-                    }
-                    MenuItem {
-                        text: @tr("Copy as TSV (with headers)");
-                        clicked => { root.copy-all-tsv(); }
-                    }
-                }
-            }
+        body-inst := ResultTableBody {
+            vertical-stretch: 1;
+            columns:       root.columns;
+            rows:          root.rows;
+            row-count:     root.row-count;
+            col-widths:    root.col-widths;
+            default-col-w: root.default-col-w;
+            vp-w:          root.vp-w;
+            row-height:    root.row-height;
+            active-filter: root.active-filter;
+            is-loading:    root.is-loading;
+            error-message: root.error-message;
+            search-query  <=> root.search-query;
+            filter-rows(q) => { root.filter-rows(q); }
+            clear-filter   => { root.clear-filter(); }
+            copy-cell(v)   => { root.copy-cell(v); }
+            copy-row(i)    => { root.copy-row(i); }
+            copy-all-tsv   => { root.copy-all-tsv(); }
+            focus-search   => { search-inst.grab-focus(); }
+            col-x-offset(j) => { root.col-x-offset(j); }
         }
+    }
 
-        // ── Loading overlay ───────────────────────────────────────────────────
-        if root.is-loading: Rectangle {
-            width:  parent.width;
-            height: parent.height;
-            background: Colors.base;
+    search-inst := ResultTableSearch {
+        x: 0;
+        y: root.height - root.bottom-total;
+        width:  root.width;
+        height: root.bottom-total;
+        active-filter:  root.active-filter;
+        in-search-mode: body-inst.nav-mode == 2;
+        search-query   <=> root.search-query;
+    }
+
+    if root.is-loading: Rectangle {
+        x: 0; y: 0; width: root.width; height: root.height;
+        background: Colors.base;
+        TouchArea {}
+        Text {
+            x: (parent.width  - self.width)  / 2;
+            y: (parent.height - self.height) / 2;
+            text: @tr("Running\u{2026}");
+            color: Colors.text;
+            font-size: Typography.size-lg;
+        }
+    }
+
+    if !root.is-loading && root.error-message != "": Rectangle {
+        x: 0; y: 0; width: root.width; height: root.height;
+        background: Colors.error-bg;
+        TouchArea {}
+        VerticalLayout {
+            alignment: start;
+            padding: 16px;
+            spacing: 8px;
             Text {
-                x: (parent.width  - self.width)  / 2;
-                y: (parent.height - self.height) / 2;
-                text: @tr("Running\u{2026}");
-                color: Colors.text;
-                font-size: Typography.size-lg;
-            }
-        }
-
-        // ── Error panel ───────────────────────────────────────────────────────
-        if !root.is-loading && root.error-message != "": Rectangle {
-            width:  parent.width;
-            height: parent.height;
-            background: Colors.error-bg;
-            VerticalLayout {
-                alignment: start;
-                padding: 16px;
-                spacing: 8px;
-                Text {
-                    text: @tr("Query Error");
-                    color: Colors.red;
-                    font-size: Typography.size-lg;
-                    font-weight: 700;
-                }
-                Text {
-                    text: root.error-message;
-                    color: Colors.text;
-                    font-size: Typography.size-base;
-                    wrap: word-wrap;
-                }
-            }
-        }
-
-        // ── Result content ────────────────────────────────────────────────────
-        if !root.is-loading && root.error-message == "": VerticalLayout {
-            width:  parent.width;
-            height: parent.height - root.bottom-total;
-
-            // ── Toolbar (page-size selector + row count) ──────────────────────
-            Rectangle {
-                height: root.toolbar-h;
-                background: Colors.mantle;
-                clip: true;
-
-                // Bottom separator
-                Rectangle {
-                    x: 0; y: parent.height - 1px;
-                    width: parent.width; height: 1px;
-                    background: Colors.surface0;
-                }
-
-                // Row count display (left side; only when a result is loaded)
-                if root.columns.length > 0: Text {
-                    x: 10px;
-                    y: (parent.height - self.height) / 2;
-                    text: root.row-count != root.total-rows
-                        ? @tr("{0} / {1} rows", root.row-count, root.total-rows)
-                        : @tr("{0} rows", root.row-count);
-                    color: Colors.surface2;
-                    font-size: Typography.size-md;
-                }
-
-                // Export button — opens a dropdown with CSV / JSON options
-                if root.columns.length > 0: ToolbarButton {
-                    x: parent.width - 266px;
-                    y: (parent.height - self.height) / 2;
-                    width: 80px;
-                    text: @tr("Export") + " \u{25BE}";
-                    clicked => { export-popup.show(); }
-                }
-
-                // Page-size selector: four toggle buttons aligned to the right
-                // 0 = unlimited (ALL); 100/500/1000 inject LIMIT N.
-                HorizontalLayout {
-                    x: parent.width - 178px;
-                    y: (parent.height - self.height) / 2;
-                    width: 170px;
-                    height: 20px;
-                    spacing: 2px;
-
-                    ToolbarButton {
-                        width: 38px;
-                        text: "100";
-                        active: root.page-size == 100;
-                        clicked => { root.change-page-size(100); }
-                    }
-                    ToolbarButton {
-                        width: 38px;
-                        text: "500";
-                        active: root.page-size == 500;
-                        clicked => { root.change-page-size(500); }
-                    }
-                    ToolbarButton {
-                        width: 46px;
-                        text: "1000";
-                        active: root.page-size == 1000;
-                        clicked => { root.change-page-size(1000); }
-                    }
-                    ToolbarButton {
-                        width: 38px;
-                        text: @tr("ALL");
-                        active: root.page-size == 0;
-                        clicked => { root.change-page-size(0); }
-                    }
-                }
-            }
-
-            // ── Header row ────────────────────────────────────────────────────
-            header-scroll := Flickable {
-                height:         root.row-height;
-                interactive:    false;
-                viewport-width: root.vp-w;
-                // One-way bind: follows body-vp-x so header tracks horizontal scroll.
-                viewport-x:     root.body-vp-x;
-
-                HorizontalLayout {
-                    spacing: 0;
-                    for col[i] in root.columns: Rectangle {
-                        width: root.col-widths.length > i && root.col-widths[i] > 0
-                            ? root.col-widths[i] * 1px
-                            : root.default-col-w;
-                        height: root.row-height;
-                        background: sort-hdr-ta.has-hover ? Colors.header-hover : Colors.surface0;
-                        clip: true;
-
-                        // Sort click area — covers the full cell except the 4px resize handle.
-                        sort-hdr-ta := TouchArea {
-                            width: parent.width - 4px;
-                            height: parent.height;
-                            mouse-cursor: pointer;
-                            clicked => { root.sort-col-clicked(i); }
-                        }
-
-                        Text {
-                            x: 8px;
-                            y: (parent.height - self.height) / 2;
-                            // Shrink right margin when the sort indicator is visible.
-                            width: root.sort-col == i
-                                ? parent.width - 28px
-                                : parent.width - 12px;
-                            text: col;
-                            color: Colors.text;
-                            font-size: Typography.size-base;
-                            overflow: elide;
-                        }
-
-                        // ▲/▼ sort direction indicator for the active sort column.
-                        if root.sort-col == i: Text {
-                            x: parent.width - 20px;
-                            y: (parent.height - self.height) / 2;
-                            text: root.sort-asc ? "▲" : "▼";
-                            color: Colors.blue;
-                            font-size: Typography.size-sm;
-                        }
-
-                        // ── Column resize drag handle ─────────────────────────
-                        Rectangle {
-                            x: parent.width - 4px;
-                            y: 0;
-                            width:  4px;
-                            height: parent.height;
-                            background: col-resize-ta.has-hover || col-resize-ta.pressed
-                                ? Colors.blue : Colors.surface1;
-
-                            col-resize-ta := TouchArea {
-                                mouse-cursor: ew-resize;
-                                moved => {
-                                    let cw = root.col-widths.length > i
-                                             && root.col-widths[i] > 0
-                                        ? root.col-widths[i] * 1px
-                                        : root.default-col-w;
-                                    let new-w = max(
-                                        cw + (self.mouse-x - self.pressed-x),
-                                        root.min-col-w
-                                    );
-                                    root.resize-column(i, new-w / 1px);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            // ── Body (ListView for virtual scrolling) ─────────────────────────
-            Rectangle {
-                vertical-stretch: 1;
-                clip: true;
-
-                body-scroll := ListView {
-                    width:          parent.width;
-                    height:         parent.height;
-                    viewport-width: root.vp-w;
-                    // Two-way bindings: user scroll gestures update root.body-vp-y/x;
-                    // programmatic scroll (changed selected-row/col) flows the other way.
-                    viewport-y <=> root.body-vp-y;
-                    viewport-x <=> root.body-vp-x;
-
-                    for row[i] in root.rows: Rectangle {
-                        height: root.row-height;
-                        width:  root.vp-w;
-                        background: i == root.selected-row
-                            ? Colors.selection
-                            : (mod(i, 2) == 0 ? Colors.base : Colors.mantle);
-
-                        Rectangle {   // bottom border
-                            y: parent.height - 1px;
-                            width: parent.width;
-                            height: 1px;
-                            background: Colors.surface0;
-                        }
-
-                        HorizontalLayout {
-                            spacing: 0;
-                            for cell[j] in row.cells: Rectangle {
-                                width: root.col-widths.length > j
-                                       && root.col-widths[j] > 0
-                                    ? root.col-widths[j] * 1px
-                                    : root.default-col-w;
-                                height: root.row-height;
-                                clip: true;
-
-                                // Cell-mode highlight: distinct tint on the focused column.
-                                if i == root.selected-row && j == root.selected-col
-                                        && root.nav-mode == 1: Rectangle {
-                                    width:  parent.width;
-                                    height: parent.height;
-                                    background: Colors.cell-highlight;
-                                }
-
-                                Rectangle {   // right border
-                                    x: parent.width - 1px;
-                                    width: 1px;
-                                    height: parent.height;
-                                    background: Colors.surface0;
-                                }
-
-                                // NULL badge — shown only when cell.is-null is true.
-                                if cell.is-null: Rectangle {
-                                    x: 8px;
-                                    y: (parent.height - self.height) / 2;
-                                    width: 36px;
-                                    height: 16px;
-                                    border-radius: 3px;
-                                    background: Colors.surface1;
-                                    Text {
-                                        width: parent.width;
-                                        height: parent.height;
-                                        text: @tr("NULL");
-                                        color: Colors.overlay2;
-                                        font-size: Typography.size-sm;
-                                        horizontal-alignment: center;
-                                        vertical-alignment: center;
-                                    }
-                                }
-
-                                // Regular value text — shown only when the cell is not NULL.
-                                if !cell.is-null: Text {
-                                    x: 8px;
-                                    y: (parent.height - self.height) / 2;
-                                    width: parent.width - 16px;
-                                    text: cell.value;
-                                    color: i == root.selected-row ? Colors.selected-text : Colors.subtext0;
-                                    font-size: Typography.size-base;
-                                    overflow: elide;
-                                }
-
-                                TouchArea {
-                                    clicked => {
-                                        root.selected-row          = i;
-                                        root.selected-cell-value   = cell.value;
-                                        root.selected-cell-is-null = cell.is-null;
-                                        table-fs.focus();
-                                    }
-                                    pointer-event(event) => {
-                                        if (event.button == PointerEventButton.right
-                                                && event.kind == PointerEventKind.down) {
-                                            root.selected-row          = i;
-                                            root.ctx-row               = i;
-                                            root.ctx-cell-value        = cell.value;
-                                            root.ctx-cell-is-null      = cell.is-null;
-                                            root.selected-cell-value   = cell.value;
-                                            root.selected-cell-is-null = cell.is-null;
-                                            root.ctx-menu-x = clamp(
-                                                root.col-x-offset(j) * 1px + root.body-vp-x + self.mouse-x,
-                                                0,
-                                                root.width - 208px
-                                            );
-                                            root.ctx-menu-y = clamp(
-                                                root.row-height + i * root.row-height + root.body-vp-y + self.mouse-y,
-                                                0,
-                                                root.height - 96px
-                                            );
-                                            ctx-popup.show();
-                                            table-fs.focus();
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // Zero-row placeholder
-                if root.row-count == 0 && root.columns.length > 0: Rectangle {
-                    x: 0; y: 0;
-                    width:  parent.width;
-                    height: parent.height;
-                    Text {
-                        x: (parent.width  - self.width)  / 2;
-                        y: (parent.height - self.height) / 2;
-                        text: @tr("0 rows");
-                        color: Colors.surface2;
-                        font-size: Typography.size-lg;
-                    }
-                }
-            }
-        }
-
-        // ── Search bar ────────────────────────────────────────────────────────
-        // Always in the tree (so search-input is always reachable) but
-        // clipped to height 0 when not in search mode.
-        Rectangle {
-            x: 0;
-            y: root.height - root.filter-banner-h - root.search-bar-h;
-            width:  root.width;
-            height: root.search-bar-h;
-            background: Colors.base;
-            clip: true;
-
-            Rectangle {   // top separator
-                x: 0; y: 0;
-                width: parent.width; height: 1px;
-                background: Colors.surface1;
-            }
-
-            Text {
-                x: 10px;
-                y: (parent.height - self.height) / 2;
-                text: "/";
-                color: Colors.blue;
+                text: @tr("Query Error");
+                color: Colors.red;
                 font-size: Typography.size-lg;
                 font-weight: 700;
             }
-
-            search-input := TextInput {
-                x: 26px;
-                y: (parent.height - self.height) / 2;
-                width: parent.width - 34px;
-                text <=> root.search-query;
-                single-line: true;
+            Text {
+                text: root.error-message;
                 color: Colors.text;
-                selection-background-color: Colors.selection;
-                selection-foreground-color: Colors.selected-text;
                 font-size: Typography.size-base;
+                wrap: word-wrap;
             }
         }
-
-        // ── Filter indicator banner ───────────────────────────────────────────
-        // Shown below the search bar when a filter is active.
-        Rectangle {
-            x: 0;
-            y: root.height - root.filter-banner-h;
-            width:  root.width;
-            height: root.filter-banner-h;
-            background: Colors.filter-bg;
-            clip: true;
-
-            Rectangle {   // top separator
-                x: 0; y: 0;
-                width: parent.width; height: 1px;
-                background: Colors.filter-accent;
-            }
-
-            HorizontalLayout {
-                padding-left: 10px;
-                padding-right: 10px;
-                spacing: 6px;
-
-                Text {
-                    text: @tr("Filter:");
-                    color: Colors.blue;
-                    font-size: Typography.size-md;
-                    font-weight: 700;
-                    vertical-alignment: center;
-                }
-                Text {
-                    text: root.active-filter;
-                    color: Colors.text;
-                    font-size: Typography.size-md;
-                    vertical-alignment: center;
-                    overflow: elide;
-                    horizontal-stretch: 1;
-                }
-                Text {
-                    text: @tr("[Esc to clear]");
-                    color: Colors.surface2;
-                    font-size: Typography.size-md;
-                    vertical-alignment: center;
-                }
-            }
-        }
-
     }
 }
