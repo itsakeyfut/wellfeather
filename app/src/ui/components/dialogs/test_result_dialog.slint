@@ -1,0 +1,43 @@
+import { Colors, Typography } from "../../theme.slint";
+import { ActionButton, ModalOverlay } from "../common.slint";
+
+export component TestResultDialog inherits ModalOverlay {
+    in property <bool>   result-ok;
+    in property <string> result-message: "";
+    callback ok-clicked;
+
+    VerticalLayout {
+        padding: 24px;
+        spacing: 16px;
+        alignment: start;
+
+        Text {
+            text: root.result-ok
+                ? @tr("Connection Successful")
+                : @tr("Connection Failed");
+            color: root.result-ok ? Colors.green : Colors.red;
+            font-size: Typography.size-xl;
+            font-weight: 700;
+            horizontal-alignment: center;
+        }
+
+        if !root.result-ok: Text {
+            text: root.result-message;
+            color: Colors.text;
+            font-size: Typography.size-base;
+            wrap: word-wrap;
+            horizontal-alignment: center;
+        }
+
+        HorizontalLayout {
+            alignment: center;
+            ActionButton {
+                width: 80px;
+                text: @tr("OK");
+                bg: Colors.blue;
+                fg: Colors.base;
+                clicked => { root.ok-clicked(); }
+            }
+        }
+    }
+}

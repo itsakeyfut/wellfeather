@@ -1,0 +1,44 @@
+import { Colors, Typography } from "../../theme.slint";
+import { ActionButton, ModalOverlay } from "../common.slint";
+
+export component AllRowsDialog inherits ModalOverlay {
+    callback cancel-clicked;
+    callback fetch-clicked;
+
+    VerticalLayout {
+        padding: 24px;
+        spacing: 16px;
+        alignment: start;
+
+        Text {
+            text: @tr("Fetch all rows?");
+            color: Colors.yellow;
+            font-size: Typography.size-xl;
+            font-weight: 700;
+        }
+
+        Text {
+            text: @tr("No LIMIT will be applied. This may take a long time for large tables.");
+            color: Colors.text;
+            font-size: Typography.size-lg;
+            wrap: word-wrap;
+        }
+
+        HorizontalLayout {
+            spacing: 8px;
+            alignment: end;
+            ActionButton {
+                width: 80px;
+                text: @tr("Cancel");
+                clicked => { root.cancel-clicked(); }
+            }
+            ActionButton {
+                width: 80px;
+                text: @tr("Fetch");
+                bg: Colors.red;
+                fg: Colors.base;
+                clicked => { root.fetch-clicked(); }
+            }
+        }
+    }
+}
