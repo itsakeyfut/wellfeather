@@ -947,7 +947,7 @@ impl UI {
             } else {
                 // Move down: target the next line.
                 match s[pos..].find('\n') {
-                    None => pos as i32, // Already on last line — stay.
+                    None => s.len() as i32, // Extend to end of text on last line.
                     Some(off) => {
                         let next_start = pos + off + 1;
                         let next_end = s[next_start..]
