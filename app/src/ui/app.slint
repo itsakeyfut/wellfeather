@@ -243,7 +243,7 @@ export component AppWindow inherits Window {
     // The result/error panel overlays the editor from the bottom (VSCode style).
     // panel-height controls how tall the overlay is; the editor always fills the
     // full content-height behind it.
-    property <length> panel-height:        250px;
+    property <length> panel-height:        content-height * 2 / 3;
     // Height of the tab-bar strip at the top of the panel (below the drag handle).
     property <length> panel-header-height: 28px;
 
