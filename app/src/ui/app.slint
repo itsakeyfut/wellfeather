@@ -1,3 +1,15 @@
+// Embed Inter, Noto Sans JP, and JetBrains Mono for consistent rendering across platforms.
+import "../../assets/fonts/Inter-Regular.ttf";
+import "../../assets/fonts/Inter-Medium.ttf";
+import "../../assets/fonts/Inter-SemiBold.ttf";
+import "../../assets/fonts/Inter-Bold.ttf";
+import "../../assets/fonts/NotoSansJP-Regular.ttf";
+import "../../assets/fonts/NotoSansJP-Medium.ttf";
+import "../../assets/fonts/NotoSansJP-SemiBold.ttf";
+import "../../assets/fonts/NotoSansJP-Bold.ttf";
+import "../../assets/fonts/JetBrainsMono-Regular.ttf";
+import "../../assets/fonts/JetBrainsMono-Bold.ttf";
+
 import { ConnectionEntry, RowData, SidebarNode, CompletionRow } from "globals.slint";
 import { Colors, Typography } from "theme.slint";
 import { CompletionPopup } from "components/completion_popup.slint";
@@ -186,6 +198,7 @@ export global UiState {
 
 export component AppWindow inherits Window {
     title: "wellfeather";
+    default-font-family: "Inter, Noto Sans JP, Segoe UI, SF Pro, system-ui";
     // Explicit width/height fix root.width/root.height as constants, which are then
     // used in arithmetic expressions below to position all children absolutely.
     // VerticalLayout + vertical-stretch proved unreliable when height: parent.height

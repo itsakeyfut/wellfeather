@@ -93,8 +93,8 @@ msgid "Loading…"
 msgstr "読み込み中…"
 
 msgctxt "Sidebar"
-msgid "＋ Add connection"
-msgstr "＋ 接続を追加"
+msgid "+ Add connection"
+msgstr "+ 接続を追加"
 
 msgctxt "ResultTableBody"
 msgid "Copy cell value"

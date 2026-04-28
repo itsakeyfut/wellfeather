@@ -34,8 +34,22 @@ fn main() {
         }
     }
 
+    // Watch font files
+    if let Ok(entries) = std::fs::read_dir("assets/fonts") {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path
+                .extension()
+                .is_some_and(|ext| ext == "ttf" || ext == "otf")
+            {
+                println!("cargo:rerun-if-changed={}", path.display());
+            }
+        }
+    }
+
+    let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let config = slint_build::CompilerConfiguration::new()
-        .with_bundled_translations(std::path::Path::new("lang"));
+        .with_bundled_translations(manifest_dir.join("lang"));
     slint_build::compile_with_config("src/ui/app.slint", config)
         .expect("Failed to compile Slint UI");
 }

@@ -93,8 +93,8 @@ msgid "Loading…"
 msgstr "Loading…"
 
 msgctxt "Sidebar"
-msgid "＋ Add connection"
-msgstr "＋ Add connection"
+msgid "+ Add connection"
+msgstr "+ Add connection"
 
 msgctxt "ResultTableBody"
 msgid "Copy cell value"
