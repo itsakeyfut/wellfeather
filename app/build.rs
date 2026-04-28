@@ -49,8 +49,7 @@ fn main() {
 
     let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let config = slint_build::CompilerConfiguration::new()
-        .with_bundled_translations(manifest_dir.join("lang"))
-        .with_include_paths(vec![manifest_dir.join("assets")]);
+        .with_bundled_translations(manifest_dir.join("lang"));
     slint_build::compile_with_config("src/ui/app.slint", config)
         .expect("Failed to compile Slint UI");
 }

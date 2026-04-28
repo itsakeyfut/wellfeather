@@ -1,16 +1,14 @@
-// Embed Inter and Noto Sans JP so the UI looks consistent on all platforms.
-// JetBrains Mono (editor / result table) is placed in assets/fonts/ by the user
-// and imported here once available.
-import "fonts/Inter-Regular.ttf";
-import "fonts/Inter-Medium.ttf";
-import "fonts/Inter-SemiBold.ttf";
-import "fonts/Inter-Bold.ttf";
-import "fonts/NotoSansJP-Regular.ttf";
-import "fonts/NotoSansJP-Medium.ttf";
-import "fonts/NotoSansJP-SemiBold.ttf";
-import "fonts/NotoSansJP-Bold.ttf";
-import "fonts/JetBrainsMono-Regular.ttf";
-import "fonts/JetBrainsMono-Bold.ttf";
+// Embed Inter, Noto Sans JP, and JetBrains Mono for consistent rendering across platforms.
+import "../../assets/fonts/Inter-Regular.ttf";
+import "../../assets/fonts/Inter-Medium.ttf";
+import "../../assets/fonts/Inter-SemiBold.ttf";
+import "../../assets/fonts/Inter-Bold.ttf";
+import "../../assets/fonts/NotoSansJP-Regular.ttf";
+import "../../assets/fonts/NotoSansJP-Medium.ttf";
+import "../../assets/fonts/NotoSansJP-SemiBold.ttf";
+import "../../assets/fonts/NotoSansJP-Bold.ttf";
+import "../../assets/fonts/JetBrainsMono-Regular.ttf";
+import "../../assets/fonts/JetBrainsMono-Bold.ttf";
 
 import { ConnectionEntry, RowData, SidebarNode, CompletionRow } from "globals.slint";
 import { Colors, Typography } from "theme.slint";
