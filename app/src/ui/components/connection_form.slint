@@ -149,7 +149,9 @@ export component ConnectionForm inherits Rectangle {
     border-color: Colors.surface2;
     drop-shadow-blur: 24px;
     drop-shadow-color: Colors.shadow-light;
-    width: 480px;
+    width: 660px;
+    height: 520px;
+    clip: true;
 
     VerticalLayout {
         padding: 20px;
@@ -211,57 +213,63 @@ export component ConnectionForm inherits Rectangle {
             }
         }
 
-        // ── Connection String panel ───────────────────────────────────────────
-        // Always instantiated (not `if`) so conn-string-input is accessible by ID
-        // from sibling elements (name-field.move-focus).
-        // height: 0 + clip collapses it to nothing when the Individual Fields tab is active.
-        Rectangle {
-            height: root.tab-index == 0 ? 28px : 0px;
-            clip: true;
-            background: Colors.base;
-            border-radius: 4px;
+        // Spacer — pushes tab content + status + buttons toward the bottom of the dialog.
+        Rectangle { vertical-stretch: 1; }
 
-            if root.conn-string == "": Text {
-                x: 6px;
-                y: 0;
-                width: parent.width - 12px;
+        // ── Tab content (single panel for both tabs) ─────────────────────────
+        // Using one panel instead of two eliminates the phantom 10px spacing that
+        // a 0-height sibling would introduce, moving the conn-string input lower.
+        // Height always equals the Individual Fields preferred height so the flex
+        // spacer above distributes equally for both tabs.
+        Rectangle {
+            height: fields-layout.preferred-height;
+            clip: true;
+
+            // Connection String tab — input pinned to the bottom of the panel,
+            // aligned with the Database field in the Individual Fields tab.
+            Rectangle {
+                visible: root.tab-index == 0;
+                background: Colors.base;
+                border-radius: 4px;
+                width: parent.width;
                 height: 28px;
-                text: "postgres://user:pass@host:5432/db";
-                color: Colors.surface2;
-                vertical-alignment: center;
-            }
-            conn-string-input := TextInput {
-                x: 6px;
-                y: 0;
-                width: parent.width - 12px;
-                height: 28px;
-                vertical-alignment: center;
-                text <=> root.conn-string;
-                color: Colors.text;
-                key-pressed(event) => {
-                    if (event.text == Key.UpArrow
-                            || (event.text == Key.Tab && event.modifiers.shift)) {
-                        name-field.grab-focus();
-                        EventResult.accept
-                    } else if (event.text == Key.Escape) {
-                        root.cancel();
-                        EventResult.accept
-                    } else {
-                        EventResult.reject
+                y: parent.height - 28px;
+
+                if root.conn-string == "": Text {
+                    x: 6px;
+                    y: 0;
+                    width: parent.width - 12px;
+                    height: 28px;
+                    text: "postgres://user:pass@host:5432/db";
+                    color: Colors.surface2;
+                    vertical-alignment: center;
+                }
+                conn-string-input := TextInput {
+                    x: 6px;
+                    y: 0;
+                    width: parent.width - 12px;
+                    height: 28px;
+                    vertical-alignment: center;
+                    text <=> root.conn-string;
+                    color: Colors.text;
+                    key-pressed(event) => {
+                        if (event.text == Key.UpArrow
+                                || (event.text == Key.Tab && event.modifiers.shift)) {
+                            name-field.grab-focus();
+                            EventResult.accept
+                        } else if (event.text == Key.Escape) {
+                            root.cancel();
+                            EventResult.accept
+                        } else {
+                            EventResult.reject
+                        }
                     }
-                    // Down/Tab from the last field in tab 0: no action (let default apply).
                 }
             }
-        }
 
-        // ── Individual Fields panel ───────────────────────────────────────────
-        // Always instantiated (not `if`) so host-field … db-field IDs are accessible.
-        // height driven by the inner layout's preferred-height; collapses to 0 on tab 0.
-        Rectangle {
-            height: root.tab-index == 1 ? fields-layout.preferred-height : 0px;
-            clip: true;
-
+            // Individual Fields tab
             fields-layout := VerticalLayout {
+                visible: root.tab-index == 1;
                 spacing: 6px;
 
                 host-field := FieldRow {
@@ -305,7 +313,6 @@ export component ConnectionForm inherits Rectangle {
                     placeholder: @tr("database name");
                     value <=> root.database;
                     move-focus(d) => {
-                        // Last field: Up goes back, Down/Return does nothing.
                         if (d < 0) { pass-field.grab-focus(); }
                     }
                 }

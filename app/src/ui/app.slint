@@ -213,14 +213,14 @@ export global UiState {
 export component AppWindow inherits Window {
     title: "wellfeather";
     default-font-family: "Inter, Noto Sans JP, Segoe UI, SF Pro, system-ui";
-    // Explicit width/height fix root.width/root.height as constants, which are then
-    // used in arithmetic expressions below to position all children absolutely.
-    // VerticalLayout + vertical-stretch proved unreliable when height: parent.height
-    // is set on a layout — the stretch distribution ignores the explicit height and
-    // falls back to preferred-height (~61px). Absolute positioning with arithmetic
-    // avoids all layout-engine ambiguity.
-    width:  1280px;
-    height: 800px;
+    // preferred-width/height set the initial window size; the window is resizable.
+    // All children are positioned with arithmetic derived from root.width/root.height,
+    // so they track resize automatically.  min-width/min-height prevent the window
+    // from shrinking below a usable size (dialogs are up to 560px wide).
+    preferred-width:  1280px;
+    preferred-height: 800px;
+    min-width:  900px;
+    min-height: 560px;
 
     // ── Theme sync ───────────────────────────────────────────────────────────
     // Mirror UiState.is-dark into Colors.is-dark so all reactive color bindings update.
@@ -246,6 +246,11 @@ export component AppWindow inherits Window {
     property <length> panel-height:        250px;
     // Height of the tab-bar strip at the top of the panel (below the drag handle).
     property <length> panel-header-height: 28px;
+
+    // Re-clamp panel-height when the window is resized to avoid the editor area going negative.
+    changed content-height => {
+        root.panel-height = clamp(root.panel-height, 80px, root.content-height - 40px);
+    }
 
     // ── Pane focus tracking ───────────────────────────────────────────────────
     // 0=sidebar  1=editor  2=result
