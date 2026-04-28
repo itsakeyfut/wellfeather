@@ -411,6 +411,13 @@ impl UI {
                 ui.set_connection_list(model.into());
                 ui.set_active_connection_id(id.into());
                 ui.set_show_connection_form(false);
+                // Reopen the DB manager if the form was launched from within it.
+                if ui.get_reopen_db_manager_on_form_close() {
+                    ui.set_reopen_db_manager_on_form_close(false);
+                    ui.set_show_db_manager(true);
+                } else {
+                    ui.set_show_db_manager(false);
+                }
                 ui.set_form_testing(false);
                 ui.set_form_status("".into());
                 ui.set_error_message("".into());
@@ -740,6 +747,80 @@ impl UI {
                     ui.set_form_test_ok(false);
                     ui.set_show_test_result_popup(false);
                     ui.set_show_add_confirm_popup(false);
+                    ui.set_form_edit_id("".into());
+                    ui.set_show_connection_form(true);
+                });
+            });
+        }
+
+        // edit-connection: open the connection form pre-filled for an existing connection.
+        // Both tabs are filled: whichever tab was NOT used to save the connection is
+        // derived via derive_conn_string / parse_conn_string.
+        {
+            let window_weak = window.as_weak();
+            let state = state.clone();
+            ui_state.on_edit_connection(move |id| {
+                let id = id.to_string();
+                let Some(conn) = state.conn.all().into_iter().find(|c| c.id == id) else {
+                    return;
+                };
+                // Decrypt stored password (only present for individual-field connections).
+                let stored_password = conn
+                    .password_encrypted
+                    .as_ref()
+                    .and_then(|enc| crypto::decrypt(enc, &enc_key).ok())
+                    .unwrap_or_default();
+
+                let is_conn_string = conn.connection_string.is_some();
+                let db_type_idx: i32 = match conn.db_type {
+                    DbType::PostgreSQL => 0,
+                    DbType::MySQL => 1,
+                    DbType::SQLite => 2,
+                };
+
+                // Derive the connection string from individual fields (or use the stored one).
+                let conn_string = if is_conn_string {
+                    conn.connection_string.clone().unwrap_or_default()
+                } else {
+                    derive_conn_string(
+                        &conn.db_type,
+                        conn.host.as_deref().unwrap_or(""),
+                        conn.port,
+                        conn.user.as_deref().unwrap_or(""),
+                        &stored_password,
+                        conn.database.as_deref().unwrap_or(""),
+                    )
+                };
+
+                // Parse individual fields from the connection string (or use the stored ones).
+                let (host, port, user, field_password, database) = if is_conn_string {
+                    parse_conn_string(&conn_string, &conn.db_type).unwrap_or_default()
+                } else {
+                    (
+                        conn.host.clone().unwrap_or_default(),
+                        conn.port,
+                        conn.user.clone().unwrap_or_default(),
+                        stored_password,
+                        conn.database.clone().unwrap_or_default(),
+                    )
+                };
+
+                with_ui(&window_weak, move |ui| {
+                    ui.set_form_edit_id(conn.id.clone().into());
+                    ui.set_form_name(conn.name.clone().into());
+                    ui.set_form_db_type(db_type_idx);
+                    ui.set_form_tab_index(if is_conn_string { 0 } else { 1 });
+                    ui.set_form_conn_string(conn_string.into());
+                    ui.set_form_host(host.into());
+                    ui.set_form_port(port.map(|p| p.to_string()).unwrap_or_default().into());
+                    ui.set_form_user(user.into());
+                    ui.set_form_password(field_password.into());
+                    ui.set_form_database(database.into());
+                    ui.set_form_status("".into());
+                    ui.set_form_testing(false);
+                    ui.set_form_test_ok(false);
+                    ui.set_show_test_result_popup(false);
+                    ui.set_show_add_confirm_popup(false);
                     ui.set_show_connection_form(true);
                 });
             });
@@ -828,6 +909,70 @@ impl UI {
             });
         }
 
+        // open-db-manager: show the DB manager dialog.
+        {
+            let window_weak = window.as_weak();
+            ui_state.on_open_db_manager(move || {
+                with_ui(&window_weak, |ui| ui.set_show_db_manager(true));
+            });
+        }
+
+        // disconnect: disconnect the active connection by id.
+        // Clears AppState active_id, collapses the sidebar node, removes cached
+        // metadata for that connection, and rebuilds the sidebar tree immediately.
+        {
+            let tx_cmd = tx_cmd.clone(); // clone required: callback closure needs owned tx_cmd
+            let state = state.clone();
+            let sidebar_state = Arc::clone(&sidebar_state);
+            let window_weak = window.as_weak();
+            ui_state.on_disconnect(move |id| {
+                let id = id.to_string();
+                if id.is_empty() {
+                    return;
+                }
+                // Clear active connection in AppState so toggle-sidebar-node can
+                // reconnect when the collapsed node is clicked again.
+                state.conn.clear_active();
+
+                // Collapse the node and drop metadata for the disconnected connection.
+                {
+                    let mut sb = sidebar_state.lock().unwrap_or_else(|p| p.into_inner());
+                    sb.expanded.remove(&format!("conn:{}", id));
+                    sb.metadata.remove(&id);
+                }
+
+                // Rebuild tree (no active connection, no expanded node for id).
+                let nodes = {
+                    let sb = sidebar_state.lock().unwrap_or_else(|p| p.into_inner());
+                    let connections = state.conn.all();
+                    build_sidebar_tree(&connections, "", &sb.metadata, &sb.expanded)
+                };
+
+                // Connection list with all entries inactive.
+                let entries: Vec<crate::ConnectionEntry> = state
+                    .conn
+                    .all()
+                    .into_iter()
+                    .map(|c| crate::ConnectionEntry {
+                        is_active: false,
+                        db_type: db_type_label(&c.db_type).into(),
+                        name: c.name.clone().into(),
+                        id: c.id.clone().into(),
+                    })
+                    .collect();
+
+                // Already on the UI thread — update directly.
+                with_ui(&window_weak, move |ui| {
+                    ui.set_active_connection_id("".into());
+                    ui.set_connection_list(Rc::new(slint::VecModel::from(entries)).into());
+                    ui.set_sidebar_tree(Rc::new(slint::VecModel::from(nodes)).into());
+                    ui.set_sidebar_loading(false);
+                });
+
+                send_cmd(&tx_cmd, Command::Disconnect(id));
+            });
+        }
+
         // table-double-clicked: insert SELECT * FROM <name> into the editor
         // and immediately execute it so the result appears without a manual
         // Ctrl+Enter.  tx_cmd is cloned here because the closure is 'static.
@@ -858,7 +1003,13 @@ impl UI {
         {
             let window_weak = window.as_weak();
             ui_state.on_close_connection_form(move || {
-                with_ui(&window_weak, |ui| ui.set_show_connection_form(false));
+                with_ui(&window_weak, |ui| {
+                    ui.set_show_connection_form(false);
+                    if ui.get_reopen_db_manager_on_form_close() {
+                        ui.set_reopen_db_manager_on_form_close(false);
+                        ui.set_show_db_manager(true);
+                    }
+                });
             });
         }
 
@@ -1672,8 +1823,16 @@ fn build_conn_from_form(ui: &crate::UiState, enc_key: &[u8; 32]) -> (DbConnectio
     // Connection-string mode embeds the password in the URL, so no separate encryption needed.
     let password_encrypted = password.as_ref().map(|pw| crypto::encrypt(pw, enc_key));
 
+    // Preserve the existing id when editing so save_connection upserts correctly.
+    let edit_id = ui.get_form_edit_id().to_string();
+    let id = if edit_id.is_empty() {
+        uuid::Uuid::new_v4().to_string()
+    } else {
+        edit_id
+    };
+
     let conn = DbConnection {
-        id: uuid::Uuid::new_v4().to_string(),
+        id,
         name: ui.get_form_name().to_string(),
         db_type,
         connection_string: if is_conn_string {
@@ -1705,6 +1864,159 @@ fn build_conn_from_form(ui: &crate::UiState, enc_key: &[u8; 32]) -> (DbConnectio
     };
 
     (conn, password)
+}
+
+// ── Connection string helpers ─────────────────────────────────────────────────
+
+/// Percent-encode a string for use in a URL userinfo or path component.
+/// Only unreserved characters (RFC 3986) are left as-is.
+fn percent_encode(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() * 3);
+    for b in s.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(b as char)
+            }
+            _ => {
+                out.push('%');
+                out.push_str(&format!("{:02X}", b));
+            }
+        }
+    }
+    out
+}
+
+/// Percent-decode a URL component back to a plain string.
+fn percent_decode(s: &str) -> String {
+    let bytes = s.as_bytes();
+    let mut out: Vec<u8> = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%'
+            && i + 2 < bytes.len()
+            && let (Some(hi), Some(lo)) = (hex_val(bytes[i + 1]), hex_val(bytes[i + 2]))
+        {
+            out.push((hi << 4) | lo);
+            i += 3;
+            continue;
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+fn hex_val(b: u8) -> Option<u8> {
+    match b {
+        b'0'..=b'9' => Some(b - b'0'),
+        b'a'..=b'f' => Some(b - b'a' + 10),
+        b'A'..=b'F' => Some(b - b'A' + 10),
+        _ => None,
+    }
+}
+
+/// Derive a connection URL from individual fields.
+///
+/// SQLite: returns the database path as-is.
+/// PostgreSQL/MySQL: builds `scheme://[user[:pass]@][host[:port]][/database]`.
+fn derive_conn_string(
+    db_type: &DbType,
+    host: &str,
+    port: Option<u16>,
+    user: &str,
+    password: &str,
+    database: &str,
+) -> String {
+    if matches!(db_type, DbType::SQLite) {
+        return database.to_string();
+    }
+    let (scheme, default_port) = match db_type {
+        DbType::PostgreSQL => ("postgres", 5432u16),
+        DbType::MySQL => ("mysql", 3306u16),
+        DbType::SQLite => unreachable!(),
+    };
+    let userinfo = match (user.is_empty(), password.is_empty()) {
+        (true, _) => String::new(),
+        (false, true) => format!("{}@", percent_encode(user)),
+        (false, false) => format!("{}:{}@", percent_encode(user), percent_encode(password)),
+    };
+    let hostport = if host.is_empty() {
+        String::new()
+    } else {
+        format!("{}:{}", host, port.unwrap_or(default_port))
+    };
+    let db_part = if database.is_empty() {
+        String::new()
+    } else {
+        format!("/{}", database)
+    };
+    format!("{}://{}{}{}", scheme, userinfo, hostport, db_part)
+}
+
+/// Parse a URL-format connection string into individual fields.
+///
+/// Handles `postgres://`, `postgresql://`, and `mysql://` schemes.
+/// SQLite: the entire string is treated as the database path.
+///
+/// Returns `(host, port, user, password, database)` or `None` if the string
+/// cannot be recognised as a URL for the given db type.
+fn parse_conn_string(
+    s: &str,
+    db_type: &DbType,
+) -> Option<(String, Option<u16>, String, String, String)> {
+    let s = s.trim();
+    if matches!(db_type, DbType::SQLite) {
+        return Some((
+            String::new(),
+            None,
+            String::new(),
+            String::new(),
+            s.to_string(),
+        ));
+    }
+    let rest = s
+        .strip_prefix("postgres://")
+        .or_else(|| s.strip_prefix("postgresql://"))
+        .or_else(|| s.strip_prefix("mysql://"))?;
+    // Strip query string / fragment
+    let rest = rest.split(['?', '#']).next().unwrap_or(rest);
+    // Split userinfo from host
+    let (userinfo, hostdb) = match rest.rfind('@') {
+        Some(pos) => (&rest[..pos], &rest[pos + 1..]),
+        None => ("", rest),
+    };
+    let (user, password) = match userinfo.find(':') {
+        Some(pos) => (&userinfo[..pos], &userinfo[pos + 1..]),
+        None => (userinfo, ""),
+    };
+    let (hostport, database) = match hostdb.find('/') {
+        Some(pos) => (&hostdb[..pos], &hostdb[pos + 1..]),
+        None => (hostdb, ""),
+    };
+    // Handle IPv6 brackets: [::1]:5432
+    let (host, port) = if hostport.starts_with('[') {
+        let bracket_end = hostport.find(']').unwrap_or(hostport.len());
+        let host_raw = &hostport[1..bracket_end];
+        let port = hostport[bracket_end + 1..]
+            .strip_prefix(':')
+            .and_then(|p| p.parse::<u16>().ok());
+        (host_raw, port)
+    } else {
+        match hostport.rfind(':') {
+            Some(pos) => {
+                let port = hostport[pos + 1..].parse::<u16>().ok();
+                (&hostport[..pos], port)
+            }
+            None => (hostport, None),
+        }
+    };
+    Some((
+        percent_decode(host),
+        port,
+        percent_decode(user),
+        percent_decode(password),
+        percent_decode(database),
+    ))
 }
 
 // ── Result table helpers ──────────────────────────────────────────────────────

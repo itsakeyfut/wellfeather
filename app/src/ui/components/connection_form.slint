@@ -131,6 +131,8 @@ export component ConnectionForm inherits Rectangle {
     /// form is opened or a new test is started.  Used to decide whether Add
     /// shows a confirmation dialog.
     in property <bool> test-ok: false;
+    /// True when editing an existing connection (title + button label change).
+    in property <bool> is-edit: false;
 
     callback cancel();
     callback test-connection();
@@ -155,7 +157,7 @@ export component ConnectionForm inherits Rectangle {
 
         // Title
         Text {
-            text: @tr("Add Connection");
+            text: root.is-edit ? @tr("Edit Connection") : @tr("Add Connection");
             color: Colors.text;
             font-size: Typography.size-2xl;
             font-weight: 700;
@@ -339,10 +341,10 @@ export component ConnectionForm inherits Rectangle {
                 clicked => { root.test-connection(); }
             }
 
-            // Add — green when test passed, muted when not yet tested / failed
+            // Add / Save — green when test passed, muted when not yet tested / failed
             ActionButton {
                 width: 80px;
-                text: @tr("Add");
+                text: root.is-edit ? @tr("Save") : @tr("Add");
                 bg: root.testing ? Colors.surface2
                   : root.test-ok  ? Colors.green
                   :                 Colors.overlay0;

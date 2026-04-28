@@ -22,6 +22,7 @@ import { StatusBar }       from "components/status_bar.slint";
 import { TestResultDialog }    from "components/dialogs/test_result_dialog.slint";
 import { AddConnectionDialog } from "components/dialogs/add_connection_dialog.slint";
 import { AllRowsDialog }       from "components/dialogs/all_rows_dialog.slint";
+import { DbManagerDialog }     from "components/dialogs/db_manager_dialog.slint";
 
 // UiState is defined here (root file) so that Slint generates Rust bindings for it.
 // Sub-components that need global state receive properties bound from UiState below.
@@ -99,8 +100,17 @@ export global UiState {
     in-out property <string>            active-connection-id: "";
     in-out property <[SidebarNode]>     sidebar-tree:         [];
 
+    // ── DB manager dialog state ───────────────────────────────────────────────
+    in-out property <bool>   show-db-manager: false;
+    /// True when the connection form was opened from inside the DB manager dialog.
+    /// Used to reopen the DB manager after the form is closed (Add or Cancel).
+    in-out property <bool>   reopen-db-manager-on-form-close: false;
+    callback open-db-manager();
+
     // ── Connection form state ─────────────────────────────────────────────────
     in-out property <bool>   show-connection-form: false;
+    /// Non-empty when editing an existing connection; preserves the id on save.
+    in-out property <string> form-edit-id:     "";
     in-out property <int>    form-tab-index:   0;   // 0 = conn-string, 1 = fields
     in-out property <int>    form-db-type:     0;   // 0 = PostgreSQL, 1 = MySQL, 2 = SQLite
     in-out property <string> form-name:        "";
@@ -181,6 +191,8 @@ export global UiState {
 
     // ── Connection management callbacks ───────────────────────────────────────
     callback open-connection-form();
+    /// Open the connection form pre-filled with the connection identified by id.
+    callback edit-connection(string);
     callback close-connection-form();
     /// Sends Command::TestConnection — verifies the connection without saving it.
     callback test-connection();
@@ -273,6 +285,7 @@ export component AppWindow inherits Window {
         capture-key-pressed(event) => {
             // Don't intercept while a modal overlay is open.
             if (UiState.show-connection-form
+                    || UiState.show-db-manager
                     || UiState.show-test-result-popup
                     || UiState.show-add-confirm-popup
                     || UiState.show-all-rows-confirm) {
@@ -319,10 +332,13 @@ export component AppWindow inherits Window {
             width:        root.width;
             editor-text:  UiState.editor-text;
             language:     UiState.language;
+            has-active-connection: UiState.active-connection-id != "";
             export-csv   => { UiState.export-csv(); }
             export-json  => { UiState.export-json(); }
             quit         => { UiState.quit(); }
             toggle-theme => { UiState.toggle-theme(); }
+            open-db-manager  => { UiState.open-db-manager(); }
+            disconnect       => { UiState.disconnect(UiState.active-connection-id); }
             run-query(sql) => { UiState.run-query(sql); }
             run-all(sql)   => { UiState.run-all(sql); }
             cancel-query   => { UiState.cancel-query(); }
@@ -337,11 +353,9 @@ export component AppWindow inherits Window {
             height: content-height;
             tree:        UiState.sidebar-tree;
             is-loading:  UiState.sidebar-loading;
-            connections: UiState.connection-list;
             toggle-node(id) => { UiState.toggle-sidebar-node(id); }
             table-double-clicked(name) => { UiState.table-double-clicked(name); }
             add-connection => { UiState.open-connection-form(); }
-            connect(id) => { UiState.connect-db(id); }
         }
 
         // ── Main content panel ────────────────────────────────────────────────
@@ -690,6 +704,7 @@ export component AppWindow inherits Window {
                 status      <=> UiState.form-status;
                 testing     <=> UiState.form-testing;
 
+                is-edit: UiState.form-edit-id != "";
                 cancel => { UiState.close-connection-form(); }
                 test-connection => { UiState.test-connection(); }
                 add-connection => { UiState.add-connection(); }
@@ -720,6 +735,29 @@ export component AppWindow inherits Window {
             width: root.width; height: root.height;
             cancel-clicked => { UiState.dismiss-all-rows-confirm(); }
             fetch-clicked  => { UiState.confirm-all-rows(); }
+        }
+
+        // ── DB manager dialog ─────────────────────────────────────────────────
+        if UiState.show-db-manager: DbManagerDialog {
+            x: 0; y: 0;
+            width: root.width; height: root.height;
+            connections: UiState.connection-list;
+            active-id:   UiState.active-connection-id;
+            close          => { UiState.show-db-manager = false; }
+            connect(id)    => { UiState.connect-db(id); }
+            disconnect(id) => { UiState.disconnect(id); }
+            edit(id) => {
+                UiState.show-db-manager = false;
+                UiState.reopen-db-manager-on-form-close = true;
+                UiState.edit-connection(id);
+            }
+            add-connection => {
+                // Close the DB manager first, then open the connection form.
+                // The flag tells the form to reopen the DB manager when it closes.
+                UiState.show-db-manager = false;
+                UiState.reopen-db-manager-on-form-close = true;
+                UiState.open-connection-form();
+            }
         }
     }
 }

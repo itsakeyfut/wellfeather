@@ -1,0 +1,292 @@
+import { ConnectionEntry } from "../../globals.slint";
+import { Colors, Typography } from "../../theme.slint";
+
+export component DbManagerDialog inherits Rectangle {
+    in property <[ConnectionEntry]> connections: [];
+    in property <string>            active-id:   "";
+
+    callback close();
+    callback connect(string);
+    callback disconnect(string);
+    callback edit(string);
+    callback add-connection();
+
+    property <int> kb-focus: 0;
+
+    init => {
+        dialog-fs.focus();
+        if (root.connections.length > 0) {
+            root.kb-focus = 0;
+        }
+    }
+
+    // Auto-scroll: keep the kb-focused row visible.
+    // viewport-y is 0 at top and negative as content scrolls down.
+    changed kb-focus => {
+        if (root.kb-focus >= 0) {
+            let row-top = root.kb-focus * 48px;
+            let row-bot = row-top + 48px;
+            if (row-top < -dialog-scroll.viewport-y) {
+                dialog-scroll.viewport-y = -row-top;
+            } else if (row-bot > -dialog-scroll.viewport-y + dialog-scroll.height) {
+                dialog-scroll.viewport-y = -(row-bot - dialog-scroll.height);
+            }
+        }
+    }
+
+    background: Colors.shadow;
+
+    dialog-fs := FocusScope {
+        x: 0; y: 0;
+        width: parent.width; height: parent.height;
+        focus-on-click: false;
+
+        key-pressed(event) => {
+            if (event.text == Key.Escape) {
+                root.close();
+                EventResult.accept
+            } else if (event.text == Key.UpArrow) {
+                if (root.kb-focus > 0) { root.kb-focus -= 1; }
+                EventResult.accept
+            } else if (event.text == Key.DownArrow) {
+                if (root.kb-focus < root.connections.length - 1) { root.kb-focus += 1; }
+                EventResult.accept
+            } else if (event.text == Key.Return) {
+                if (root.kb-focus >= 0 && root.connections.length > 0) {
+                    let conn = root.connections[root.kb-focus];
+                    if (conn.is-active) {
+                        root.disconnect(conn.id);
+                    } else {
+                        root.connect(conn.id);
+                    }
+                }
+                EventResult.accept
+            } else {
+                EventResult.reject
+            }
+        }
+
+        // Centered card
+        Rectangle {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            width: 560px;
+            height: 520px;
+            background: Colors.surface0;
+            border-radius: 8px;
+            border-width: 1px;
+            border-color: Colors.surface2;
+            drop-shadow-blur: 24px;
+            drop-shadow-color: Colors.shadow-light;
+            clip: true;
+
+            VerticalLayout {
+                // ── Header ────────────────────────────────────────────────────
+                Rectangle {
+                    height: 48px;
+                    background: Colors.mantle;
+
+                    HorizontalLayout {
+                        padding-left: 16px;
+                        padding-right: 8px;
+                        spacing: 0;
+
+                        Text {
+                            text: @tr("Connections");
+                            color: Colors.text;
+                            font-size: Typography.size-xl;
+                            font-weight: 700;
+                            vertical-alignment: center;
+                            horizontal-stretch: 1;
+                        }
+
+                        // Close button
+                        close-rect := Rectangle {
+                            width: 36px;
+                            border-radius: 4px;
+                            background: close-ta.has-hover ? Colors.surface1 : transparent;
+
+                            Text {
+                                text: "×";
+                                color: Colors.subtext0;
+                                font-size: Typography.size-2xl;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+                            close-ta := TouchArea {
+                                clicked => { root.close(); }
+                            }
+                        }
+                    }
+
+                    // Bottom border
+                    Rectangle {
+                        y: parent.height - 1px;
+                        height: 1px;
+                        width: parent.width;
+                        background: Colors.surface1;
+                    }
+                }
+
+                // ── Scrollable connection list ─────────────────────────────────
+                dialog-scroll := Flickable {
+                    vertical-stretch: 1;
+                    interactive: true;
+                    viewport-height: max(dialog-content.preferred-height, self.height);
+
+                    dialog-content := VerticalLayout {
+                        for conn[i] in root.connections: Rectangle {
+                            height: 48px;
+                            clip: true;
+
+                            background: i == root.kb-focus
+                                ? Colors.sidebar-sel
+                                : (conn.is-active ? Colors.surface0 : transparent);
+
+                            row-ta := TouchArea {
+                                width: parent.width;
+                                height: parent.height;
+                                clicked => { root.kb-focus = i; }
+                            }
+
+                            // Hover overlay (skipped for kb-focused and active rows)
+                            Rectangle {
+                                background: row-ta.has-hover
+                                    && i != root.kb-focus
+                                    && !conn.is-active
+                                    ? Colors.hover-subtle : transparent;
+                                width: parent.width;
+                                height: parent.height;
+                            }
+
+                            HorizontalLayout {
+                                x: 0; y: 0;
+                                width: parent.width;
+                                height: parent.height;
+                                padding-left: 16px;
+                                padding-right: 12px;
+                                spacing: 8px;
+
+                                // Active / inactive indicator dot
+                                Text {
+                                    text: conn.is-active ? "●" : "○";
+                                    color: conn.is-active ? Colors.blue : Colors.surface2;
+                                    font-size: Typography.size-sm;
+                                    vertical-alignment: center;
+                                    width: 12px;
+                                }
+
+                                // Connection name
+                                Text {
+                                    text: conn.name;
+                                    color: conn.is-active ? Colors.text : Colors.subtext1;
+                                    font-size: Typography.size-base;
+                                    vertical-alignment: center;
+                                    overflow: elide;
+                                    horizontal-stretch: 1;
+                                }
+
+                                // DB-type badge
+                                Text {
+                                    text: conn.db-type;
+                                    color: Colors.subtext0;
+                                    font-size: Typography.size-sm;
+                                    vertical-alignment: center;
+                                    width: 90px;
+                                    horizontal-alignment: right;
+                                }
+
+                                // Edit button (vertically centred)
+                                VerticalLayout {
+                                    alignment: center;
+                                    width: 60px;
+
+                                    edit-rect := Rectangle {
+                                        height: 26px;
+                                        border-radius: 4px;
+                                        background: edit-ta.has-hover
+                                            ? Colors.surface2 : Colors.surface1;
+
+                                        Text {
+                                            text: @tr("Edit");
+                                            color: Colors.text;
+                                            font-size: Typography.size-sm;
+                                            horizontal-alignment: center;
+                                            vertical-alignment: center;
+                                        }
+                                        edit-ta := TouchArea {
+                                            clicked => { root.edit(conn.id); }
+                                        }
+                                    }
+                                }
+
+                                // Connect / Disconnect button (vertically centred)
+                                VerticalLayout {
+                                    alignment: center;
+                                    width: 100px;
+
+                                    btn-rect := Rectangle {
+                                        height: 26px;
+                                        border-radius: 4px;
+                                        background: conn.is-active
+                                            ? Colors.surface2
+                                            : Colors.blue;
+
+                                        Text {
+                                            text: conn.is-active ? @tr("Disconnect") : @tr("Connect");
+                                            color: Colors.base;
+                                            font-size: Typography.size-sm;
+                                            horizontal-alignment: center;
+                                            vertical-alignment: center;
+                                        }
+                                        btn-ta := TouchArea {
+                                            clicked => {
+                                                if (conn.is-active) {
+                                                    root.disconnect(conn.id);
+                                                } else {
+                                                    root.connect(conn.id);
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // ── Separator ─────────────────────────────────────────────────
+                Rectangle {
+                    height: 1px;
+                    background: Colors.surface1;
+                }
+
+                // ── Add connection footer ──────────────────────────────────────
+                Rectangle {
+                    height: 44px;
+
+                    footer-ta := TouchArea {
+                        width: parent.width;
+                        height: parent.height;
+                        clicked => { root.add-connection(); }
+                    }
+
+                    Rectangle {
+                        background: footer-ta.has-hover ? Colors.hover-subtle : transparent;
+                        width: parent.width;
+                        height: parent.height;
+                    }
+
+                    HorizontalLayout {
+                        padding-left: 16px;
+                        Text {
+                            text: @tr("+ Add connection");
+                            color: Colors.blue;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
