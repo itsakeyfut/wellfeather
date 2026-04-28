@@ -14,6 +14,10 @@ component FieldRow inherits HorizontalLayout {
     in property <bool>       is-password: false;
     in-out property <string> value;
 
+    // Fired with +1 (Down/Tab/Return) or -1 (Up/Shift+Tab) to move to the next/prev field.
+    callback move-focus(int);
+    public function grab-focus() { field-input.focus(); }
+
     spacing: 8px;
     Text {
         text: label-text;
@@ -39,7 +43,7 @@ component FieldRow inherits HorizontalLayout {
             vertical-alignment: center;
         }
         // TextInput rendered last → on top → receives all pointer/focus events.
-        TextInput {
+        field-input := TextInput {
             x: 6px;
             y: 0;
             width: parent.width - 12px;
@@ -48,6 +52,20 @@ component FieldRow inherits HorizontalLayout {
             text <=> value;
             color: Colors.text;
             input-type: is-password ? InputType.password : InputType.text;
+            key-pressed(event) => {
+                if (event.text == Key.DownArrow
+                        || (event.text == Key.Tab && !event.modifiers.shift)
+                        || event.text == Key.Return) {
+                    root.move-focus(1);
+                    EventResult.accept
+                } else if (event.text == Key.UpArrow
+                           || (event.text == Key.Tab && event.modifiers.shift)) {
+                    root.move-focus(-1);
+                    EventResult.accept
+                } else {
+                    EventResult.reject
+                }
+            }
         }
     }
 }
@@ -118,6 +136,10 @@ export component ConnectionForm inherits Rectangle {
     callback test-connection();
     callback add-connection();
 
+    // Auto-focus the Name field when the form opens and whenever the active tab changes.
+    init => { name-field.grab-focus(); }
+    changed tab-index => { name-field.grab-focus(); }
+
     // ── Layout ────────────────────────────────────────────────────────────────
     background: Colors.surface0;
     border-radius: 8px;
@@ -140,10 +162,17 @@ export component ConnectionForm inherits Rectangle {
         }
 
         // Name
-        FieldRow {
+        name-field := FieldRow {
             label-text: @tr("Name");
             placeholder: @tr("My Database");
             value <=> root.name;
+            move-focus(d) => {
+                if (d > 0) {
+                    if (root.tab-index == 0) { conn-string-input.focus(); }
+                    else { host-field.grab-focus(); }
+                }
+                // d < 0: Name is the first field — do nothing.
+            }
         }
 
         // DB type selector
@@ -180,58 +209,104 @@ export component ConnectionForm inherits Rectangle {
             }
         }
 
-        // Connection String tab
-        if root.tab-index == 0: Rectangle {
+        // ── Connection String panel ───────────────────────────────────────────
+        // Always instantiated (not `if`) so conn-string-input is accessible by ID
+        // from sibling elements (name-field.move-focus).
+        // height: 0 + clip collapses it to nothing when the Individual Fields tab is active.
+        Rectangle {
+            height: root.tab-index == 0 ? 28px : 0px;
+            clip: true;
             background: Colors.base;
             border-radius: 4px;
-            height: 28px;
+
             if root.conn-string == "": Text {
                 x: 6px;
                 y: 0;
                 width: parent.width - 12px;
-                height: parent.height;
+                height: 28px;
                 text: "postgres://user:pass@host:5432/db";
                 color: Colors.surface2;
                 vertical-alignment: center;
             }
-            TextInput {
+            conn-string-input := TextInput {
                 x: 6px;
                 y: 0;
                 width: parent.width - 12px;
-                height: parent.height;
+                height: 28px;
                 vertical-alignment: center;
                 text <=> root.conn-string;
                 color: Colors.text;
+                key-pressed(event) => {
+                    if (event.text == Key.UpArrow
+                            || (event.text == Key.Tab && event.modifiers.shift)) {
+                        name-field.grab-focus();
+                        EventResult.accept
+                    } else if (event.text == Key.Escape) {
+                        root.cancel();
+                        EventResult.accept
+                    } else {
+                        EventResult.reject
+                    }
+                    // Down/Tab from the last field in tab 0: no action (let default apply).
+                }
             }
         }
 
-        // Individual Fields tab
-        if root.tab-index == 1: VerticalLayout {
-            spacing: 6px;
-            FieldRow {
-                label-text: @tr("Host");
-                placeholder: "localhost";
-                value <=> root.host;
-            }
-            FieldRow {
-                label-text: @tr("Port");
-                placeholder: "5432";
-                value <=> root.port;
-            }
-            FieldRow {
-                label-text: @tr("User");
-                placeholder: @tr("username");
-                value <=> root.user;
-            }
-            FieldRow {
-                label-text: @tr("Password");
-                value <=> root.password;
-                is-password: true;
-            }
-            FieldRow {
-                label-text: @tr("Database");
-                placeholder: @tr("database name");
-                value <=> root.database;
+        // ── Individual Fields panel ───────────────────────────────────────────
+        // Always instantiated (not `if`) so host-field … db-field IDs are accessible.
+        // height driven by the inner layout's preferred-height; collapses to 0 on tab 0.
+        Rectangle {
+            height: root.tab-index == 1 ? fields-layout.preferred-height : 0px;
+            clip: true;
+
+            fields-layout := VerticalLayout {
+                spacing: 6px;
+
+                host-field := FieldRow {
+                    label-text: @tr("Host");
+                    placeholder: "localhost";
+                    value <=> root.host;
+                    move-focus(d) => {
+                        if (d > 0) { port-field.grab-focus(); }
+                        else { name-field.grab-focus(); }
+                    }
+                }
+                port-field := FieldRow {
+                    label-text: @tr("Port");
+                    placeholder: "5432";
+                    value <=> root.port;
+                    move-focus(d) => {
+                        if (d > 0) { user-field.grab-focus(); }
+                        else { host-field.grab-focus(); }
+                    }
+                }
+                user-field := FieldRow {
+                    label-text: @tr("User");
+                    placeholder: @tr("username");
+                    value <=> root.user;
+                    move-focus(d) => {
+                        if (d > 0) { pass-field.grab-focus(); }
+                        else { port-field.grab-focus(); }
+                    }
+                }
+                pass-field := FieldRow {
+                    label-text: @tr("Password");
+                    value <=> root.password;
+                    is-password: true;
+                    move-focus(d) => {
+                        if (d > 0) { db-field.grab-focus(); }
+                        else { user-field.grab-focus(); }
+                    }
+                }
+                db-field := FieldRow {
+                    label-text: @tr("Database");
+                    placeholder: @tr("database name");
+                    value <=> root.database;
+                    move-focus(d) => {
+                        // Last field: Up goes back, Down/Return does nothing.
+                        if (d < 0) { pass-field.grab-focus(); }
+                    }
+                }
             }
         }
 

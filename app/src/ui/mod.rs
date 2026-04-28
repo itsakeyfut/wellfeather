@@ -801,6 +801,33 @@ impl UI {
             });
         }
 
+        // connect-db: connect to a saved connection from the DB tab by id.
+        // Mirrors the connection-switching logic in toggle-sidebar-node.
+        {
+            // clone required: callback closure needs owned captures
+            let tx_cmd = tx_cmd.clone();
+            let state = state.clone();
+            ui_state.on_connect_db(move |id| {
+                let id = id.to_string();
+                let active_id = state
+                    .conn
+                    .active()
+                    .map(|c| c.id.clone())
+                    .unwrap_or_default();
+                if id == active_id {
+                    return;
+                }
+                let conn = state.conn.all().into_iter().find(|c| c.id == id);
+                if let Some(conn) = conn {
+                    let password = conn
+                        .password_encrypted
+                        .as_ref()
+                        .and_then(|enc| crypto::decrypt(enc, &enc_key).ok());
+                    send_cmd(&tx_cmd, Command::Connect(conn, password));
+                }
+            });
+        }
+
         // table-double-clicked: insert SELECT * FROM <name> into the editor
         // and immediately execute it so the result appears without a manual
         // Ctrl+Enter.  tx_cmd is cloned here because the closure is 'static.
