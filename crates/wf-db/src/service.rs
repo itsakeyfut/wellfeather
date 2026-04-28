@@ -73,6 +73,7 @@ impl DbService {
     ///
     /// Returns `Err(DbError::Cancelled)` if the token fires first.
     /// Returns `Err(DbError::ConnectionFailed)` if `conn_id` is not in the pool map.
+    #[tracing::instrument(skip(self, token))]
     pub async fn execute_with_cancel(
         &self,
         conn_id: &str,
@@ -80,10 +81,18 @@ impl DbService {
         token: CancellationToken,
     ) -> Result<QueryResult, DbError> {
         let pool = self.pool_for(conn_id)?;
-        tokio::select! {
+        let result = tokio::select! {
             result = pool.execute(sql) => result,
             _ = token.cancelled() => Err(DbError::Cancelled),
+        };
+        match &result {
+            Ok(r) => {
+                tracing::info!(conn_id = %conn_id, duration_ms = r.execution_time_ms, "query executed")
+            }
+            Err(DbError::Cancelled) => {}
+            Err(e) => tracing::error!(conn_id = %conn_id, error = %e, "query error"),
         }
+        result
     }
 
     /// Fetch schema metadata for the connection identified by `conn_id`.

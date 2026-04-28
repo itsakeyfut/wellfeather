@@ -18,7 +18,7 @@ use std::path::PathBuf;
 use chrono::Utc;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
-use tracing::{info, warn};
+use tracing::{debug, error, info, warn};
 use wf_completion::{cache::MetadataCache, service::CompletionService};
 use wf_db::{error::DbError, models::DbConnection, service::DbService};
 use wf_history::service::HistoryService;
@@ -115,6 +115,7 @@ impl AppController {
         self.metadata_cache = Some(cache);
 
         while let Some(cmd) = self.rx_cmd.recv().await {
+            debug!("received command: {:?}", cmd);
             match cmd {
                 Command::Connect(conn, pw) => self.handle_connect(conn, pw).await,
                 Command::TestConnection(conn, pw) => self.handle_test_connection(conn, pw).await,
@@ -252,6 +253,7 @@ impl AppController {
 
         let token = CancellationToken::new();
         self.state.query.set_cancel_token(token.clone());
+        debug!("sending event: QueryStarted");
         let _ = self.tx_event.send(Event::QueryStarted).await;
 
         let page_size = self.state.ui.page_size();
@@ -280,12 +282,15 @@ impl AppController {
                             warn!("failed to save history: {e}");
                         }
                     }
+                    debug!("sending event: QueryFinished");
                     let _ = tx.send(Event::QueryFinished(result)).await;
                 }
                 Err(DbError::Cancelled) => {
+                    debug!("sending event: QueryCancelled");
                     let _ = tx.send(Event::QueryCancelled).await;
                 }
                 Err(e) => {
+                    error!(error = %e, "query execution failed");
                     if let Some(ref h) = history {
                         let exec = wf_db::models::QueryExecution {
                             id: 0,
@@ -300,6 +305,7 @@ impl AppController {
                             warn!("failed to save history: {he}");
                         }
                     }
+                    debug!("sending event: QueryError");
                     let _ = tx.send(Event::QueryError(e.to_string())).await;
                 }
             }

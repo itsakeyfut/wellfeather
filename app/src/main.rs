@@ -31,7 +31,9 @@ use wf_db::service::DbService;
 
 /// Entry point. Runs on the main OS thread; the Slint event loop must stay here.
 fn main() -> anyhow::Result<()> {
-    tracing_subscriber::fmt::init();
+    tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .init();
 
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
