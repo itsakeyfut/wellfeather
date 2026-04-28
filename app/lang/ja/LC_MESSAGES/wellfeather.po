@@ -81,6 +81,18 @@ msgid "Font Settings (coming soon)"
 msgstr "フォント設定（近日公開）"
 
 msgctxt "MenuBar"
+msgid "Database"
+msgstr "データベース"
+
+msgctxt "MenuBar"
+msgid "Manage Connections…"
+msgstr "接続の管理…"
+
+msgctxt "MenuBar"
+msgid "Disconnect"
+msgstr "切断"
+
+msgctxt "MenuBar"
 msgid "English"
 msgstr "English"
 
@@ -135,6 +147,14 @@ msgstr "[Esc でクリア]"
 msgctxt "ConnectionForm"
 msgid "Add Connection"
 msgstr "接続を追加"
+
+msgctxt "ConnectionForm"
+msgid "Edit Connection"
+msgstr "接続を編集"
+
+msgctxt "ConnectionForm"
+msgid "Save"
+msgstr "保存"
 
 msgctxt "ConnectionForm"
 msgid "Name"
@@ -251,3 +271,23 @@ msgstr "接続失敗"
 msgctxt "TestResultDialog"
 msgid "OK"
 msgstr "OK"
+
+msgctxt "DbManagerDialog"
+msgid "Connections"
+msgstr "接続一覧"
+
+msgctxt "DbManagerDialog"
+msgid "Edit"
+msgstr "編集"
+
+msgctxt "DbManagerDialog"
+msgid "Connect"
+msgstr "接続"
+
+msgctxt "DbManagerDialog"
+msgid "Disconnect"
+msgstr "切断"
+
+msgctxt "DbManagerDialog"
+msgid "+ Add connection"
+msgstr "+ 接続を追加"

@@ -74,4 +74,20 @@ impl ConnectionState {
             .unwrap_or_else(|p| p.into_inner())
             .active_id = Some(id.to_string());
     }
+
+    /// Replaces the saved connection that has the same `id`. No-op if not found.
+    pub fn update(&self, conn: DbConnection) {
+        let mut d = self.data.write().unwrap_or_else(|p| p.into_inner());
+        if let Some(existing) = d.connections.iter_mut().find(|c| c.id == conn.id) {
+            *existing = conn;
+        }
+    }
+
+    /// Clears the active connection id (no connection active).
+    pub fn clear_active(&self) {
+        self.data
+            .write()
+            .unwrap_or_else(|p| p.into_inner())
+            .active_id = None;
+    }
 }

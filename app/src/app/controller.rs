@@ -153,9 +153,11 @@ impl AppController {
                 if let Err(e) = self.session.save_connection(&conn) {
                     warn!(conn_id = %id, error = %e, "failed to save session");
                 }
-                // Only add to the saved list if this is a new connection.
+                // Add or update the connection in the saved list.
                 let already_saved = self.state.conn.all().iter().any(|c| c.id == id);
-                if !already_saved {
+                if already_saved {
+                    self.state.conn.update(conn);
+                } else {
                     self.state.conn.add(conn);
                 }
                 self.state.conn.set_active(&id);

@@ -81,6 +81,18 @@ msgid "Font Settings (coming soon)"
 msgstr "Font Settings (coming soon)"
 
 msgctxt "MenuBar"
+msgid "Database"
+msgstr "Database"
+
+msgctxt "MenuBar"
+msgid "Manage Connections…"
+msgstr "Manage Connections…"
+
+msgctxt "MenuBar"
+msgid "Disconnect"
+msgstr "Disconnect"
+
+msgctxt "MenuBar"
 msgid "English"
 msgstr "English"
 
@@ -135,6 +147,14 @@ msgstr "[Esc to clear]"
 msgctxt "ConnectionForm"
 msgid "Add Connection"
 msgstr "Add Connection"
+
+msgctxt "ConnectionForm"
+msgid "Edit Connection"
+msgstr "Edit Connection"
+
+msgctxt "ConnectionForm"
+msgid "Save"
+msgstr "Save"
 
 msgctxt "ConnectionForm"
 msgid "Name"
@@ -251,3 +271,23 @@ msgstr "Connection Failed"
 msgctxt "TestResultDialog"
 msgid "OK"
 msgstr "OK"
+
+msgctxt "DbManagerDialog"
+msgid "Connections"
+msgstr "Connections"
+
+msgctxt "DbManagerDialog"
+msgid "Edit"
+msgstr "Edit"
+
+msgctxt "DbManagerDialog"
+msgid "Connect"
+msgstr "Connect"
+
+msgctxt "DbManagerDialog"
+msgid "Disconnect"
+msgstr "Disconnect"
+
+msgctxt "DbManagerDialog"
+msgid "+ Add connection"
+msgstr "+ Add connection"
