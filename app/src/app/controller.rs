@@ -16,7 +16,6 @@
 use std::path::PathBuf;
 
 use chrono::Utc;
-use rust_i18n::t;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
@@ -248,9 +247,10 @@ impl AppController {
                 warn!("RunQuery: no active connection");
                 let _ = self
                     .tx_event
-                    .send(Event::QueryError(
-                        t!("error.no_active_connection").to_string(),
-                    ))
+                    .send(Event::QueryError(crate::app::locale::tr(
+                        "error.no_active_connection",
+                        &[],
+                    )))
                     .await;
                 return;
             }
@@ -393,6 +393,11 @@ fn apply_limit(sql: &str, limit: usize) -> String {
         return sql.to_string();
     }
     let trimmed = sql.trim().trim_end_matches(';').trim_end();
+    // Multi-statement SQL (semicolon in the middle) must not have LIMIT injected;
+    // the caller is responsible for splitting statements before calling apply_limit.
+    if trimmed.contains(';') {
+        return sql.to_string();
+    }
     let upper = trimmed.to_uppercase();
     if upper.starts_with("SELECT") && !upper.contains(" LIMIT ") {
         format!("{} LIMIT {}", trimmed, limit)
@@ -504,6 +509,12 @@ mod tests {
     #[test]
     fn apply_limit_should_not_apply_when_limit_is_zero() {
         assert_eq!(apply_limit("SELECT * FROM t", 0), "SELECT * FROM t");
+    }
+
+    #[test]
+    fn apply_limit_should_not_apply_to_multi_statement_sql() {
+        let multi = "SELECT * FROM a;\nSELECT * FROM b";
+        assert_eq!(apply_limit(multi, 500), multi);
     }
 
     // ── TestConnection ────────────────────────────────────────────────────────

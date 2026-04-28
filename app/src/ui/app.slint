@@ -152,6 +152,9 @@ export global UiState {
     // ── UI → Controller callbacks ─────────────────────────────────────────────
     callback run-query(string);
     callback run-all(string);
+    /// Fired by Ctrl+Enter in the editor. Rust extracts the statement at cursor
+    /// or the selected text and sends Command::RunSelection.
+    callback run-query-at-cursor(string, int, int, int);
     callback cancel-query();
     callback quit();
 
@@ -379,7 +382,9 @@ export component AppWindow inherits Window {
                 line-count:      UiState.count-lines(UiState.editor-text);
                 cursor-line(text, pos) => { UiState.cursor-line(text, pos); }
                 move-cursor-line(text, pos, delta) => { UiState.move-cursor-line(text, pos, delta); }
-                run-query => { UiState.run-query(UiState.editor-text); }
+                run-query(sql, cursor, sel-start, sel-end) => {
+                    UiState.run-query-at-cursor(sql, cursor, sel-start, sel-end);
+                }
                 toggle-panel => { UiState.result-panel-open = !UiState.result-panel-open; }
                 text-edited(sql, pos) => { UiState.fetch-completion(sql, pos); }
                 trigger-completion(sql, pos) => { UiState.trigger-completion(sql, pos); }
