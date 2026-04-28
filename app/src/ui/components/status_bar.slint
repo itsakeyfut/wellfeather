@@ -14,11 +14,9 @@ export component StatusBar inherits Rectangle {
     /// Examples: "Running…"  |  "42 ms  ·  128 rows"  |  "Cancelled"  |  "Error: …"
     in property <string> query-status;
 
-    callback toggle-theme();
-
     HorizontalLayout {
         padding-left:  12px;
-        padding-right: 6px;
+        padding-right: 12px;
         spacing: 8px;
 
         Text {
@@ -34,23 +32,6 @@ export component StatusBar inherits Rectangle {
             color: Colors.subtext0;
             font-size: Typography.size-base;
             vertical-alignment: center;
-        }
-
-        Rectangle {
-            width: 34px;
-            border-radius: 3px;
-            background: theme-btn-ta.has-hover ? Colors.surface1 : Colors.surface0;
-
-            theme-btn-ta := TouchArea {
-                clicked => { root.toggle-theme(); }
-            }
-            Text {
-                text: Colors.is-dark ? "☀" : "☾";
-                color: Colors.overlay2;
-                font-size: Typography.size-md;
-                horizontal-alignment: center;
-                vertical-alignment: center;
-            }
         }
     }
 }
