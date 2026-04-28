@@ -21,5 +21,21 @@ fn main() {
         }
     }
 
-    slint_build::compile("src/ui/app.slint").expect("Failed to compile Slint UI");
+    // Watch .po translation files
+    println!("cargo:rerun-if-changed=lang");
+
+    // Watch all .slint files under src/ui/components/dialogs/
+    if let Ok(entries) = std::fs::read_dir("src/ui/components/dialogs") {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().is_some_and(|e| e == "slint") {
+                println!("cargo:rerun-if-changed={}", path.display());
+            }
+        }
+    }
+
+    let config = slint_build::CompilerConfiguration::new()
+        .with_bundled_translations(std::path::Path::new("lang"));
+    slint_build::compile_with_config("src/ui/app.slint", config)
+        .expect("Failed to compile Slint UI");
 }

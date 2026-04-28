@@ -1,0 +1,245 @@
+# Japanese translations for Wellfeather UI
+msgid ""
+msgstr ""
+"Project-Id-Version: wellfeather 0.1.0\n"
+"Language: ja\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=1; plural=0;\n"
+
+msgctxt "AppWindow"
+msgid "Select a cell to preview its value"
+msgstr "セルを選択して値をプレビュー"
+
+msgctxt "AppWindow"
+msgid "NULL"
+msgstr "NULL"
+
+msgctxt "AppWindow"
+msgid "Error"
+msgstr "エラー"
+
+msgctxt "AppWindow"
+msgid "Results"
+msgstr "結果"
+
+msgctxt "ResultTable"
+msgid "Running…"
+msgstr "実行中…"
+
+msgctxt "ResultTable"
+msgid "Query Error"
+msgstr "クエリエラー"
+
+msgctxt "MenuBar"
+msgid "File"
+msgstr "ファイル"
+
+msgctxt "MenuBar"
+msgid "Export CSV"
+msgstr "CSV エクスポート"
+
+msgctxt "MenuBar"
+msgid "Export JSON"
+msgstr "JSON エクスポート"
+
+msgctxt "MenuBar"
+msgid "Quit"
+msgstr "終了"
+
+msgctxt "MenuBar"
+msgid "Edit"
+msgstr "編集"
+
+msgctxt "MenuBar"
+msgid "Toggle Theme"
+msgstr "テーマ切り替え"
+
+msgctxt "MenuBar"
+msgid "Query"
+msgstr "クエリ"
+
+msgctxt "MenuBar"
+msgid "Run (Ctrl+Enter)"
+msgstr "実行 (Ctrl+Enter)"
+
+msgctxt "MenuBar"
+msgid "Run All (Ctrl+Shift+Enter)"
+msgstr "全実行 (Ctrl+Shift+Enter)"
+
+msgctxt "MenuBar"
+msgid "Cancel (Esc)"
+msgstr "キャンセル (Esc)"
+
+msgctxt "MenuBar"
+msgid "Settings"
+msgstr "設定"
+
+msgctxt "MenuBar"
+msgid "Font Settings (coming soon)"
+msgstr "フォント設定（近日公開）"
+
+msgctxt "MenuBar"
+msgid "English"
+msgstr "English"
+
+msgctxt "MenuBar"
+msgid "Japanese"
+msgstr "日本語"
+
+msgctxt "Sidebar"
+msgid "Loading…"
+msgstr "読み込み中…"
+
+msgctxt "Sidebar"
+msgid "＋ Add connection"
+msgstr "＋ 接続を追加"
+
+msgctxt "ResultTableBody"
+msgid "Copy cell value"
+msgstr "セル値をコピー"
+
+msgctxt "ResultTableBody"
+msgid "Copy row (tab-separated)"
+msgstr "行をコピー（タブ区切り）"
+
+msgctxt "ResultTableBody"
+msgid "Copy as TSV (with headers)"
+msgstr "TSV でコピー（ヘッダー付き）"
+
+msgctxt "ResultTableBody"
+msgid "NULL"
+msgstr "NULL"
+
+msgctxt "ResultTableBody"
+msgid "0 rows"
+msgstr "0 行"
+
+msgctxt "ResultTableSearch"
+msgid "Filter:"
+msgstr "フィルター:"
+
+msgctxt "ResultTableSearch"
+msgid "[Esc to clear]"
+msgstr "[Esc でクリア]"
+
+msgctxt "ConnectionForm"
+msgid "Add Connection"
+msgstr "接続を追加"
+
+msgctxt "ConnectionForm"
+msgid "Name"
+msgstr "名前"
+
+msgctxt "ConnectionForm"
+msgid "Connection String"
+msgstr "接続文字列"
+
+msgctxt "ConnectionForm"
+msgid "Individual Fields"
+msgstr "個別フィールド"
+
+msgctxt "ConnectionForm"
+msgid "Host"
+msgstr "ホスト"
+
+msgctxt "ConnectionForm"
+msgid "Port"
+msgstr "ポート"
+
+msgctxt "ConnectionForm"
+msgid "User"
+msgstr "ユーザー"
+
+msgctxt "ConnectionForm"
+msgid "Password"
+msgstr "パスワード"
+
+msgctxt "ConnectionForm"
+msgid "Database"
+msgstr "データベース"
+
+msgctxt "ConnectionForm"
+msgid "Cancel"
+msgstr "キャンセル"
+
+msgctxt "ConnectionForm"
+msgid "Testing…"
+msgstr "テスト中…"
+
+msgctxt "ConnectionForm"
+msgid "Test Connection"
+msgstr "接続テスト"
+
+msgctxt "ConnectionForm"
+msgid "Add"
+msgstr "追加"
+
+msgctxt "ResultTableToolbar"
+msgid "Export"
+msgstr "エクスポート"
+
+msgctxt "ResultTableToolbar"
+msgid "ALL"
+msgstr "全件"
+
+msgctxt "ResultTableToolbar"
+msgid "Export CSV"
+msgstr "CSV エクスポート"
+
+msgctxt "ResultTableToolbar"
+msgid "Export JSON"
+msgstr "JSON エクスポート"
+
+msgctxt "ResultTableToolbar"
+msgid "{0} rows"
+msgstr "{0} 行"
+
+msgctxt "ResultTableToolbar"
+msgid "{0} / {1} rows"
+msgstr "{0} / {1} 行"
+
+msgctxt "AddConnectionDialog"
+msgid "Warning"
+msgstr "警告"
+
+msgctxt "AddConnectionDialog"
+msgid "Connection test was not successful. Add anyway?"
+msgstr "接続テストに失敗しました。それでも追加しますか？"
+
+msgctxt "AddConnectionDialog"
+msgid "No"
+msgstr "いいえ"
+
+msgctxt "AddConnectionDialog"
+msgid "Yes"
+msgstr "はい"
+
+msgctxt "AllRowsDialog"
+msgid "Fetch all rows?"
+msgstr "全件取得しますか？"
+
+msgctxt "AllRowsDialog"
+msgid "No LIMIT will be applied. This may take a long time for large tables."
+msgstr "LIMIT なしで実行されます。大きなテーブルでは時間がかかる場合があります。"
+
+msgctxt "AllRowsDialog"
+msgid "Cancel"
+msgstr "キャンセル"
+
+msgctxt "AllRowsDialog"
+msgid "Fetch"
+msgstr "取得"
+
+msgctxt "TestResultDialog"
+msgid "Connection Successful"
+msgstr "接続成功"
+
+msgctxt "TestResultDialog"
+msgid "Connection Failed"
+msgstr "接続失敗"
+
+msgctxt "TestResultDialog"
+msgid "OK"
+msgstr "OK"

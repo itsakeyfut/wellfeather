@@ -16,6 +16,7 @@
 //! ```
 
 slint::include_modules!();
+rust_i18n::i18n!("locales", fallback = "en");
 
 mod app;
 mod state;
@@ -49,6 +50,8 @@ fn main() -> anyhow::Result<()> {
     let state = Arc::new(AppState::new());
 
     // Load persisted page_size and theme from config so the first launch uses the user's last settings.
+    // Language locale is applied in UI::new() after the Slint component is created — Slint requires
+    // a live component to exist before select_bundled_translation() takes effect.
     {
         let config = ConfigManager::new().load().unwrap_or_default();
         state

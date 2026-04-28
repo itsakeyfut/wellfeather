@@ -143,6 +143,12 @@ export global UiState {
     /// Toggle between dark and light theme; Rust persists the choice.
     callback toggle-theme();
 
+    // ── Language ──────────────────────────────────────────────────────────────
+    /// Active locale code ("en" or "ja"). Initialised from config.toml by Rust.
+    in-out property <string> language: "en";
+    /// Switch locale; Rust calls select_bundled_translation + set_locale and persists.
+    callback set-language(string);
+
     // ── UI → Controller callbacks ─────────────────────────────────────────────
     callback run-query(string);
     callback run-all(string);
@@ -294,6 +300,7 @@ export component AppWindow inherits Window {
             y: 0;
             width:        root.width;
             editor-text:  UiState.editor-text;
+            language:     UiState.language;
             export-csv   => { UiState.export-csv(); }
             export-json  => { UiState.export-json(); }
             quit         => { UiState.quit(); }
@@ -301,6 +308,7 @@ export component AppWindow inherits Window {
             run-query(sql) => { UiState.run-query(sql); }
             run-all(sql)   => { UiState.run-all(sql); }
             cancel-query   => { UiState.cancel-query(); }
+            set-language(lang) => { UiState.set-language(lang); }
         }
 
         // ── Sidebar ───────────────────────────────────────────────────────────
