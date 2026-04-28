@@ -388,7 +388,7 @@ export component AppWindow inherits Window {
                 y: 0;
                 width:  root.gutter-col-width;
                 height: parent.height;
-                background: Colors.base;
+                background: Colors.mantle;
                 clip: true;
 
                 for i in editor-inst.gutter-vis-count: Text {
@@ -420,7 +420,11 @@ export component AppWindow inherits Window {
                 move-cursor-line(text, pos, delta) => { UiState.move-cursor-line(text, pos, delta); }
                 run-query(cursor) => { UiState.run-query-at-cursor(UiState.editor-text, cursor); }
                 run-all => { UiState.run-all(UiState.editor-text); }
-                toggle-panel => { UiState.result-panel-open = !UiState.result-panel-open; }
+                toggle-panel => {
+                    if (UiState.result-columns.length > 0 || UiState.error-message != "") {
+                        UiState.result-panel-open = !UiState.result-panel-open;
+                    }
+                }
                 text-edited(sql, pos) => { UiState.fetch-completion(sql, pos); }
                 trigger-completion(sql, pos) => { UiState.trigger-completion(sql, pos); }
                 format-sql => { UiState.format-sql(); }
@@ -431,15 +435,40 @@ export component AppWindow inherits Window {
                 accept-completion(text, pos, offset, tname) => { UiState.accept-completion(text, pos, offset, tname); }
             }
 
+            // ── Panel drag handle ─────────────────────────────────────────────
+            // Sits at the top boundary of the preview strip (the thin separator
+            // between the editor and the preview area).  Dragging grows/shrinks
+            // panel-height upward.  Rendered after the result panel so it is on
+            // top and receives pointer events without being clipped.
+            if UiState.result-panel-open: Rectangle {
+                x: 0;
+                y: parent.height - root.panel-height - root.preview-strip-h;
+                width:  parent.width;
+                height: root.divider-thickness;
+                background: panel-drag-ta.has-hover || panel-drag-ta.pressed
+                    ? Colors.surface2 : transparent;
+
+                panel-drag-ta := TouchArea {
+                    mouse-cursor: ns-resize;
+                    moved => {
+                        root.panel-height = clamp(
+                            root.panel-height + (self.pressed-y - self.mouse-y),
+                            80px,
+                            root.content-height - 40px
+                        );
+                    }
+                }
+            }
+
             // ── Cell-value preview strip ──────────────────────────────────────
             // Fixed-height strip placed above the result panel; shows the full
             // value of the last clicked cell with word-wrap and vertical scroll.
             // Rendered as a sibling of the result panel so it never reduces the
             // table body height.
             Rectangle {
-                x: root.gutter-col-width;
+                x: 0;
                 y: parent.height - root.panel-height - root.preview-strip-h;
-                width:  parent.width - root.gutter-col-width;
+                width:  parent.width;
                 height: root.preview-strip-h;
                 background: Colors.mantle;
                 clip: true;
@@ -493,57 +522,18 @@ export component AppWindow inherits Window {
             // Always instantiated (so result-table-inst is accessible from AppWindow
             // scope for focus tracking and grab-focus); hidden via `visible:` when closed.
             Rectangle {
-                x: root.gutter-col-width;
+                x: 0;
                 y: parent.height - root.panel-height;
-                width:  parent.width - root.gutter-col-width;
+                width:  parent.width;
                 height: root.panel-height;
                 background: Colors.base;
                 clip: true;
                 visible: UiState.result-panel-open;
 
-                // ── Top drag handle ───────────────────────────────────────────
-                // Dragging this edge adjusts panel-height (panel grows/shrinks upward).
-                Rectangle {
-                    x: 0;
-                    y: 0;
-                    width:  parent.width;
-                    height: root.divider-thickness;
-                    background: Colors.surface0;
-
-                    states [
-                        active when panel-drag-ta.has-hover || panel-drag-ta.pressed: {
-                            background: Colors.surface2;
-                        }
-                    ]
-
-                    panel-drag-ta := TouchArea {
-                        mouse-cursor: ns-resize;
-
-                        // Each `moved` event: mouse-y is relative to the current element
-                        // position, which itself moves as panel-height changes.  Using the
-                        // snapshot-and-delta approach would accumulate drift.  Instead we
-                        // compute the incremental correction each frame:
-                        //
-                        //   cursor_abs = (container_height - ph) + mouse_y_rel
-                        //   desired panel_top = cursor_abs - pressed_y
-                        //   → ph_new = ph_current + (pressed_y - mouse_y_rel)
-                        //
-                        // After the update the element repositions so that mouse_y_rel
-                        // equals pressed_y when the cursor is stationary — zero drift.
-                        moved => {
-                            root.panel-height = clamp(
-                                root.panel-height + (self.pressed-y - self.mouse-y),
-                                80px,
-                                root.content-height - 40px
-                            );
-                        }
-                    }
-                }
-
                 // ── Panel header (tab label + close button) ───────────────────
                 Rectangle {
                     x: 0;
-                    y: root.divider-thickness;
+                    y: 0;
                     width:  parent.width;
                     height: root.panel-header-height;
                     background: Colors.surface0;
@@ -589,9 +579,9 @@ export component AppWindow inherits Window {
                 // ── Result table content ──────────────────────────────────────
                 result-table-inst := ResultTable {
                     x: 0;
-                    y: root.divider-thickness + root.panel-header-height;
+                    y: root.panel-header-height;
                     width:  parent.width;
-                    height: root.panel-height - root.divider-thickness - root.panel-header-height;
+                    height: root.panel-height - root.panel-header-height;
                     columns:          UiState.result-columns;
                     rows:             UiState.result-rows;
                     row-count:        UiState.result-row-count;
@@ -657,7 +647,7 @@ export component AppWindow inherits Window {
             y: menu-bar-height;
             width:  sidebar-width;
             height: content-height;
-            border-width: 2px;
+            border-width: 1px;
             border-color: Colors.blue;
             background: transparent;
         }
@@ -668,7 +658,7 @@ export component AppWindow inherits Window {
             y: menu-bar-height;
             width:  main-width;
             height: content-height;
-            border-width: 2px;
+            border-width: 1px;
             border-color: Colors.blue;
             background: transparent;
         }
@@ -679,7 +669,7 @@ export component AppWindow inherits Window {
             y: menu-bar-height + content-height - panel-height - preview-strip-h;
             width:  main-width;
             height: panel-height + preview-strip-h;
-            border-width: 2px;
+            border-width: 1px;
             border-color: Colors.blue;
             background: transparent;
         }
@@ -763,6 +753,20 @@ export component AppWindow inherits Window {
                 UiState.reopen-db-manager-on-form-close = true;
                 UiState.open-connection-form();
             }
+        }
+
+        // ── Inner edge lines ──────────────────────────────────────────────────
+        // Subtle 1px vertical accents on the left and right sides of the client area.
+        // Dark mode: surface0 (#313244), light mode: surface0 (#ccd0da).
+        Rectangle {
+            x: 0; y: 0;
+            width: 1px; height: root.height;
+            background: Colors.surface0;
+        }
+        Rectangle {
+            x: root.width - 1px; y: 0;
+            width: 1px; height: root.height;
+            background: Colors.surface0;
         }
     }
 }
