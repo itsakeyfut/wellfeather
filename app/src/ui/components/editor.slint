@@ -110,6 +110,10 @@ export component Editor inherits Rectangle {
     // ── Key-hold state for timer-based UP/DOWN navigation ────────────────────
     property <bool> up-held:   false;
     property <bool> down-held: false;
+    // Armed after the initial-delay timer fires; gates the repeat timer so a
+    // brief tap never triggers more than one movement.
+    property <bool> up-repeat-ready:   false;
+    property <bool> down-repeat-ready: false;
 
     // ── Cursor-line poll timer ────────────────────────────────────────────────
     // NOT a reactive binding — polling at 60 fps keeps key-event processing to
@@ -134,12 +138,27 @@ export component Editor inherits Rectangle {
         }
     }
 
+    // ── Initial-delay timers ──────────────────────────────────────────────────
+    // Fire once ~250 ms after the key is first held.  Setting repeat-ready arms
+    // the sustained-movement timer, matching the OS key-repeat initial delay.
+    // The timer stops itself because the running condition becomes false once
+    // repeat-ready is true.
+    Timer {
+        interval: 250ms;
+        running: root.up-held && !root.up-repeat-ready;
+        triggered => { root.up-repeat-ready = true; }
+    }
+    Timer {
+        interval: 250ms;
+        running: root.down-held && !root.down-repeat-ready;
+        triggered => { root.down-repeat-ready = true; }
+    }
+
     // ── Sustained UP movement timer ───────────────────────────────────────────
-    // Fires while the up arrow is held (after the initial press handled by
-    // capture-key-pressed).  Interval matches a typical OS key-repeat rate.
+    // Only fires after the initial delay has elapsed (up-repeat-ready = true).
     Timer {
         interval: 50ms;
-        running: root.up-held;
+        running: root.up-held && root.up-repeat-ready;
         triggered => {
             let new-pos = root.move-cursor-line(
                 inner-input.text,
@@ -153,7 +172,7 @@ export component Editor inherits Rectangle {
     // ── Sustained DOWN movement timer ─────────────────────────────────────────
     Timer {
         interval: 50ms;
-        running: root.down-held;
+        running: root.down-held && root.down-repeat-ready;
         triggered => {
             let new-pos = root.move-cursor-line(
                 inner-input.text,
@@ -369,8 +388,14 @@ export component Editor inherits Rectangle {
             }
 
             capture-key-released(event) => {
-                if (event.text == Key.UpArrow)   { root.up-held   = false; }
-                if (event.text == Key.DownArrow)  { root.down-held = false; }
+                if (event.text == Key.UpArrow) {
+                    root.up-held         = false;
+                    root.up-repeat-ready = false;
+                }
+                if (event.text == Key.DownArrow) {
+                    root.down-held         = false;
+                    root.down-repeat-ready = false;
+                }
                 EventResult.reject
             }
 
