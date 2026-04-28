@@ -16,6 +16,7 @@
 use std::path::PathBuf;
 
 use chrono::Utc;
+use rust_i18n::t;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
@@ -25,6 +26,7 @@ use wf_history::service::HistoryService;
 
 use crate::{
     app::{
+        LocalizedMessage,
         command::{Command, ConfigUpdate},
         event::{Event, StateEvent},
         session::SessionManager,
@@ -183,7 +185,10 @@ impl AppController {
             }
             Err(e) => {
                 warn!(conn_id = %id, error = %e, "connection failed");
-                let _ = self.tx_event.send(Event::ConnectError(e.to_string())).await;
+                let _ = self
+                    .tx_event
+                    .send(Event::ConnectError(e.localized_message()))
+                    .await;
             }
         }
     }
@@ -208,7 +213,7 @@ impl AppController {
                 warn!(conn_id = %id, error = %e, "test connection failed");
                 let _ = self
                     .tx_event
-                    .send(Event::TestConnectionFailed(e.to_string()))
+                    .send(Event::TestConnectionFailed(e.localized_message()))
                     .await;
             }
         }
@@ -243,7 +248,9 @@ impl AppController {
                 warn!("RunQuery: no active connection");
                 let _ = self
                     .tx_event
-                    .send(Event::QueryError("no active connection".to_string()))
+                    .send(Event::QueryError(
+                        t!("error.no_active_connection").to_string(),
+                    ))
                     .await;
                 return;
             }
@@ -306,7 +313,7 @@ impl AppController {
                         }
                     }
                     debug!("sending event: QueryError");
-                    let _ = tx.send(Event::QueryError(e.to_string())).await;
+                    let _ = tx.send(Event::QueryError(e.localized_message())).await;
                 }
             }
         });
@@ -335,6 +342,11 @@ impl AppController {
                     warn!(error = %e, "failed to persist page_size to config");
                 }
                 let _ = self.tx_event.send(Event::ConfigUpdated).await;
+            }
+            ConfigUpdate::Language(lang) => {
+                if let Err(e) = self.session.save_language(&lang) {
+                    warn!(error = %e, "failed to persist language to config");
+                }
             }
             _ => {}
         }

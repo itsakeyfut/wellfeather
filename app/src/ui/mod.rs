@@ -5,6 +5,7 @@ use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
+use rust_i18n::t;
 use slint::ComponentHandle;
 use slint::Model as _;
 use tokio::sync::mpsc;
@@ -270,6 +271,12 @@ impl UI {
             .unwrap_or_default();
         ui_global.set_font_family(config.appearance.font_family.into());
         ui_global.set_font_size(config.appearance.font_size as i32);
+        // Apply locale after the Slint component exists — select_bundled_translation
+        // requires a live component and is a no-op if called before one is created.
+        let lang = &config.ui.language;
+        let _ = slint::select_bundled_translation(lang);
+        rust_i18n::set_locale(lang);
+        ui_global.set_language(lang.clone().into());
         // Restore last editor query from previous session (last_query.sql).
         if let Ok(Some(query)) = SessionManager::new().restore_query_file() {
             ui_global.set_editor_text(query.into());
@@ -281,6 +288,7 @@ impl UI {
             Arc::clone(&original_data),
             tx_cmd.clone(),
         );
+        Self::register_language_callback(&window, tx_cmd.clone());
         Self::register_status_callbacks(&window, state.clone());
         Self::spawn_event_handler(
             &window,
@@ -444,7 +452,7 @@ impl UI {
             with_ui(&ww, |ui| {
                 ui.set_form_testing(false);
                 ui.set_form_status(msg.clone().into());
-                ui.set_status_message(format!("Connection failed: {msg}").into());
+                ui.set_status_message(t!("status.connect_failed", msg = msg).to_string().into());
                 ui.set_sidebar_loading(false);
             });
         });
@@ -456,7 +464,7 @@ impl UI {
             with_ui(&ww, |ui| {
                 ui.set_is_loading(true);
                 ui.set_error_message("".into());
-                ui.set_status_message("Running\u{2026}".into());
+                ui.set_status_message(t!("status.running").to_string().into());
                 ui.set_result_panel_open(true);
             });
         });
@@ -500,7 +508,11 @@ impl UI {
                 let total_w = col_count as f32 * DEFAULT_COLUMN_WIDTH;
                 ui.set_result_col_widths(Rc::new(slint::VecModel::from(widths)).into());
                 ui.set_result_total_col_width(total_w);
-                ui.set_status_message(format!("{exec_ms} ms  ·  {row_count} rows").into());
+                ui.set_status_message(
+                    t!("status.query_finished", ms = exec_ms, rows = row_count)
+                        .to_string()
+                        .into(),
+                );
                 ui.set_result_panel_open(true);
             });
         });
@@ -511,7 +523,7 @@ impl UI {
         let _ = slint::invoke_from_event_loop(move || {
             with_ui(&ww, |ui| {
                 ui.set_is_loading(false);
-                ui.set_status_message("Cancelled".into());
+                ui.set_status_message(t!("status.cancelled").to_string().into());
             });
         });
     }
@@ -531,7 +543,7 @@ impl UI {
                 ui.set_form_status(msg.clone().into());
                 ui.set_form_testing(false);
                 ui.set_error_message(msg.into());
-                ui.set_status_message(format!("Error: {summary}").into());
+                ui.set_status_message(t!("status.error", msg = summary).to_string().into());
                 ui.set_result_panel_open(true);
             });
         });
@@ -541,8 +553,8 @@ impl UI {
         // clone required: invoke_from_event_loop closure must be 'static
         let _ = slint::invoke_from_event_loop(move || {
             with_ui(&ww, move |ui| {
-                ui.set_status_message(format!("Disconnected: {id}").into());
-                ui.set_status_connection("Not connected".into());
+                ui.set_status_message(t!("status.disconnected", id = id).to_string().into());
+                ui.set_status_connection(t!("status.not_connected").to_string().into());
             });
         });
     }
@@ -582,7 +594,11 @@ impl UI {
         let _ = slint::invoke_from_event_loop(move || {
             with_ui(&ww, move |ui| {
                 ui.set_sidebar_loading(false);
-                ui.set_status_message(format!("Metadata unavailable: {msg}").into());
+                ui.set_status_message(
+                    t!("status.metadata_unavailable", msg = msg)
+                        .to_string()
+                        .into(),
+                );
             });
         });
     }
@@ -1477,6 +1493,23 @@ impl UI {
                 });
             });
         }
+    }
+
+    // ── Language callback ─────────────────────────────────────────────────────
+
+    fn register_language_callback(window: &crate::AppWindow, tx_cmd: mpsc::Sender<Command>) {
+        let ui = window.global::<crate::UiState>();
+        let window_weak = window.as_weak(); // clone required: on_set_language closure
+        ui.on_set_language(move |lang| {
+            let lang = lang.to_string();
+            // Immediate locale switch on the UI thread — all @tr() bindings re-evaluate.
+            let _ = slint::select_bundled_translation(&lang);
+            rust_i18n::set_locale(&lang);
+            // Update UiState.language so the checkmarks in the menu update.
+            with_ui(&window_weak, |ui| ui.set_language(lang.clone().into()));
+            // Persist to config.toml via controller.
+            send_cmd(&tx_cmd, Command::UpdateConfig(ConfigUpdate::Language(lang)));
+        });
     }
 
     // ── Status callbacks (TODO) ───────────────────────────────────────────────

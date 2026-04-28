@@ -96,6 +96,26 @@ impl SessionManager {
         Ok(())
     }
 
+    /// Persist `lang` as `[ui].language` in `config.toml`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the config file cannot be loaded or written.
+    pub fn save_language(&self, lang: &str) -> anyhow::Result<()> {
+        let mut config = self
+            .config_manager
+            .load()
+            .context("failed to load config for language save")?;
+
+        config.ui.language = lang.to_string();
+
+        self.config_manager
+            .save(&config)
+            .context("failed to save language")?;
+        info!(%lang, "language saved");
+        Ok(())
+    }
+
     /// Persist `theme` as `[appearance].theme` in `config.toml`.
     ///
     /// # Errors

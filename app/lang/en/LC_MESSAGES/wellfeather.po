@@ -1,0 +1,245 @@
+# English translations for Wellfeather UI
+msgid ""
+msgstr ""
+"Project-Id-Version: wellfeather 0.1.0\n"
+"Language: en\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+msgctxt "AppWindow"
+msgid "Select a cell to preview its value"
+msgstr "Select a cell to preview its value"
+
+msgctxt "AppWindow"
+msgid "NULL"
+msgstr "NULL"
+
+msgctxt "AppWindow"
+msgid "Error"
+msgstr "Error"
+
+msgctxt "AppWindow"
+msgid "Results"
+msgstr "Results"
+
+msgctxt "ResultTable"
+msgid "Running…"
+msgstr "Running…"
+
+msgctxt "ResultTable"
+msgid "Query Error"
+msgstr "Query Error"
+
+msgctxt "MenuBar"
+msgid "File"
+msgstr "File"
+
+msgctxt "MenuBar"
+msgid "Export CSV"
+msgstr "Export CSV"
+
+msgctxt "MenuBar"
+msgid "Export JSON"
+msgstr "Export JSON"
+
+msgctxt "MenuBar"
+msgid "Quit"
+msgstr "Quit"
+
+msgctxt "MenuBar"
+msgid "Edit"
+msgstr "Edit"
+
+msgctxt "MenuBar"
+msgid "Toggle Theme"
+msgstr "Toggle Theme"
+
+msgctxt "MenuBar"
+msgid "Query"
+msgstr "Query"
+
+msgctxt "MenuBar"
+msgid "Run (Ctrl+Enter)"
+msgstr "Run (Ctrl+Enter)"
+
+msgctxt "MenuBar"
+msgid "Run All (Ctrl+Shift+Enter)"
+msgstr "Run All (Ctrl+Shift+Enter)"
+
+msgctxt "MenuBar"
+msgid "Cancel (Esc)"
+msgstr "Cancel (Esc)"
+
+msgctxt "MenuBar"
+msgid "Settings"
+msgstr "Settings"
+
+msgctxt "MenuBar"
+msgid "Font Settings (coming soon)"
+msgstr "Font Settings (coming soon)"
+
+msgctxt "MenuBar"
+msgid "English"
+msgstr "English"
+
+msgctxt "MenuBar"
+msgid "Japanese"
+msgstr "Japanese"
+
+msgctxt "Sidebar"
+msgid "Loading…"
+msgstr "Loading…"
+
+msgctxt "Sidebar"
+msgid "＋ Add connection"
+msgstr "＋ Add connection"
+
+msgctxt "ResultTableBody"
+msgid "Copy cell value"
+msgstr "Copy cell value"
+
+msgctxt "ResultTableBody"
+msgid "Copy row (tab-separated)"
+msgstr "Copy row (tab-separated)"
+
+msgctxt "ResultTableBody"
+msgid "Copy as TSV (with headers)"
+msgstr "Copy as TSV (with headers)"
+
+msgctxt "ResultTableBody"
+msgid "NULL"
+msgstr "NULL"
+
+msgctxt "ResultTableBody"
+msgid "0 rows"
+msgstr "0 rows"
+
+msgctxt "ResultTableSearch"
+msgid "Filter:"
+msgstr "Filter:"
+
+msgctxt "ResultTableSearch"
+msgid "[Esc to clear]"
+msgstr "[Esc to clear]"
+
+msgctxt "ConnectionForm"
+msgid "Add Connection"
+msgstr "Add Connection"
+
+msgctxt "ConnectionForm"
+msgid "Name"
+msgstr "Name"
+
+msgctxt "ConnectionForm"
+msgid "Connection String"
+msgstr "Connection String"
+
+msgctxt "ConnectionForm"
+msgid "Individual Fields"
+msgstr "Individual Fields"
+
+msgctxt "ConnectionForm"
+msgid "Host"
+msgstr "Host"
+
+msgctxt "ConnectionForm"
+msgid "Port"
+msgstr "Port"
+
+msgctxt "ConnectionForm"
+msgid "User"
+msgstr "User"
+
+msgctxt "ConnectionForm"
+msgid "Password"
+msgstr "Password"
+
+msgctxt "ConnectionForm"
+msgid "Database"
+msgstr "Database"
+
+msgctxt "ConnectionForm"
+msgid "Cancel"
+msgstr "Cancel"
+
+msgctxt "ConnectionForm"
+msgid "Testing…"
+msgstr "Testing…"
+
+msgctxt "ConnectionForm"
+msgid "Test Connection"
+msgstr "Test Connection"
+
+msgctxt "ConnectionForm"
+msgid "Add"
+msgstr "Add"
+
+msgctxt "ResultTableToolbar"
+msgid "Export"
+msgstr "Export"
+
+msgctxt "ResultTableToolbar"
+msgid "ALL"
+msgstr "ALL"
+
+msgctxt "ResultTableToolbar"
+msgid "Export CSV"
+msgstr "Export CSV"
+
+msgctxt "ResultTableToolbar"
+msgid "Export JSON"
+msgstr "Export JSON"
+
+msgctxt "ResultTableToolbar"
+msgid "{0} rows"
+msgstr "{0} rows"
+
+msgctxt "ResultTableToolbar"
+msgid "{0} / {1} rows"
+msgstr "{0} / {1} rows"
+
+msgctxt "AddConnectionDialog"
+msgid "Warning"
+msgstr "Warning"
+
+msgctxt "AddConnectionDialog"
+msgid "Connection test was not successful. Add anyway?"
+msgstr "Connection test was not successful. Add anyway?"
+
+msgctxt "AddConnectionDialog"
+msgid "No"
+msgstr "No"
+
+msgctxt "AddConnectionDialog"
+msgid "Yes"
+msgstr "Yes"
+
+msgctxt "AllRowsDialog"
+msgid "Fetch all rows?"
+msgstr "Fetch all rows?"
+
+msgctxt "AllRowsDialog"
+msgid "No LIMIT will be applied. This may take a long time for large tables."
+msgstr "No LIMIT will be applied. This may take a long time for large tables."
+
+msgctxt "AllRowsDialog"
+msgid "Cancel"
+msgstr "Cancel"
+
+msgctxt "AllRowsDialog"
+msgid "Fetch"
+msgstr "Fetch"
+
+msgctxt "TestResultDialog"
+msgid "Connection Successful"
+msgstr "Connection Successful"
+
+msgctxt "TestResultDialog"
+msgid "Connection Failed"
+msgstr "Connection Failed"
+
+msgctxt "TestResultDialog"
+msgid "OK"
+msgstr "OK"

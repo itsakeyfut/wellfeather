@@ -1,0 +1,16 @@
+en:
+  status:
+    running: "Running…"
+    query_finished: "%{ms} ms  ·  %{rows} rows"
+    cancelled: "Cancelled"
+    error: "Error: %{msg}"
+    disconnected: "Disconnected: %{id}"
+    not_connected: "Not connected"
+    connect_failed: "Connection failed: %{msg}"
+    metadata_unavailable: "Metadata unavailable: %{msg}"
+  error:
+    no_active_connection: "No active connection"
+    db_connect_failed: "Failed to connect: %{reason}"
+    query_failed: "Query error: %{reason}"
+    query_cancelled: "Query cancelled"
+    db_error: "Database error: %{reason}"
