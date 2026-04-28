@@ -65,10 +65,10 @@ export component Editor inherits Rectangle {
     pure callback move-cursor-line(string, int, int) -> int;
 
     /// Fired when the user presses Ctrl+Enter to run the current SQL.
-    /// Carries the cursor byte offset and anchor byte offset so the handler
-    /// can extract the statement under the cursor or the selected range.
-    /// Implemented in app.slint by forwarding to UiState.run-query-at-cursor.
-    callback run-query(int, int);
+    /// Carries the cursor byte offset so the handler can extract the statement
+    /// at the cursor position.  Implemented in app.slint by forwarding to
+    /// UiState.run-query-at-cursor.
+    callback run-query(int);
 
     /// Fired when the user presses Ctrl+J to toggle the result panel.
     /// Implemented in app.slint by toggling UiState.result-panel-open.
@@ -338,10 +338,7 @@ export component Editor inherits Rectangle {
                     }
                     EventResult.accept
                 } else if (event.text == Key.Return && event.modifiers.control) {
-                    root.run-query(
-                        inner-input.cursor-position-byte-offset,
-                        inner-input.anchor-position-byte-offset
-                    );
+                    root.run-query(inner-input.cursor-position-byte-offset);
                     EventResult.accept
                 } else if (event.text == "j" && event.modifiers.control) {
                     root.toggle-panel();
