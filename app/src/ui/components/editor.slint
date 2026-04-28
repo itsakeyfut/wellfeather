@@ -83,6 +83,10 @@ export component Editor inherits Rectangle {
     /// Carries the current SQL text and cursor byte offset.
     callback trigger-completion(string, int);
 
+    /// Fired when the user presses Ctrl+Shift+Enter to run all SQL statements.
+    /// Implemented in app.slint by forwarding to UiState.run-all.
+    callback run-all();
+
     /// Fired when the user presses Ctrl+Shift+F to reformat the SQL.
     callback format-sql();
 
@@ -337,7 +341,14 @@ export component Editor inherits Rectangle {
                         root.down-held = true;
                     }
                     EventResult.accept
-                } else if (event.text == Key.Return && event.modifiers.control) {
+                } else if (event.text == Key.Return
+                        && event.modifiers.control
+                        && event.modifiers.shift) {
+                    root.run-all();
+                    EventResult.accept
+                } else if (event.text == Key.Return
+                        && event.modifiers.control
+                        && !event.modifiers.shift) {
                     root.run-query(inner-input.cursor-position-byte-offset);
                     EventResult.accept
                 } else if (event.text == "j" && event.modifiers.control) {

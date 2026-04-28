@@ -383,6 +383,7 @@ export component AppWindow inherits Window {
                 cursor-line(text, pos) => { UiState.cursor-line(text, pos); }
                 move-cursor-line(text, pos, delta) => { UiState.move-cursor-line(text, pos, delta); }
                 run-query(cursor) => { UiState.run-query-at-cursor(UiState.editor-text, cursor); }
+                run-all => { UiState.run-all(UiState.editor-text); }
                 toggle-panel => { UiState.result-panel-open = !UiState.result-panel-open; }
                 text-edited(sql, pos) => { UiState.fetch-completion(sql, pos); }
                 trigger-completion(sql, pos) => { UiState.trigger-completion(sql, pos); }

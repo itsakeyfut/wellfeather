@@ -8,15 +8,42 @@
 /// If the input has no semicolon the whole string is returned trimmed.
 pub fn extract_statement_at(sql: &str, cursor_pos: usize) -> &str {
     let mut pos: usize = 0;
+    let mut last: &str = "";
     for segment in sql.split(';') {
         let end = pos + segment.len();
         if cursor_pos <= end {
-            return segment.trim();
+            let trimmed = segment.trim();
+            if trimmed.is_empty() {
+                return last;
+            }
+            // A cursor that lands within the leading newline whitespace of a segment
+            // is visually "at end of the previous line" — attribute it to the
+            // preceding statement rather than this one.
+            let prefix_len = segment.len() - segment.trim_start().len();
+            if cursor_pos < pos + prefix_len && segment[..prefix_len].contains('\n') {
+                return last;
+            }
+            return trimmed;
+        }
+        let t = segment.trim();
+        if !t.is_empty() {
+            last = t;
         }
         pos = end + 1; // skip the ';'
     }
-    // cursor_pos is past the end of the string — return the whole text trimmed
-    sql.trim()
+    // cursor_pos is past the end of the string
+    if last.is_empty() { sql.trim() } else { last }
+}
+
+/// Splits `sql` on semicolons and returns all non-empty, trimmed statements.
+///
+/// Suitable for "run all" operations: each returned string is a single
+/// statement ready to send to the database individually.
+pub fn extract_all_statements(sql: &str) -> Vec<&str> {
+    sql.split(';')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .collect()
 }
 
 /// Returns the substring of `sql` for the byte range `start..end`.
@@ -51,8 +78,8 @@ mod tests {
         assert_eq!(extract_statement_at("SELECT 1;", 7), "SELECT 1");
         // cursor ON the semicolon (byte 8) — belongs to the preceding statement
         assert_eq!(extract_statement_at("SELECT 1;", 8), "SELECT 1");
-        // cursor after the semicolon — empty trailing segment
-        assert_eq!(extract_statement_at("SELECT 1;", 9), "");
+        // cursor after the semicolon — empty trailing segment returns preceding statement
+        assert_eq!(extract_statement_at("SELECT 1;", 9), "SELECT 1");
     }
 
     #[test]
@@ -91,6 +118,27 @@ mod tests {
         assert_eq!(extract_statement_at(sql, 0), "SELECT 1");
         assert_eq!(extract_statement_at(sql, 10), "SELECT 2");
         assert_eq!(extract_statement_at(sql, 20), "SELECT 3");
+    }
+
+    #[test]
+    fn extract_statement_at_should_attribute_newline_to_preceding_statement() {
+        let sql = "SELECT 1;\nSELECT 2;\nSELECT 3";
+        //                    9^         19^
+        // Cursor at '\n' after ';' is visually end-of-line — belongs to preceding stmt.
+        assert_eq!(extract_statement_at(sql, 9), "SELECT 1");
+        assert_eq!(extract_statement_at(sql, 19), "SELECT 2");
+        // Cursor at first char of the next statement belongs to that statement.
+        assert_eq!(extract_statement_at(sql, 10), "SELECT 2");
+    }
+
+    #[test]
+    fn extract_statement_at_should_return_last_statement_when_cursor_past_end() {
+        // Trailing semicolon — cursor one past the ';'
+        assert_eq!(extract_statement_at("SELECT 1;", 9), "SELECT 1");
+        // Trailing semicolon + newline — cursor at/past the newline
+        let sql = "SELECT 1;\nSELECT 2;\n";
+        assert_eq!(extract_statement_at(sql, 19), "SELECT 2");
+        assert_eq!(extract_statement_at(sql, 20), "SELECT 2");
     }
 
     // ── extract_selection ───────────────────────────────────────────────────
