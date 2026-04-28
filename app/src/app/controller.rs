@@ -123,7 +123,7 @@ impl AppController {
                 Command::TestConnection(conn, pw) => self.handle_test_connection(conn, pw).await,
                 Command::Disconnect(id) => self.handle_disconnect(id).await,
                 Command::RunQuery(sql) => self.handle_run_query(sql).await,
-                Command::RunAll(sql) => self.handle_run_query(sql).await,
+                Command::RunAll(sql) => self.handle_run_all(sql).await,
                 Command::RunSelection(sql) => self.handle_run_query(sql).await,
                 Command::CancelQuery => self.handle_cancel_query().await,
                 Command::UpdateConfig(update) => self.handle_update_config(update).await,
@@ -319,6 +319,112 @@ impl AppController {
         });
     }
 
+    /// Handle a `RunAll` command.
+    ///
+    /// Splits the SQL on semicolons and executes each non-empty statement
+    /// sequentially using a single cancellation token.  Only the result of the
+    /// last statement is surfaced to the UI so the result panel is not spammed.
+    /// This approach is DB-agnostic and does not require any special driver flags
+    /// (e.g. MySQL `CLIENT_MULTI_STATEMENTS`).
+    async fn handle_run_all(&self, sql: String) {
+        self.state.query.cancel();
+
+        let conn_id = match self.state.conn.active() {
+            Some(c) => c.id.clone(),
+            None => {
+                warn!("RunAll: no active connection");
+                let _ = self
+                    .tx_event
+                    .send(Event::QueryError(
+                        t!("error.no_active_connection").to_string(),
+                    ))
+                    .await;
+                return;
+            }
+        };
+
+        let stmts: Vec<String> = wf_query::analyzer::extract_all_statements(&sql)
+            .into_iter()
+            .map(str::to_owned)
+            .collect();
+
+        if stmts.is_empty() {
+            return;
+        }
+
+        self.state.query.set_last_sql(sql.clone());
+
+        let token = CancellationToken::new();
+        self.state.query.set_cancel_token(token.clone());
+        let _ = self.tx_event.send(Event::QueryStarted).await;
+
+        let page_size = self.state.ui.page_size();
+        let db = self.db.clone(); // clone required: tokio::spawn needs 'static
+        let tx = self.tx_event.clone(); // clone required: tokio::spawn needs 'static
+        let history = self.history.clone(); // clone required: tokio::spawn needs 'static
+        let conn_id_hist = conn_id.clone(); // clone required: history record needs owned id
+
+        tokio::spawn(async move {
+            let now = Utc::now().timestamp();
+
+            for (i, stmt) in stmts.iter().enumerate() {
+                let sql_to_run = apply_limit(stmt, page_size);
+                let is_last = i == stmts.len() - 1;
+
+                match db
+                    .execute_with_cancel(&conn_id, &sql_to_run, token.clone())
+                    .await
+                {
+                    Ok(result) => {
+                        if is_last {
+                            if let Some(ref h) = history {
+                                let exec = wf_db::models::QueryExecution {
+                                    id: 0,
+                                    sql: stmt.clone(),
+                                    duration_ms: result.execution_time_ms,
+                                    success: true,
+                                    error_message: None,
+                                    timestamp: now,
+                                    connection_id: conn_id_hist.clone(),
+                                };
+                                if let Err(e) = h.insert(&exec).await {
+                                    warn!("failed to save history: {e}");
+                                }
+                            }
+                            debug!("sending event: QueryFinished (run-all last stmt)");
+                            let _ = tx.send(Event::QueryFinished(result)).await;
+                        }
+                    }
+                    Err(DbError::Cancelled) => {
+                        debug!("sending event: QueryCancelled");
+                        let _ = tx.send(Event::QueryCancelled).await;
+                        return;
+                    }
+                    Err(e) => {
+                        error!(error = %e, "run-all statement failed");
+                        if let Some(ref h) = history {
+                            let exec = wf_db::models::QueryExecution {
+                                id: 0,
+                                sql: stmt.clone(),
+                                duration_ms: 0,
+                                success: false,
+                                error_message: Some(e.to_string()),
+                                timestamp: now,
+                                connection_id: conn_id_hist.clone(),
+                            };
+                            if let Err(he) = h.insert(&exec).await {
+                                warn!("failed to save history: {he}");
+                            }
+                        }
+                        debug!("sending event: QueryError");
+                        let _ = tx.send(Event::QueryError(e.localized_message())).await;
+                        return;
+                    }
+                }
+            }
+        });
+    }
+
     /// Handle an `UpdateConfig` command.
     ///
     /// Handles `Theme` and `PageSize` changes: updates shared state so they
@@ -394,7 +500,7 @@ fn apply_limit(sql: &str, limit: usize) -> String {
     }
     let trimmed = sql.trim().trim_end_matches(';').trim_end();
     let upper = trimmed.to_uppercase();
-    if upper.starts_with("SELECT") && !upper.contains(" LIMIT ") {
+    if upper.starts_with("SELECT") && !upper.contains(" LIMIT ") && !trimmed.contains(';') {
         format!("{} LIMIT {}", trimmed, limit)
     } else {
         sql.to_string()
@@ -504,6 +610,12 @@ mod tests {
     #[test]
     fn apply_limit_should_not_apply_when_limit_is_zero() {
         assert_eq!(apply_limit("SELECT * FROM t", 0), "SELECT * FROM t");
+    }
+
+    #[test]
+    fn apply_limit_should_not_apply_to_multi_statement_sql() {
+        let sql = "SELECT 1; SELECT 2";
+        assert_eq!(apply_limit(sql, 500), sql);
     }
 
     // ── TestConnection ────────────────────────────────────────────────────────

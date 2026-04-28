@@ -19,8 +19,9 @@ import { Colors } from "../theme.slint";
 //   intercepts UP/DOWN arrow key events in the capture phase (before TextInput
 //   processes them), preventing OS key-repeat events from piling up in the queue.
 //   Timer-based cursor movement replaces key-repeat for UP/DOWN.
-//   All other keys (text entry, Shift+arrows, Ctrl+arrows, etc.) pass through to
-//   TextInput unchanged.
+//   Shift+UP/DOWN are also intercepted for range selection using the same
+//   timer pattern.  All other keys (text entry, Ctrl+arrows, etc.) pass through
+//   to TextInput unchanged.
 //
 // Key-repeat queue problem (why the FocusScope approach is necessary):
 //   Holding an arrow key causes the OS to enqueue ~33 WM_KEYDOWN/s.  If each
@@ -65,8 +66,10 @@ export component Editor inherits Rectangle {
     pure callback move-cursor-line(string, int, int) -> int;
 
     /// Fired when the user presses Ctrl+Enter to run the current SQL.
-    /// Implemented in app.slint by forwarding to UiState.run-query.
-    callback run-query();
+    /// Carries the cursor byte offset so the handler can extract the statement
+    /// at the cursor position.  Implemented in app.slint by forwarding to
+    /// UiState.run-query-at-cursor.
+    callback run-query(int);
 
     /// Fired when the user presses Ctrl+J to toggle the result panel.
     /// Implemented in app.slint by toggling UiState.result-panel-open.
@@ -80,6 +83,10 @@ export component Editor inherits Rectangle {
     /// Fired on Ctrl+Space for immediate completion.
     /// Carries the current SQL text and cursor byte offset.
     callback trigger-completion(string, int);
+
+    /// Fired when the user presses Ctrl+Shift+Enter to run all SQL statements.
+    /// Implemented in app.slint by forwarding to UiState.run-all.
+    callback run-all();
 
     /// Fired when the user presses Ctrl+Shift+F to reformat the SQL.
     callback format-sql();
@@ -104,6 +111,20 @@ export component Editor inherits Rectangle {
     // ── Key-hold state for timer-based UP/DOWN navigation ────────────────────
     property <bool> up-held:   false;
     property <bool> down-held: false;
+    // Armed after the initial-delay timer fires; gates the repeat timer so a
+    // brief tap never triggers more than one movement.
+    property <bool> up-repeat-ready:   false;
+    property <bool> down-repeat-ready: false;
+
+    // ── Key-hold state for Shift+UP/DOWN range selection ──────────────────
+    property <bool> up-shift-held:   false;
+    property <bool> down-shift-held: false;
+    property <bool> up-shift-repeat-ready:   false;
+    property <bool> down-shift-repeat-ready: false;
+    // Byte offset of the fixed end of an active shift-selection.
+    // -1 = no active selection.  Set on first Shift+arrow press; reset when
+    // the cursor moves outside of a shift-selection context (plain nav or click).
+    property <int>  sel-anchor: -1;
 
     // ── Cursor-line poll timer ────────────────────────────────────────────────
     // NOT a reactive binding — polling at 60 fps keeps key-event processing to
@@ -128,12 +149,27 @@ export component Editor inherits Rectangle {
         }
     }
 
+    // ── Initial-delay timers ──────────────────────────────────────────────────
+    // Fire once ~250 ms after the key is first held.  Setting repeat-ready arms
+    // the sustained-movement timer, matching the OS key-repeat initial delay.
+    // The timer stops itself because the running condition becomes false once
+    // repeat-ready is true.
+    Timer {
+        interval: 250ms;
+        running: root.up-held && !root.up-repeat-ready;
+        triggered => { root.up-repeat-ready = true; }
+    }
+    Timer {
+        interval: 250ms;
+        running: root.down-held && !root.down-repeat-ready;
+        triggered => { root.down-repeat-ready = true; }
+    }
+
     // ── Sustained UP movement timer ───────────────────────────────────────────
-    // Fires while the up arrow is held (after the initial press handled by
-    // capture-key-pressed).  Interval matches a typical OS key-repeat rate.
+    // Only fires after the initial delay has elapsed (up-repeat-ready = true).
     Timer {
         interval: 50ms;
-        running: root.up-held;
+        running: root.up-held && root.up-repeat-ready;
         triggered => {
             let new-pos = root.move-cursor-line(
                 inner-input.text,
@@ -147,7 +183,7 @@ export component Editor inherits Rectangle {
     // ── Sustained DOWN movement timer ─────────────────────────────────────────
     Timer {
         interval: 50ms;
-        running: root.down-held;
+        running: root.down-held && root.down-repeat-ready;
         triggered => {
             let new-pos = root.move-cursor-line(
                 inner-input.text,
@@ -155,6 +191,46 @@ export component Editor inherits Rectangle {
                 1
             );
             inner-input.set-selection-offsets(new-pos, new-pos);
+        }
+    }
+
+    // ── Initial-delay timers for Shift+UP/DOWN selection ─────────────────────
+    Timer {
+        interval: 250ms;
+        running: root.up-shift-held && !root.up-shift-repeat-ready;
+        triggered => { root.up-shift-repeat-ready = true; }
+    }
+    Timer {
+        interval: 250ms;
+        running: root.down-shift-held && !root.down-shift-repeat-ready;
+        triggered => { root.down-shift-repeat-ready = true; }
+    }
+
+    // ── Sustained Shift+UP selection timer ───────────────────────────────────
+    Timer {
+        interval: 50ms;
+        running: root.up-shift-held && root.up-shift-repeat-ready;
+        triggered => {
+            let new-pos = root.move-cursor-line(
+                inner-input.text,
+                inner-input.cursor-position-byte-offset,
+                -1
+            );
+            inner-input.set-selection-offsets(root.sel-anchor, new-pos);
+        }
+    }
+
+    // ── Sustained Shift+DOWN selection timer ─────────────────────────────────
+    Timer {
+        interval: 50ms;
+        running: root.down-shift-held && root.down-shift-repeat-ready;
+        triggered => {
+            let new-pos = root.move-cursor-line(
+                inner-input.text,
+                inner-input.cursor-position-byte-offset,
+                1
+            );
+            inner-input.set-selection-offsets(root.sel-anchor, new-pos);
         }
     }
 
@@ -306,6 +382,44 @@ export component Editor inherits Rectangle {
                         EventResult.reject
                     }
                 } else if (event.text == Key.UpArrow
+                        && event.modifiers.shift
+                        && !event.modifiers.control
+                        && !event.modifiers.alt) {
+                    if (!root.up-shift-held) {
+                        // Set held flag BEFORE set-selection-offsets so that
+                        // cursor-position-changed does not reset sel-anchor.
+                        root.up-shift-held = true;
+                        if (root.sel-anchor < 0) {
+                            root.sel-anchor = inner-input.cursor-position-byte-offset;
+                        }
+                        let new-pos = root.move-cursor-line(
+                            inner-input.text,
+                            inner-input.cursor-position-byte-offset,
+                            -1
+                        );
+                        inner-input.set-selection-offsets(root.sel-anchor, new-pos);
+                    }
+                    EventResult.accept
+                } else if (event.text == Key.DownArrow
+                        && event.modifiers.shift
+                        && !event.modifiers.control
+                        && !event.modifiers.alt) {
+                    if (!root.down-shift-held) {
+                        // Set held flag BEFORE set-selection-offsets so that
+                        // cursor-position-changed does not reset sel-anchor.
+                        root.down-shift-held = true;
+                        if (root.sel-anchor < 0) {
+                            root.sel-anchor = inner-input.cursor-position-byte-offset;
+                        }
+                        let new-pos = root.move-cursor-line(
+                            inner-input.text,
+                            inner-input.cursor-position-byte-offset,
+                            1
+                        );
+                        inner-input.set-selection-offsets(root.sel-anchor, new-pos);
+                    }
+                    EventResult.accept
+                } else if (event.text == Key.UpArrow
                         && !event.modifiers.shift
                         && !event.modifiers.control
                         && !event.modifiers.alt) {
@@ -335,8 +449,15 @@ export component Editor inherits Rectangle {
                         root.down-held = true;
                     }
                     EventResult.accept
-                } else if (event.text == Key.Return && event.modifiers.control) {
-                    root.run-query();
+                } else if (event.text == Key.Return
+                        && event.modifiers.control
+                        && event.modifiers.shift) {
+                    root.run-all();
+                    EventResult.accept
+                } else if (event.text == Key.Return
+                        && event.modifiers.control
+                        && !event.modifiers.shift) {
+                    root.run-query(inner-input.cursor-position-byte-offset);
                     EventResult.accept
                 } else if (event.text == "j" && event.modifiers.control) {
                     root.toggle-panel();
@@ -356,8 +477,18 @@ export component Editor inherits Rectangle {
             }
 
             capture-key-released(event) => {
-                if (event.text == Key.UpArrow)   { root.up-held   = false; }
-                if (event.text == Key.DownArrow)  { root.down-held = false; }
+                if (event.text == Key.UpArrow) {
+                    root.up-held               = false;
+                    root.up-repeat-ready       = false;
+                    root.up-shift-held         = false;
+                    root.up-shift-repeat-ready = false;
+                }
+                if (event.text == Key.DownArrow) {
+                    root.down-held               = false;
+                    root.down-repeat-ready       = false;
+                    root.down-shift-held         = false;
+                    root.down-shift-repeat-ready = false;
+                }
                 EventResult.reject
             }
 
@@ -389,6 +520,13 @@ export component Editor inherits Rectangle {
                 // viewport-x is ≤ 0; visible content spans
                 //   [-viewport-x, -viewport-x + editor-scroll.width].
                 cursor-position-changed(pos) => {
+                    // Reset shift-selection anchor whenever the cursor moves
+                    // outside of an active Shift+arrow sequence (plain nav,
+                    // mouse click, typing, etc.).
+                    if (!root.down-shift-held && !root.up-shift-held) {
+                        root.sel-anchor = -1;
+                    }
+
                     let margin    = 40px;
                     let vis-left  = -editor-scroll.viewport-x;
                     let vis-right = vis-left + editor-scroll.width;

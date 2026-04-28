@@ -12,6 +12,7 @@ use tokio::sync::mpsc;
 use wf_completion::CompletionItem;
 use wf_config::crypto;
 use wf_db::models::{DbConnection, DbMetadata, DbType, QueryResult, TableInfo};
+use wf_query::analyzer::extract_statement_at;
 
 const COMPLETION_DEBOUNCE_MS: u64 = 300;
 const ERROR_TRUNCATION_CHARS: usize = 80;
@@ -946,7 +947,7 @@ impl UI {
             } else {
                 // Move down: target the next line.
                 match s[pos..].find('\n') {
-                    None => pos as i32, // Already on last line — stay.
+                    None => s.len() as i32, // Extend to end of text on last line.
                     Some(off) => {
                         let next_start = pos + off + 1;
                         let next_end = s[next_start..]
@@ -963,6 +964,15 @@ impl UI {
             let tx_cmd = tx_cmd.clone(); // clone required: callback closure needs owned tx_cmd
             ui.on_run_query(move |sql| {
                 send_cmd(&tx_cmd, Command::RunQuery(sql.to_string()));
+            });
+        }
+        {
+            let tx_cmd = tx_cmd.clone(); // clone required: callback closure needs owned tx_cmd
+            ui.on_run_query_at_cursor(move |sql, cursor| {
+                let stmt = extract_statement_at(sql.as_str(), cursor as usize);
+                if !stmt.is_empty() {
+                    send_cmd(&tx_cmd, Command::RunQuery(stmt.to_owned()));
+                }
             });
         }
         {
