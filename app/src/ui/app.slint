@@ -436,13 +436,12 @@ export component AppWindow inherits Window {
             }
 
             // ── Panel drag handle ─────────────────────────────────────────────
-            // Sits at the top boundary of the preview strip (the thin separator
-            // between the editor and the preview area).  Dragging grows/shrinks
+            // Sits at the top boundary of the result panel.  Dragging grows/shrinks
             // panel-height upward.  Rendered after the result panel so it is on
             // top and receives pointer events without being clipped.
             if UiState.result-panel-open: Rectangle {
                 x: 0;
-                y: parent.height - root.panel-height - root.preview-strip-h;
+                y: parent.height - root.panel-height;
                 width:  parent.width;
                 height: root.divider-thickness;
                 background: panel-drag-ta.has-hover || panel-drag-ta.pressed
@@ -456,63 +455,6 @@ export component AppWindow inherits Window {
                             80px,
                             root.content-height - 40px
                         );
-                    }
-                }
-            }
-
-            // ── Cell-value preview strip ──────────────────────────────────────
-            // Fixed-height strip placed above the result panel; shows the full
-            // value of the last clicked cell with word-wrap and vertical scroll.
-            // Rendered as a sibling of the result panel so it never reduces the
-            // table body height.
-            Rectangle {
-                x: 0;
-                y: parent.height - root.panel-height - root.preview-strip-h;
-                width:  parent.width;
-                height: root.preview-strip-h;
-                background: Colors.mantle;
-                clip: true;
-                visible: UiState.result-panel-open;
-
-                // Top separator
-                Rectangle {
-                    x: 0; y: 0;
-                    width: parent.width; height: 1px;
-                    background: Colors.surface1;
-                }
-
-                // Placeholder — nothing selected or row-only selection
-                if !result-table-inst.selected-cell-is-null
-                        && result-table-inst.selected-cell-value == "": Text {
-                    x: 10px; y: 8px;
-                    color: Colors.surface1;
-                    font-size: Typography.size-base;
-                    text: @tr("Select a cell to preview its value");
-                }
-
-                // NULL indicator
-                if result-table-inst.selected-cell-is-null: Text {
-                    x: 10px; y: 8px;
-                    color: Colors.overlay2;
-                    font-size: Typography.size-base;
-                    text: @tr("NULL");
-                }
-
-                // Cell value — word-wrapped, vertically scrollable
-                if !result-table-inst.selected-cell-is-null
-                        && result-table-inst.selected-cell-value != "": Flickable {
-                    x: 0; y: 4px;
-                    width:  parent.width;
-                    height: parent.height - 4px;
-                    viewport-height: preview-val-text.preferred-height + 8px;
-
-                    preview-val-text := Text {
-                        x: 10px; y: 4px;
-                        width: parent.width - 20px;
-                        text: result-table-inst.selected-cell-value;
-                        color: Colors.text;
-                        font-size: Typography.size-base;
-                        wrap: word-wrap;
                     }
                 }
             }
@@ -581,7 +523,7 @@ export component AppWindow inherits Window {
                     x: 0;
                     y: root.panel-header-height;
                     width:  parent.width;
-                    height: root.panel-height - root.panel-header-height;
+                    height: root.panel-height - root.panel-header-height - root.preview-strip-h;
                     columns:          UiState.result-columns;
                     rows:             UiState.result-rows;
                     row-count:        UiState.result-row-count;
@@ -614,6 +556,60 @@ export component AppWindow inherits Window {
                         }
                     }
                 }
+
+                // ── Cell-value preview strip ──────────────────────────────────
+                // Fixed-height strip at the bottom of the result panel; shows the
+                // full value of the last clicked cell with word-wrap and vertical scroll.
+                Rectangle {
+                    x: 0;
+                    y: root.panel-height - root.preview-strip-h;
+                    width:  parent.width;
+                    height: root.preview-strip-h;
+                    background: Colors.mantle;
+                    clip: true;
+
+                    // Top separator
+                    Rectangle {
+                        x: 0; y: 0;
+                        width: parent.width; height: 1px;
+                        background: Colors.surface1;
+                    }
+
+                    // Placeholder — nothing selected or row-only selection
+                    if !result-table-inst.selected-cell-is-null
+                            && result-table-inst.selected-cell-value == "": Text {
+                        x: 10px; y: 8px;
+                        color: Colors.surface1;
+                        font-size: Typography.size-base;
+                        text: @tr("Select a cell to preview its value");
+                    }
+
+                    // NULL indicator
+                    if result-table-inst.selected-cell-is-null: Text {
+                        x: 10px; y: 8px;
+                        color: Colors.overlay2;
+                        font-size: Typography.size-base;
+                        text: @tr("NULL");
+                    }
+
+                    // Cell value — word-wrapped, vertically scrollable
+                    if !result-table-inst.selected-cell-is-null
+                            && result-table-inst.selected-cell-value != "": Flickable {
+                        x: 0; y: 4px;
+                        width:  parent.width;
+                        height: parent.height - 4px;
+                        viewport-height: preview-val-text.preferred-height + 8px;
+
+                        preview-val-text := Text {
+                            x: 10px; y: 4px;
+                            width: parent.width - 20px;
+                            text: result-table-inst.selected-cell-value;
+                            color: Colors.text;
+                            font-size: Typography.size-base;
+                            wrap: word-wrap;
+                        }
+                    }
+                }
             }
         }
 
@@ -637,9 +633,26 @@ export component AppWindow inherits Window {
             query-status:    UiState.status-message;
         }
 
+        // ── Inner edge lines ──────────────────────────────────────────────────
+        // Subtle 1px vertical accents on the left and right sides of the client area.
+        // Rendered before focus borders so the focus border draws on top and remains
+        // fully visible when it aligns with a window edge.
+        // Dark mode: surface0 (#313244), light mode: surface0 (#ccd0da).
+        Rectangle {
+            x: 0; y: 0;
+            width: 1px; height: root.height;
+            background: Colors.surface0;
+        }
+        Rectangle {
+            x: root.width - 1px; y: 0;
+            width: 1px; height: root.height;
+            background: Colors.surface0;
+        }
+
         // ── Pane focus border indicators ──────────────────────────────────────
-        // Rendered after the main content so they appear on top of the panes,
-        // but before the modal overlays so modals cover the borders.
+        // Rendered after the inner edge lines so focus borders always appear on top
+        // and are not obscured at the window edges.
+        // Rendered before modal overlays so modals cover the borders.
 
         // Sidebar focus border
         if root.focused-pane == 0: Rectangle {
@@ -663,12 +676,12 @@ export component AppWindow inherits Window {
             background: transparent;
         }
 
-        // Result-table pane focus border (covers result panel + preview strip above it)
+        // Result-table pane focus border
         if root.focused-pane == 2 && UiState.result-panel-open: Rectangle {
             x: sidebar-width;
-            y: menu-bar-height + content-height - panel-height - preview-strip-h;
+            y: menu-bar-height + content-height - panel-height;
             width:  main-width;
-            height: panel-height + preview-strip-h;
+            height: panel-height;
             border-width: 1px;
             border-color: Colors.blue;
             background: transparent;
@@ -755,18 +768,5 @@ export component AppWindow inherits Window {
             }
         }
 
-        // ── Inner edge lines ──────────────────────────────────────────────────
-        // Subtle 1px vertical accents on the left and right sides of the client area.
-        // Dark mode: surface0 (#313244), light mode: surface0 (#ccd0da).
-        Rectangle {
-            x: 0; y: 0;
-            width: 1px; height: root.height;
-            background: Colors.surface0;
-        }
-        Rectangle {
-            x: root.width - 1px; y: 0;
-            width: 1px; height: root.height;
-            background: Colors.surface0;
-        }
     }
 }
