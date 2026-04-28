@@ -394,7 +394,7 @@ fn apply_limit(sql: &str, limit: usize) -> String {
     }
     let trimmed = sql.trim().trim_end_matches(';').trim_end();
     let upper = trimmed.to_uppercase();
-    if upper.starts_with("SELECT") && !upper.contains(" LIMIT ") {
+    if upper.starts_with("SELECT") && !upper.contains(" LIMIT ") && !trimmed.contains(';') {
         format!("{} LIMIT {}", trimmed, limit)
     } else {
         sql.to_string()
@@ -504,6 +504,12 @@ mod tests {
     #[test]
     fn apply_limit_should_not_apply_when_limit_is_zero() {
         assert_eq!(apply_limit("SELECT * FROM t", 0), "SELECT * FROM t");
+    }
+
+    #[test]
+    fn apply_limit_should_not_apply_to_multi_statement_sql() {
+        let sql = "SELECT 1; SELECT 2";
+        assert_eq!(apply_limit(sql, 500), sql);
     }
 
     // ── TestConnection ────────────────────────────────────────────────────────

@@ -12,6 +12,7 @@ use tokio::sync::mpsc;
 use wf_completion::CompletionItem;
 use wf_config::crypto;
 use wf_db::models::{DbConnection, DbMetadata, DbType, QueryResult, TableInfo};
+use wf_query::analyzer::{extract_selection, extract_statement_at};
 
 const COMPLETION_DEBOUNCE_MS: u64 = 300;
 const ERROR_TRUNCATION_CHARS: usize = 80;
@@ -963,6 +964,27 @@ impl UI {
             let tx_cmd = tx_cmd.clone(); // clone required: callback closure needs owned tx_cmd
             ui.on_run_query(move |sql| {
                 send_cmd(&tx_cmd, Command::RunQuery(sql.to_string()));
+            });
+        }
+        {
+            let tx_cmd = tx_cmd.clone(); // clone required: callback closure needs owned tx_cmd
+            ui.on_run_query_at_cursor(move |sql, cursor, anchor| {
+                let sql = sql.as_str();
+                let cursor = cursor as usize;
+                let anchor = anchor as usize;
+                let stmt = if cursor != anchor {
+                    let (start, end) = if cursor <= anchor {
+                        (cursor, anchor)
+                    } else {
+                        (anchor, cursor)
+                    };
+                    extract_selection(sql, start, end).to_owned()
+                } else {
+                    extract_statement_at(sql, cursor).to_owned()
+                };
+                if !stmt.is_empty() {
+                    send_cmd(&tx_cmd, Command::RunQuery(stmt));
+                }
             });
         }
         {
