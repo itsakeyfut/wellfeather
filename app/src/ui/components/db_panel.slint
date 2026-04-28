@@ -1,0 +1,117 @@
+import { ConnectionEntry } from "../globals.slint";
+import { Colors, Typography } from "../theme.slint";
+
+/// Flat connection list for the Database tab.
+/// Each row shows an active indicator, name, and DB-type badge.
+/// Clicking an inactive row fires connect(id); active row is inert.
+export component DbPanel inherits Rectangle {
+    background: Colors.base;
+
+    in property <[ConnectionEntry]> connections: [];
+    callback connect(string);
+    callback add-connection();
+
+    panel-fs := FocusScope {
+        x: 0; y: 0;
+        width: parent.width; height: parent.height;
+        focus-on-click: false;
+
+        panel-scroll := Flickable {
+            x: 0; y: 0;
+            width: parent.width; height: parent.height;
+            interactive: true;
+            viewport-height: max(panel-content.preferred-height, self.height);
+
+            panel-content := VerticalLayout {
+                // ── Connection rows ───────────────────────────────────────────────
+                for conn in root.connections: Rectangle {
+                    height: 40px;
+                    clip: true;
+
+                    background: conn.is-active ? Colors.surface0 : transparent;
+
+                    row-ta := TouchArea {
+                        width: parent.width;
+                        height: parent.height;
+                        clicked => {
+                            if (!conn.is-active) {
+                                root.connect(conn.id);
+                            }
+                        }
+                    }
+
+                    // Hover overlay for inactive rows
+                    Rectangle {
+                        background: row-ta.has-hover && !conn.is-active
+                            ? Colors.hover-subtle : transparent;
+                        width: parent.width;
+                        height: parent.height;
+                    }
+
+                    HorizontalLayout {
+                        x: 0; y: 0;
+                        width: parent.width;
+                        height: parent.height;
+                        padding-left: 12px;
+                        padding-right: 8px;
+                        spacing: 6px;
+
+                        // Active / inactive indicator dot
+                        Text {
+                            text: conn.is-active ? "●" : "○";
+                            color: conn.is-active ? Colors.blue : Colors.surface2;
+                            font-size: Typography.size-sm;
+                            vertical-alignment: center;
+                            width: 12px;
+                        }
+
+                        // Connection name
+                        Text {
+                            text: conn.name;
+                            color: conn.is-active ? Colors.text : Colors.subtext1;
+                            font-size: Typography.size-lg;
+                            vertical-alignment: center;
+                            overflow: elide;
+                            horizontal-stretch: 1;
+                        }
+
+                        // DB-type badge
+                        Text {
+                            text: conn.db-type;
+                            color: Colors.surface2;
+                            font-size: Typography.size-sm;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+
+                // ── Divider ───────────────────────────────────────────────────────
+                Rectangle {
+                    height: 1px;
+                    background: Colors.surface0;
+                }
+
+                // ── Add connection button ─────────────────────────────────────────
+                Rectangle {
+                    height: 36px;
+                    background: transparent;
+
+                    HorizontalLayout {
+                        padding-left: 12px;
+                        Text {
+                            text: @tr("+ Add connection");
+                            color: Colors.blue;
+                            vertical-alignment: center;
+                        }
+                    }
+
+                    TouchArea {
+                        width: parent.width;
+                        height: parent.height;
+                        clicked => { root.add-connection(); }
+                    }
+                }
+            }
+        }
+    }
+}

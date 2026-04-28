@@ -176,6 +176,8 @@ export global UiState {
     in-out property <bool> result-panel-open: false;
     callback connect(string);
     callback disconnect(string);
+    /// Connect to a saved connection from the DB tab by id.
+    callback connect-db(string);
 
     // ── Connection management callbacks ───────────────────────────────────────
     callback open-connection-form();
@@ -333,11 +335,13 @@ export component AppWindow inherits Window {
             y: menu-bar-height;
             width:  sidebar-width;
             height: content-height;
-            tree:       UiState.sidebar-tree;
-            is-loading: UiState.sidebar-loading;
+            tree:        UiState.sidebar-tree;
+            is-loading:  UiState.sidebar-loading;
+            connections: UiState.connection-list;
             toggle-node(id) => { UiState.toggle-sidebar-node(id); }
             table-double-clicked(name) => { UiState.table-double-clicked(name); }
             add-connection => { UiState.open-connection-form(); }
+            connect(id) => { UiState.connect-db(id); }
         }
 
         // ── Main content panel ────────────────────────────────────────────────

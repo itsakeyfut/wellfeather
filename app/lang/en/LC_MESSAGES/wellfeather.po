@@ -89,6 +89,14 @@ msgid "Japanese"
 msgstr "Japanese"
 
 msgctxt "Sidebar"
+msgid "Schema"
+msgstr "Schema"
+
+msgctxt "Sidebar"
+msgid "DB"
+msgstr "DB"
+
+msgctxt "Sidebar"
 msgid "Loading…"
 msgstr "Loading…"
 

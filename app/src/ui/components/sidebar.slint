@@ -1,14 +1,17 @@
-import { SidebarNode } from "../globals.slint";
+import { SidebarNode, ConnectionEntry } from "../globals.slint";
 import { Colors, Typography } from "../theme.slint";
+import { DbPanel } from "db_panel.slint";
 
 export component Sidebar inherits Rectangle {
     background: Colors.base;
 
-    in property <[SidebarNode]> tree: [];
-    in property <bool> is-loading: false;
+    in property <[SidebarNode]>     tree:        [];
+    in property <bool>              is-loading:  false;
+    in property <[ConnectionEntry]> connections: [];
     callback toggle-node(string);
     callback table-double-clicked(string);
     callback add-connection();
+    callback connect(string);   // connect to a saved connection by id
 
     /// True while this sidebar holds keyboard focus (used by app.slint to sync focused-pane).
     out property <bool> sidebar-focused: sidebar-fs.has-focus;
@@ -19,6 +22,9 @@ export component Sidebar inherits Rectangle {
             root.kb-focus = 0;
         }
     }
+
+    // 0 = Schema (default), 1 = DB
+    property <int> active-tab: 0;
 
     /// Keyboard-navigation cursor (-1 = none selected).
     property <int> kb-focus: -1;
@@ -44,201 +50,299 @@ export component Sidebar inherits Rectangle {
         }
     }
 
-    sidebar-fs := FocusScope {
-        x: 0; y: 0;
-        width: parent.width; height: parent.height;
-        focus-on-click: true;
+    VerticalLayout {
+        // ── Tab bar ──────────────────────────────────────────────────────────
+        Rectangle {
+            height: 28px;
+            background: Colors.mantle;
 
-        key-pressed(event) => {
-            if (event.text == Key.UpArrow) {
-                if (root.kb-focus <= 0) {
-                    root.kb-focus = 0;
-                } else {
-                    root.kb-focus -= 1;
-                }
-                EventResult.accept
-            } else if (event.text == Key.DownArrow) {
-                if (root.kb-focus < 0) {
-                    root.kb-focus = 0;
-                } else if (root.kb-focus < root.tree.length - 1) {
-                    root.kb-focus += 1;
-                }
-                EventResult.accept
-            } else if (event.text == Key.RightArrow) {
-                if (root.kb-focus >= 0 && root.tree.length > 0) {
-                    let node = root.tree[root.kb-focus];
-                    if (node.level < 2) {
-                        if (!node.is-expanded) {
-                            root.toggle-node(node.id);
-                        } else if (root.kb-focus + 1 < root.tree.length) {
-                            root.kb-focus += 1;
-                        }
-                    }
-                }
-                EventResult.accept
-            } else if (event.text == Key.LeftArrow) {
-                if (root.kb-focus >= 0 && root.tree.length > 0) {
-                    let node = root.tree[root.kb-focus];
-                    if (node.is-expanded && node.level < 2) {
-                        root.toggle-node(node.id);
-                    } else if (node.parent-index >= 0) {
-                        root.kb-focus = node.parent-index;
-                    }
-                }
-                EventResult.accept
-            } else if (event.text == Key.Return) {
-                if (root.kb-focus >= 0 && root.tree.length > 0) {
-                    let node = root.tree[root.kb-focus];
-                    if (node.node-kind == "table" || node.node-kind == "view") {
-                        root.table-double-clicked(node.label);
-                    } else if (node.level < 2) {
-                        root.toggle-node(node.id);
-                    }
-                }
-                EventResult.accept
-            } else {
-                EventResult.reject
-            }
-        }
+            HorizontalLayout {
+                // Schema tab
+                schema-tab := Rectangle {
+                    width: parent.width / 2;
+                    height: parent.height;
+                    background: root.active-tab == 0 ? Colors.base : Colors.mantle;
 
-        sidebar-scroll := Flickable {
-            x: 0; y: 0;
-            width: parent.width; height: parent.height;
-            interactive: true;
-            viewport-height: max(sidebar-content.preferred-height, self.height);
-
-            sidebar-content := VerticalLayout {
-                // ── Schema tree ───────────────────────────────────────────────────────
-                for node[i] in root.tree : Rectangle {
-                    height: 32px;
-                    clip: true;
-
-                    background: i == root.kb-focus
-                        ? Colors.sidebar-sel
-                        : (node.is-active && node.level == 0 ? Colors.surface0 : transparent);
-
-                    ta := TouchArea {
+                    Text {
+                        text: @tr("Schema");
+                        color: root.active-tab == 0 ? Colors.text : Colors.subtext1;
+                        font-size: Typography.size-sm;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
                         width: parent.width;
                         height: parent.height;
-                        clicked => {
-                            root.kb-focus = i;
-                            // Level-2 items (tables, views, etc.) have no children to
-                            // expand, so skip toggle-node to avoid rebuilding the VecModel
-                            // on the first click — a rebuild would destroy the element and
-                            // prevent Slint from recognising the second click as a
-                            // double-click.
-                            if (node.level < 2) {
-                                root.toggle-node(node.id);
-                            }
-                        }
-                        double-clicked => {
-                            if node.node-kind == "table" || node.node-kind == "view" {
-                                root.table-double-clicked(node.label);
-                            }
-                        }
                     }
-
-                    // Hover overlay (skipped for kb-focused and active-connection rows)
+                    // Active underline
                     Rectangle {
-                        background: ta.has-hover
-                            && i != root.kb-focus
-                            && !(node.is-active && node.level == 0)
-                            ? Colors.hover-subtle : transparent;
+                        y: parent.height - 2px;
+                        height: 2px;
                         width: parent.width;
-                        height: parent.height;
+                        background: root.active-tab == 0 ? Colors.blue : transparent;
                     }
-
-                    HorizontalLayout {
-                        x: 0; y: 0;
-                        width: parent.width;
-                        height: parent.height;
-                        padding-left: (8 + node.level * 14) * 1px;
-                        padding-right: 8px;
-                        spacing: 4px;
-
-                        // Expand/collapse toggle icon for connection and category nodes
-                        if node.level < 2 : Text {
-                            text: node.is-expanded ? "▼" : "▶";
-                            color: Colors.surface2;
-                            font-size: Typography.size-xs;
-                            vertical-alignment: center;
-                            width: 14px;
-                        }
-                        // Spacer for item nodes
-                        if node.level >= 2 : Rectangle { width: 14px; }
-
-                        // Connection status dot (● active / ○ inactive)
-                        if node.level == 0 : Text {
-                            text: node.is-active ? "●" : "○";
-                            color: node.is-active ? Colors.blue : Colors.surface2;
-                            font-size: Typography.size-sm;
-                            vertical-alignment: center;
-                        }
-
-                        // Main label
-                        Text {
-                            text: node.label;
-                            color: node.level == 0
-                                ? (node.is-active ? Colors.text : Colors.subtext1)
-                                : (node.level == 1 ? Colors.overlay1 : Colors.subtext0);
-                            font-size: node.level == 0 ? Typography.size-lg : Typography.size-base;
-                            vertical-alignment: center;
-                            overflow: elide;
-                            horizontal-stretch: 1;
-                        }
-
-                        // Sub-label badge (db-type for connection nodes)
-                        if node.sub-label != "" : Text {
-                            text: node.sub-label;
-                            color: Colors.surface2;
-                            font-size: Typography.size-sm;
-                            vertical-alignment: center;
-                        }
-                    }
-                }
-
-                // ── Metadata loading indicator ────────────────────────────────────────
-                if root.is-loading : Rectangle {
-                    height: 28px;
-                    HorizontalLayout {
-                        padding-left: 24px;
-                        Text {
-                            text: @tr("Loading\u{2026}");
-                            color: Colors.surface2;
-                            font-size: Typography.size-md;
-                            vertical-alignment: center;
-                            font-italic: true;
-                        }
-                    }
-                }
-
-                // ── Divider ───────────────────────────────────────────────────────────
-                Rectangle {
-                    height: 1px;
-                    background: Colors.surface0;
-                }
-
-                // ── Add connection button ─────────────────────────────────────────────
-                Rectangle {
-                    height: 36px;
-                    background: transparent;
-
-                    HorizontalLayout {
-                        padding-left: 12px;
-                        Text {
-                            text: @tr("+ Add connection");
-                            color: Colors.blue;
-                            vertical-alignment: center;
-                        }
-                    }
-
                     TouchArea {
                         width: parent.width;
                         height: parent.height;
-                        clicked => { root.add-connection(); }
+                        clicked => { root.active-tab = 0; }
+                    }
+                }
+
+                // DB tab
+                db-tab := Rectangle {
+                    width: parent.width / 2;
+                    height: parent.height;
+                    background: root.active-tab == 1 ? Colors.base : Colors.mantle;
+
+                    Text {
+                        text: @tr("DB");
+                        color: root.active-tab == 1 ? Colors.text : Colors.subtext1;
+                        font-size: Typography.size-sm;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                        width: parent.width;
+                        height: parent.height;
+                    }
+                    // Active underline
+                    Rectangle {
+                        y: parent.height - 2px;
+                        height: 2px;
+                        width: parent.width;
+                        background: root.active-tab == 1 ? Colors.blue : transparent;
+                    }
+                    TouchArea {
+                        width: parent.width;
+                        height: parent.height;
+                        clicked => { root.active-tab = 1; }
                     }
                 }
             }
+
+            // Bottom border
+            Rectangle {
+                y: parent.height - 1px;
+                height: 1px;
+                width: parent.width;
+                background: Colors.surface0;
+            }
+        }
+
+        // ── Content area ─────────────────────────────────────────────────────
+        // Both panels share the same space; only one is visible at a time.
+        // Using visible: instead of if: so that sidebar-fs / sidebar-scroll IDs
+        // remain accessible at root scope (if-scoped IDs cannot be referenced outside).
+        Rectangle {
+            horizontal-stretch: 1;
+            vertical-stretch: 1;
+            clip: true;
+
+            // DB tab panel
+            DbPanel {
+                x: 0; y: 0;
+                width: parent.width; height: parent.height;
+                visible: root.active-tab == 1;
+                connections: root.connections;
+                connect(id) => { root.connect(id); }
+                add-connection => { root.add-connection(); }
+            }
+
+            // Schema tab (tree + add-connection)
+            sidebar-fs := FocusScope {
+                x: 0; y: 0;
+                width: parent.width; height: parent.height;
+                visible: root.active-tab == 0;
+                focus-on-click: true;
+
+            key-pressed(event) => {
+                if (event.text == Key.UpArrow) {
+                    if (root.kb-focus <= 0) {
+                        root.kb-focus = 0;
+                    } else {
+                        root.kb-focus -= 1;
+                    }
+                    EventResult.accept
+                } else if (event.text == Key.DownArrow) {
+                    if (root.kb-focus < 0) {
+                        root.kb-focus = 0;
+                    } else if (root.kb-focus < root.tree.length - 1) {
+                        root.kb-focus += 1;
+                    }
+                    EventResult.accept
+                } else if (event.text == Key.RightArrow) {
+                    if (root.kb-focus >= 0 && root.tree.length > 0) {
+                        let node = root.tree[root.kb-focus];
+                        if (node.level < 2) {
+                            if (!node.is-expanded) {
+                                root.toggle-node(node.id);
+                            } else if (root.kb-focus + 1 < root.tree.length) {
+                                root.kb-focus += 1;
+                            }
+                        }
+                    }
+                    EventResult.accept
+                } else if (event.text == Key.LeftArrow) {
+                    if (root.kb-focus >= 0 && root.tree.length > 0) {
+                        let node = root.tree[root.kb-focus];
+                        if (node.is-expanded && node.level < 2) {
+                            root.toggle-node(node.id);
+                        } else if (node.parent-index >= 0) {
+                            root.kb-focus = node.parent-index;
+                        }
+                    }
+                    EventResult.accept
+                } else if (event.text == Key.Return) {
+                    if (root.kb-focus >= 0 && root.tree.length > 0) {
+                        let node = root.tree[root.kb-focus];
+                        if (node.node-kind == "table" || node.node-kind == "view") {
+                            root.table-double-clicked(node.label);
+                        } else if (node.level < 2) {
+                            root.toggle-node(node.id);
+                        }
+                    }
+                    EventResult.accept
+                } else {
+                    EventResult.reject
+                }
+            }
+
+            sidebar-scroll := Flickable {
+                x: 0; y: 0;
+                width: parent.width; height: parent.height;
+                interactive: true;
+                viewport-height: max(sidebar-content.preferred-height, self.height);
+
+                sidebar-content := VerticalLayout {
+                    // ── Schema tree ───────────────────────────────────────────────────────
+                    for node[i] in root.tree : Rectangle {
+                        height: 32px;
+                        clip: true;
+
+                        background: i == root.kb-focus
+                            ? Colors.sidebar-sel
+                            : (node.is-active && node.level == 0 ? Colors.surface0 : transparent);
+
+                        ta := TouchArea {
+                            width: parent.width;
+                            height: parent.height;
+                            clicked => {
+                                root.kb-focus = i;
+                                // Level-2 items (tables, views, etc.) have no children to
+                                // expand, so skip toggle-node to avoid rebuilding the VecModel
+                                // on the first click — a rebuild would destroy the element and
+                                // prevent Slint from recognising the second click as a
+                                // double-click.
+                                if (node.level < 2) {
+                                    root.toggle-node(node.id);
+                                }
+                            }
+                            double-clicked => {
+                                if node.node-kind == "table" || node.node-kind == "view" {
+                                    root.table-double-clicked(node.label);
+                                }
+                            }
+                        }
+
+                        // Hover overlay (skipped for kb-focused and active-connection rows)
+                        Rectangle {
+                            background: ta.has-hover
+                                && i != root.kb-focus
+                                && !(node.is-active && node.level == 0)
+                                ? Colors.hover-subtle : transparent;
+                            width: parent.width;
+                            height: parent.height;
+                        }
+
+                        HorizontalLayout {
+                            x: 0; y: 0;
+                            width: parent.width;
+                            height: parent.height;
+                            padding-left: (8 + node.level * 14) * 1px;
+                            padding-right: 8px;
+                            spacing: 4px;
+
+                            // Expand/collapse toggle icon for connection and category nodes
+                            if node.level < 2 : Text {
+                                text: node.is-expanded ? "▼" : "▶";
+                                color: Colors.surface2;
+                                font-size: Typography.size-xs;
+                                vertical-alignment: center;
+                                width: 14px;
+                            }
+                            // Spacer for item nodes
+                            if node.level >= 2 : Rectangle { width: 14px; }
+
+                            // Connection status dot (● active / ○ inactive)
+                            if node.level == 0 : Text {
+                                text: node.is-active ? "●" : "○";
+                                color: node.is-active ? Colors.blue : Colors.surface2;
+                                font-size: Typography.size-sm;
+                                vertical-alignment: center;
+                            }
+
+                            // Main label
+                            Text {
+                                text: node.label;
+                                color: node.level == 0
+                                    ? (node.is-active ? Colors.text : Colors.subtext1)
+                                    : (node.level == 1 ? Colors.overlay1 : Colors.subtext0);
+                                font-size: node.level == 0 ? Typography.size-lg : Typography.size-base;
+                                vertical-alignment: center;
+                                overflow: elide;
+                                horizontal-stretch: 1;
+                            }
+
+                            // Sub-label badge (db-type for connection nodes)
+                            if node.sub-label != "" : Text {
+                                text: node.sub-label;
+                                color: Colors.surface2;
+                                font-size: Typography.size-sm;
+                                vertical-alignment: center;
+                            }
+                        }
+                    }
+
+                    // ── Metadata loading indicator ────────────────────────────────────────
+                    if root.is-loading : Rectangle {
+                        height: 28px;
+                        HorizontalLayout {
+                            padding-left: 24px;
+                            Text {
+                                text: @tr("Loading\u{2026}");
+                                color: Colors.surface2;
+                                font-size: Typography.size-md;
+                                vertical-alignment: center;
+                                font-italic: true;
+                            }
+                        }
+                    }
+
+                    // ── Divider ───────────────────────────────────────────────────────────
+                    Rectangle {
+                        height: 1px;
+                        background: Colors.surface0;
+                    }
+
+                    // ── Add connection button ─────────────────────────────────────────────
+                    Rectangle {
+                        height: 36px;
+                        background: transparent;
+
+                        HorizontalLayout {
+                            padding-left: 12px;
+                            Text {
+                                text: @tr("+ Add connection");
+                                color: Colors.blue;
+                                vertical-alignment: center;
+                            }
+                        }
+
+                        TouchArea {
+                            width: parent.width;
+                            height: parent.height;
+                            clicked => { root.add-connection(); }
+                        }
+                    }
+                }
+            }
+        }
         }
     }
 }
