@@ -259,6 +259,7 @@ impl UI {
         Self::register_formatter_callback(&window);
         Self::register_export_callbacks(&window, Arc::clone(&original_data));
         Self::register_theme_callback(&window, state.clone(), tx_cmd.clone());
+        Self::register_menu_callbacks(&window, tx_cmd.clone());
         Self::register_close_handler(&window);
         // Set initial page size and theme on the Slint window from shared state.
         let ui_global = window.global::<crate::UiState>();
@@ -671,6 +672,25 @@ impl UI {
             }
             slint::CloseRequestResponse::HideWindow
         });
+    }
+
+    // ── Menu bar callbacks ────────────────────────────────────────────────────
+
+    fn register_menu_callbacks(window: &crate::AppWindow, tx_cmd: mpsc::Sender<Command>) {
+        let ui = window.global::<crate::UiState>();
+
+        // quit: exit the event loop (closes the application)
+        ui.on_quit(|| {
+            let _ = slint::quit_event_loop();
+        });
+
+        // run-all: execute the entire editor content
+        {
+            let tx_cmd = tx_cmd.clone(); // clone required: callback closure needs owned tx_cmd
+            ui.on_run_all(move |sql| {
+                send_cmd(&tx_cmd, Command::RunAll(sql.to_string()));
+            });
+        }
     }
 
     // ── Sidebar callbacks ─────────────────────────────────────────────────────

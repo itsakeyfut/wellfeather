@@ -1,0 +1,219 @@
+// Custom menu bar — horizontal strip of top-level menus (File / Edit / Query / Settings).
+// Each top-level label shows a PopupWindow dropdown on click.
+// Items reuse MenuItem from common.slint.
+
+import { Colors, Typography } from "../theme.slint";
+import { MenuItem } from "common.slint";
+
+export component MenuBar inherits Rectangle {
+    height: 28px;
+    background: Colors.mantle;
+
+    callback export-csv();
+    callback export-json();
+    callback quit();
+    callback toggle-theme();
+    callback run-query(string);
+    callback run-all(string);
+    callback cancel-query();
+    in property <string> editor-text;
+
+    // Bottom border separating menu bar from content area
+    Rectangle {
+        x: 0;
+        y: parent.height - 1px;
+        width:  parent.width;
+        height: 1px;
+        background: Colors.surface1;
+    }
+
+    HorizontalLayout {
+        padding-left:   4px;
+        padding-top:    2px;
+        padding-bottom: 2px;
+        alignment:      start;
+        spacing:        0;
+
+        // ── File ──────────────────────────────────────────────────────────────
+        Rectangle {
+            width: 60px;
+            background: file-ta.has-hover ? Colors.surface1 : transparent;
+            border-radius: 3px;
+
+            Text {
+                text: @tr("File");
+                color: Colors.text;
+                font-size: Typography.size-sm;
+                horizontal-alignment: center;
+                vertical-alignment:   center;
+            }
+            file-ta := TouchArea {
+                clicked => { file-popup.show(); }
+            }
+            file-popup := PopupWindow {
+                x: 0;
+                y: root.height;
+                width:  180px;
+                height: 91px;
+                close-policy: PopupClosePolicy.close-on-click;
+
+                Rectangle {
+                    width:  180px;
+                    height: 91px;
+                    background:    Colors.surface0;
+                    border-radius: 4px;
+                    border-width:  1px;
+                    border-color:  Colors.surface2;
+                    drop-shadow-blur:  8px;
+                    drop-shadow-color: Colors.shadow;
+                    clip: true;
+
+                    VerticalLayout {
+                        spacing: 0;
+                        MenuItem { text: @tr("Export CSV");  clicked => { root.export-csv();  } }
+                        MenuItem { text: @tr("Export JSON"); clicked => { root.export-json(); } }
+                        Rectangle { height: 1px; background: Colors.surface1; }
+                        MenuItem { text: @tr("Quit");        clicked => { root.quit();        } }
+                    }
+                }
+            }
+        }
+
+        // ── Edit ──────────────────────────────────────────────────────────────
+        Rectangle {
+            width: 60px;
+            background: edit-ta.has-hover ? Colors.surface1 : transparent;
+            border-radius: 3px;
+
+            Text {
+                text: @tr("Edit");
+                color: Colors.text;
+                font-size: Typography.size-sm;
+                horizontal-alignment: center;
+                vertical-alignment:   center;
+            }
+            edit-ta := TouchArea {
+                clicked => { edit-popup.show(); }
+            }
+            edit-popup := PopupWindow {
+                x: 0;
+                y: root.height;
+                width:  180px;
+                height: 30px;
+                close-policy: PopupClosePolicy.close-on-click;
+
+                Rectangle {
+                    width:  180px;
+                    height: 30px;
+                    background:    Colors.surface0;
+                    border-radius: 4px;
+                    border-width:  1px;
+                    border-color:  Colors.surface2;
+                    drop-shadow-blur:  8px;
+                    drop-shadow-color: Colors.shadow;
+                    clip: true;
+
+                    VerticalLayout {
+                        spacing: 0;
+                        MenuItem { text: @tr("Toggle Theme"); clicked => { root.toggle-theme(); } }
+                    }
+                }
+            }
+        }
+
+        // ── Query ─────────────────────────────────────────────────────────────
+        Rectangle {
+            width: 70px;
+            background: query-ta.has-hover ? Colors.surface1 : transparent;
+            border-radius: 3px;
+
+            Text {
+                text: @tr("Query");
+                color: Colors.text;
+                font-size: Typography.size-sm;
+                horizontal-alignment: center;
+                vertical-alignment:   center;
+            }
+            query-ta := TouchArea {
+                clicked => { query-popup.show(); }
+            }
+            query-popup := PopupWindow {
+                x: 0;
+                y: root.height;
+                width:  220px;
+                height: 90px;
+                close-policy: PopupClosePolicy.close-on-click;
+
+                Rectangle {
+                    width:  220px;
+                    height: 90px;
+                    background:    Colors.surface0;
+                    border-radius: 4px;
+                    border-width:  1px;
+                    border-color:  Colors.surface2;
+                    drop-shadow-blur:  8px;
+                    drop-shadow-color: Colors.shadow;
+                    clip: true;
+
+                    VerticalLayout {
+                        spacing: 0;
+                        MenuItem {
+                            text: @tr("Run (Ctrl+Enter)");
+                            clicked => { root.run-query(root.editor-text); }
+                        }
+                        MenuItem {
+                            text: @tr("Run All (Ctrl+Shift+Enter)");
+                            clicked => { root.run-all(root.editor-text); }
+                        }
+                        MenuItem {
+                            text: @tr("Cancel (Esc)");
+                            clicked => { root.cancel-query(); }
+                        }
+                    }
+                }
+            }
+        }
+
+        // ── Settings ──────────────────────────────────────────────────────────
+        Rectangle {
+            width: 80px;
+            background: settings-ta.has-hover ? Colors.surface1 : transparent;
+            border-radius: 3px;
+
+            Text {
+                text: @tr("Settings");
+                color: Colors.text;
+                font-size: Typography.size-sm;
+                horizontal-alignment: center;
+                vertical-alignment:   center;
+            }
+            settings-ta := TouchArea {
+                clicked => { settings-popup.show(); }
+            }
+            settings-popup := PopupWindow {
+                x: 0;
+                y: root.height;
+                width:  220px;
+                height: 30px;
+                close-policy: PopupClosePolicy.close-on-click;
+
+                Rectangle {
+                    width:  220px;
+                    height: 30px;
+                    background:    Colors.surface0;
+                    border-radius: 4px;
+                    border-width:  1px;
+                    border-color:  Colors.surface2;
+                    drop-shadow-blur:  8px;
+                    drop-shadow-color: Colors.shadow;
+                    clip: true;
+
+                    VerticalLayout {
+                        spacing: 0;
+                        MenuItem { text: @tr("Font Settings (coming soon)"); }
+                    }
+                }
+            }
+        }
+    }
+}

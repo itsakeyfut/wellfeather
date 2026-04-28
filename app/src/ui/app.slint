@@ -2,6 +2,7 @@ import { ConnectionEntry, RowData, SidebarNode, CompletionRow } from "globals.sl
 import { Colors, Typography } from "theme.slint";
 import { CompletionPopup } from "components/completion_popup.slint";
 import { ConnectionForm }  from "components/connection_form.slint";
+import { MenuBar }         from "components/menu_bar.slint";
 import { Sidebar }         from "components/sidebar.slint";
 import { Editor }          from "components/editor.slint";
 import { ResultTable }     from "components/result_table.slint";
@@ -144,7 +145,9 @@ export global UiState {
 
     // ── UI → Controller callbacks ─────────────────────────────────────────────
     callback run-query(string);
+    callback run-all(string);
     callback cancel-query();
+    callback quit();
 
     /// Set to true by Rust when a query starts, finishes, or errors.
     /// AppWindow watches this via a local alias and snaps the result panel open
@@ -189,7 +192,8 @@ export component AppWindow inherits Window {
     changed _theme-sync => { Colors.is-dark = UiState.is-dark; }
 
     // ── Layout geometry helpers ───────────────────────────────────────────────
-    property <length> content-height:    root.height - 24px;  // excludes status bar
+    property <length> menu-bar-height:   28px;
+    property <length> content-height:    root.height - 24px - menu-bar-height;  // excludes status bar and menu bar
     property <length> sidebar-width:     220px;
     property <length> main-width:        root.width - sidebar-width;
     property <length> divider-thickness: 5px;
@@ -284,10 +288,25 @@ export component AppWindow inherits Window {
             }
         }
 
+        // ── Menu bar ─────────────────────────────────────────────────────────
+        MenuBar {
+            x: 0;
+            y: 0;
+            width:        root.width;
+            editor-text:  UiState.editor-text;
+            export-csv   => { UiState.export-csv(); }
+            export-json  => { UiState.export-json(); }
+            quit         => { UiState.quit(); }
+            toggle-theme => { UiState.toggle-theme(); }
+            run-query(sql) => { UiState.run-query(sql); }
+            run-all(sql)   => { UiState.run-all(sql); }
+            cancel-query   => { UiState.cancel-query(); }
+        }
+
         // ── Sidebar ───────────────────────────────────────────────────────────
         sidebar-inst := Sidebar {
             x: 0;
-            y: 0;
+            y: menu-bar-height;
             width:  sidebar-width;
             height: content-height;
             tree:       UiState.sidebar-tree;
@@ -309,7 +328,7 @@ export component AppWindow inherits Window {
         // x and share the same width, so they are always perfectly aligned.
         Rectangle {
             x: sidebar-width;
-            y: 0;
+            y: menu-bar-height;
             width:  main-width;
             height: content-height;
             clip: true;
@@ -565,7 +584,7 @@ export component AppWindow inherits Window {
         // it is never clipped even when the cursor is near the editor bottom.
         if UiState.completion-visible && UiState.completion-items.length > 0: CompletionPopup {
             x: root.sidebar-width + root.gutter-col-width + editor-inst.popup-x;
-            y: editor-inst.popup-y;
+            y: menu-bar-height + editor-inst.popup-y;
             items: UiState.completion-items;
             selected-index <=> UiState.completion-selected;
         }
@@ -573,7 +592,7 @@ export component AppWindow inherits Window {
         // ── Status bar ────────────────────────────────────────────────────────
         StatusBar {
             x: 0;
-            y: content-height;
+            y: menu-bar-height + content-height;
             width:  root.width;
             height: 24px;
             connection-text: UiState.status-connection;
@@ -588,7 +607,7 @@ export component AppWindow inherits Window {
         // Sidebar focus border
         if root.focused-pane == 0: Rectangle {
             x: 0;
-            y: 0;
+            y: menu-bar-height;
             width:  sidebar-width;
             height: content-height;
             border-width: 2px;
@@ -599,7 +618,7 @@ export component AppWindow inherits Window {
         // Editor / main-content pane focus border
         if root.focused-pane == 1: Rectangle {
             x: sidebar-width;
-            y: 0;
+            y: menu-bar-height;
             width:  main-width;
             height: content-height;
             border-width: 2px;
@@ -610,7 +629,7 @@ export component AppWindow inherits Window {
         // Result-table pane focus border (covers result panel + preview strip above it)
         if root.focused-pane == 2 && UiState.result-panel-open: Rectangle {
             x: sidebar-width;
-            y: content-height - panel-height - preview-strip-h;
+            y: menu-bar-height + content-height - panel-height - preview-strip-h;
             width:  main-width;
             height: panel-height + preview-strip-h;
             border-width: 2px;
