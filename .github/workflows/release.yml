@@ -1,0 +1,42 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  release-windows:
+    runs-on: windows-latest
+
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build release binary
+        run: cargo build --release -p wellfeather
+
+      - name: Create archive
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $archive = "wellfeather-${tag}-x86_64-windows.zip"
+          Compress-Archive -Path target/release/wellfeather.exe -DestinationPath $archive
+          echo "ARCHIVE=$archive" >> $env:GITHUB_ENV
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ env.ARCHIVE }}
+          draft: true
+          generate_release_notes: false
+          body_path: CHANGELOG.md
