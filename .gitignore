@@ -5,6 +5,9 @@
 docs/roadmap/tasks/
 docs/master-password/
 
+# Screenshots for development purposes
+screenshots/
+
 # Claude session file
 SESSION.md
 
