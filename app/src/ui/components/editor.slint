@@ -166,22 +166,22 @@ export component Editor inherits Rectangle {
     // Fire once ~250 ms after the key is first held.  Setting repeat-ready arms
     // the sustained-movement timer, matching the OS key-repeat initial delay.
     Timer {
-        interval: 250ms;
+        interval: 180ms;
         running: root.up-held && !root.up-repeat-ready;
         triggered => { root.up-repeat-ready = true; }
     }
     Timer {
-        interval: 250ms;
+        interval: 180ms;
         running: root.down-held && !root.down-repeat-ready;
         triggered => { root.down-repeat-ready = true; }
     }
     Timer {
-        interval: 250ms;
+        interval: 180ms;
         running: root.up-shift-held && !root.up-shift-repeat-ready;
         triggered => { root.up-shift-repeat-ready = true; }
     }
     Timer {
-        interval: 250ms;
+        interval: 180ms;
         running: root.down-shift-held && !root.down-shift-repeat-ready;
         triggered => { root.down-shift-repeat-ready = true; }
     }
@@ -195,7 +195,7 @@ export component Editor inherits Rectangle {
     //     If *-key-seen is false, no repeat arrived since last fire → key released → stop.
     //     If *-key-seen is true, a repeat arrived → keep moving.
     Timer {
-        interval: 50ms;
+        interval: 35ms;
         running: root.up-held && root.up-repeat-ready;
         triggered => {
             if (!root.up-repeat-received) {
@@ -216,7 +216,7 @@ export component Editor inherits Rectangle {
         }
     }
     Timer {
-        interval: 50ms;
+        interval: 35ms;
         running: root.down-held && root.down-repeat-ready;
         triggered => {
             if (!root.down-repeat-received) {
@@ -237,7 +237,7 @@ export component Editor inherits Rectangle {
         }
     }
     Timer {
-        interval: 50ms;
+        interval: 35ms;
         running: root.up-shift-held && root.up-shift-repeat-ready;
         triggered => {
             if (!root.up-shift-repeat-received) {
@@ -258,7 +258,7 @@ export component Editor inherits Rectangle {
         }
     }
     Timer {
-        interval: 50ms;
+        interval: 35ms;
         running: root.down-shift-held && root.down-shift-repeat-ready;
         triggered => {
             if (!root.down-shift-repeat-received) {
