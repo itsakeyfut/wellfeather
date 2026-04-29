@@ -8,7 +8,8 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 repository.workspace = true
-authors.workspace = true
+authors.workspace    = true
+license.workspace    = true
 
 [dependencies]
 sqlx      = { workspace = true }

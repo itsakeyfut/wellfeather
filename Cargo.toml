@@ -12,10 +12,14 @@ default-members = ["app"]
 resolver = "2"
 
 [workspace.package]
-version = "0.1.0"
+version = "0.7.0"
 edition = "2024"
 rust-version = "1.93.0"
-# license = ""
+description = "A lightweight, keyboard-centric SQL client built with Rust and Slint"
+readme = "README.md"
+keywords = ["sql", "database", "gui", "slint", "tui"]
+categories = ["database", "gui"]
+license = "Apache-2.0"
 repository = "https://github.com/itsakeyfut/wellfeather"
 authors = ["itsakeyfut"]
 
@@ -29,3 +33,10 @@ tracing       = "0.1.44"
 sqlx          = { version = "0.8.6", features = ["postgres", "mysql", "sqlite", "runtime-tokio", "macros", "chrono", "uuid"] }
 uuid          = { version = "1.23.0", features = ["v4"] }
 chrono        = { version = "0.4.44", features = ["serde"] }
+
+[profile.release]
+opt-level     = 3
+lto           = true
+codegen-units = 1
+strip         = true
+panic         = "abort"
