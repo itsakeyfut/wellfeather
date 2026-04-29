@@ -381,13 +381,20 @@ export component AppWindow inherits Window {
             clip: true;
 
             // ── Shared gutter column ──────────────────────────────────────────
-            // Spans the full content height so the gutter visually extends through
-            // the divider and result area, giving a consistent left anchor.
+            // Height is capped to the portion above the result panel when the panel
+            // is open.  The panel's opaque background already hides any gutter content
+            // below its top edge, but more importantly: gutter line-number colors
+            // depend on current-line (active-line highlight).  When the gutter's
+            // bounding box overlaps the result panel, every cursor-movement dirty mark
+            // causes Slint to repaint the result cells too.  Clipping the gutter to
+            // the area above the panel eliminates that dirty-region overlap.
             Rectangle {
                 x: 0;
                 y: 0;
                 width:  root.gutter-col-width;
-                height: parent.height;
+                height: UiState.result-panel-open
+                    ? parent.height - root.panel-height
+                    : parent.height;
                 background: Colors.mantle;
                 clip: true;
 
@@ -406,12 +413,19 @@ export component AppWindow inherits Window {
             }
 
             // ── SQL editor (text area only — gutter is the sibling above) ─────────
-            // Always fills the full content height; the result panel overlays it.
+            // Height is capped to the portion of the content area that is NOT covered
+            // by the result panel.  This is the key performance constraint: keeping
+            // the editor's bounds out of the result panel's screen region means Slint's
+            // dirty-region tracker never needs to repaint the result cells when cursor
+            // movement (current-line highlight, TextInput cursor blink, etc.) marks the
+            // editor dirty.  When the panel is closed the editor fills the full height.
             editor-inst := Editor {
                 x: root.gutter-col-width;
                 y: 0;
                 width:  parent.width - root.gutter-col-width;
-                height: parent.height;
+                height: UiState.result-panel-open
+                    ? parent.height - root.panel-height
+                    : parent.height;
                 text         <=> UiState.editor-text;
                 font-family:     UiState.font-family;
                 font-size-px:    UiState.font-size;
