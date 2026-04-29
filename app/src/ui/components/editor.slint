@@ -16,24 +16,19 @@ import { Colors } from "../theme.slint";
 //
 // Scroll architecture:
 //   TextInput is wrapped in a FocusScope inside a Flickable.  The FocusScope
-//   intercepts UP/DOWN arrow key events in the capture phase (before TextInput
-//   processes them), preventing OS key-repeat events from piling up in the queue.
-//   Timer-based cursor movement replaces key-repeat for UP/DOWN.
-//   Shift+UP/DOWN are also intercepted for range selection using the same
-//   timer pattern.  All other keys (text entry, Ctrl+arrows, etc.) pass through
-//   to TextInput unchanged.
+//   intercepts UP/DOWN (plain and Shift) in the capture phase and drives cursor
+//   movement via 50 ms timers to prevent OS key-repeat queue overflow when the
+//   result panel is open (Slint full-scene renders can block the event loop, delaying
+//   WM_KEYUP and causing overshoot with native OS repeat).
 //
-// Key-repeat queue problem (why the FocusScope approach is necessary):
-//   Holding an arrow key causes the OS to enqueue ~33 WM_KEYDOWN/s.  If each
-//   event triggers TextInput processing + a render, events accumulate faster than
-//   they are drained, so releasing the key does not stop cursor movement immediately.
-//   By consuming repeats in the capture phase we ensure the queue never grows, and
-//   cursor movement stops the instant capture-key-released clears the held flag.
-//
-// Source evidence: i-slint-core/window.rs:804 — capture_key_event is dispatched
-// root→focused (reverse item_list) before key_event is dispatched focused→root.
-// i-slint-core/items/flickable.rs:155 — Flickable.capture_key_event always returns
-// EventIgnored, so it does not interfere.
+//   Two-phase heartbeat stop mechanism:
+//     Phase 1 (*-repeat-received == false): timer moves unconditionally; stopping
+//       relies on capture-key-released / key-released (OS hasn't started auto-repeating
+//       yet, so no heartbeat signal is available).
+//     Phase 2 (*-repeat-received == true): timer checks *-key-seen each fire; if the
+//       flag is clear no OS repeat arrived since the last fire → key was released → stop.
+//   *-repeat-received is set on the first OS auto-repeat event (identified by *-held
+//   already being true when capture-key-pressed fires) and cleared on key-released.
 //
 // All UiState values arrive as `in` properties forwarded from app.slint.
 // This component does NOT import app.slint to avoid circular dependencies.
@@ -116,20 +111,49 @@ export component Editor inherits Rectangle {
     property <bool> up-repeat-ready:   false;
     property <bool> down-repeat-ready: false;
 
-    // ── Key-hold state for Shift+UP/DOWN range selection ──────────────────
+    // ── Heartbeat flags ───────────────────────────────────────────────────────
+    // Two-phase stop mechanism that works even when slow renders block the event
+    // loop and delay capture-key-released / WM_KEYUP processing.
+    //
+    // *-key-seen : set true by every key-press event (initial + OS repeats);
+    //              reset by the 50ms timer after each move.
+    // *-repeat-received : set true the first time an OS auto-repeat event for
+    //              that direction arrives (identified by down-held already being
+    //              true on entry to capture-key-pressed).
+    //
+    // Pre-OS-repeat phase (*-repeat-received == false):
+    //   The OS hasn't started auto-repeating yet (OS initial delay ~500 ms).
+    //   The timer moves unconditionally on every fire — heartbeat is not usable
+    //   because no OS repeats are coming.  Stopping relies on capture-key-released.
+    //
+    // Post-OS-repeat phase (*-repeat-received == true):
+    //   OS repeats are arriving at ~33 ms.  On each timer fire: if *-key-seen is
+    //   true, a repeat arrived since the last fire → keep moving; if false, no
+    //   repeat arrived → key released → stop.  This detects release within one
+    //   timer interval regardless of render blocking.
+    property <bool> up-key-seen:           false;
+    property <bool> down-key-seen:         false;
+    property <bool> up-shift-key-seen:     false;
+    property <bool> down-shift-key-seen:   false;
+    property <bool> up-repeat-received:       false;
+    property <bool> down-repeat-received:     false;
+    property <bool> up-shift-repeat-received:   false;
+    property <bool> down-shift-repeat-received: false;
+
+    // ── Key-hold state for Shift+UP/DOWN range selection ─────────────────────
     property <bool> up-shift-held:   false;
     property <bool> down-shift-held: false;
     property <bool> up-shift-repeat-ready:   false;
     property <bool> down-shift-repeat-ready: false;
     // Byte offset of the fixed end of an active shift-selection.
     // -1 = no active selection.  Set on first Shift+arrow press; reset when
-    // the cursor moves outside of a shift-selection context (plain nav or click).
+    // the cursor moves outside of a shift-selection context.
     property <int>  sel-anchor: -1;
 
-    // ── Cursor-line poll timer ────────────────────────────────────────────────
-    // NOT a reactive binding — polling at 60 fps keeps key-event processing to
-    // pure TextInput internals (essentially free) so rapid key-repeat bursts do
-    // not stall behind our property computations.
+    // current-line is updated inside cursor-position-changed (see below).
+    // It is NOT driven by a poll timer — that would dirty the window at 60 fps
+    // regardless of cursor movement.  Updating only inside cursor-position-changed
+    // means a dirty mark is issued only when the cursor actually moves.
     in-out property <int> current-line: 0;
 
     /// Exposes TextInput focus state so app.slint can sync its focused-pane property.
@@ -138,112 +162,133 @@ export component Editor inherits Rectangle {
     /// Programmatic focus: called by app.slint when Alt+Arrow navigates to the editor.
     public function grab-focus() { inner-input.focus(); }
 
-    Timer {
-        interval: 16ms;
-        running: inner-input.has-focus;
-        triggered => {
-            root.current-line = root.cursor-line(
-                inner-input.text,
-                inner-input.cursor-position-byte-offset
-            );
-        }
-    }
-
     // ── Initial-delay timers ──────────────────────────────────────────────────
     // Fire once ~250 ms after the key is first held.  Setting repeat-ready arms
     // the sustained-movement timer, matching the OS key-repeat initial delay.
-    // The timer stops itself because the running condition becomes false once
-    // repeat-ready is true.
     Timer {
-        interval: 250ms;
+        interval: 180ms;
         running: root.up-held && !root.up-repeat-ready;
         triggered => { root.up-repeat-ready = true; }
     }
     Timer {
-        interval: 250ms;
+        interval: 180ms;
         running: root.down-held && !root.down-repeat-ready;
         triggered => { root.down-repeat-ready = true; }
     }
-
-    // ── Sustained UP movement timer ───────────────────────────────────────────
-    // Only fires after the initial delay has elapsed (up-repeat-ready = true).
     Timer {
-        interval: 50ms;
-        running: root.up-held && root.up-repeat-ready;
-        triggered => {
-            let new-pos = root.move-cursor-line(
-                inner-input.text,
-                inner-input.cursor-position-byte-offset,
-                -1
-            );
-            inner-input.set-selection-offsets(new-pos, new-pos);
-        }
-    }
-
-    // ── Sustained DOWN movement timer ─────────────────────────────────────────
-    Timer {
-        interval: 50ms;
-        running: root.down-held && root.down-repeat-ready;
-        triggered => {
-            let new-pos = root.move-cursor-line(
-                inner-input.text,
-                inner-input.cursor-position-byte-offset,
-                1
-            );
-            inner-input.set-selection-offsets(new-pos, new-pos);
-        }
-    }
-
-    // ── Initial-delay timers for Shift+UP/DOWN selection ─────────────────────
-    Timer {
-        interval: 250ms;
+        interval: 180ms;
         running: root.up-shift-held && !root.up-shift-repeat-ready;
         triggered => { root.up-shift-repeat-ready = true; }
     }
     Timer {
-        interval: 250ms;
+        interval: 180ms;
         running: root.down-shift-held && !root.down-shift-repeat-ready;
         triggered => { root.down-shift-repeat-ready = true; }
     }
 
-    // ── Sustained Shift+UP selection timer ───────────────────────────────────
+    // ── Sustained movement timers ─────────────────────────────────────────────
+    // Two-phase heartbeat:
+    //   Phase 1 (*-repeat-received == false): OS hasn't started auto-repeating yet.
+    //     Move unconditionally — no heartbeat possible without OS repeats.
+    //     Stopping relies on capture-key-released / key-released.
+    //   Phase 2 (*-repeat-received == true): OS auto-repeats are arriving.
+    //     If *-key-seen is false, no repeat arrived since last fire → key released → stop.
+    //     If *-key-seen is true, a repeat arrived → keep moving.
     Timer {
-        interval: 50ms;
-        running: root.up-shift-held && root.up-shift-repeat-ready;
+        interval: 35ms;
+        running: root.up-held && root.up-repeat-ready;
         triggered => {
-            let new-pos = root.move-cursor-line(
-                inner-input.text,
-                inner-input.cursor-position-byte-offset,
-                -1
-            );
-            inner-input.set-selection-offsets(root.sel-anchor, new-pos);
+            if (!root.up-repeat-received) {
+                root.up-key-seen = false;
+                let new-pos = root.move-cursor-line(inner-input.text,
+                    inner-input.cursor-position-byte-offset, -1);
+                inner-input.set-selection-offsets(new-pos, new-pos);
+            } else if (!root.up-key-seen) {
+                root.up-held = false;
+                root.up-repeat-ready = false;
+                root.up-repeat-received = false;
+            } else {
+                root.up-key-seen = false;
+                let new-pos = root.move-cursor-line(inner-input.text,
+                    inner-input.cursor-position-byte-offset, -1);
+                inner-input.set-selection-offsets(new-pos, new-pos);
+            }
         }
     }
-
-    // ── Sustained Shift+DOWN selection timer ─────────────────────────────────
     Timer {
-        interval: 50ms;
+        interval: 35ms;
+        running: root.down-held && root.down-repeat-ready;
+        triggered => {
+            if (!root.down-repeat-received) {
+                root.down-key-seen = false;
+                let new-pos = root.move-cursor-line(inner-input.text,
+                    inner-input.cursor-position-byte-offset, 1);
+                inner-input.set-selection-offsets(new-pos, new-pos);
+            } else if (!root.down-key-seen) {
+                root.down-held = false;
+                root.down-repeat-ready = false;
+                root.down-repeat-received = false;
+            } else {
+                root.down-key-seen = false;
+                let new-pos = root.move-cursor-line(inner-input.text,
+                    inner-input.cursor-position-byte-offset, 1);
+                inner-input.set-selection-offsets(new-pos, new-pos);
+            }
+        }
+    }
+    Timer {
+        interval: 35ms;
+        running: root.up-shift-held && root.up-shift-repeat-ready;
+        triggered => {
+            if (!root.up-shift-repeat-received) {
+                root.up-shift-key-seen = false;
+                let new-pos = root.move-cursor-line(inner-input.text,
+                    inner-input.cursor-position-byte-offset, -1);
+                inner-input.set-selection-offsets(root.sel-anchor, new-pos);
+            } else if (!root.up-shift-key-seen) {
+                root.up-shift-held = false;
+                root.up-shift-repeat-ready = false;
+                root.up-shift-repeat-received = false;
+            } else {
+                root.up-shift-key-seen = false;
+                let new-pos = root.move-cursor-line(inner-input.text,
+                    inner-input.cursor-position-byte-offset, -1);
+                inner-input.set-selection-offsets(root.sel-anchor, new-pos);
+            }
+        }
+    }
+    Timer {
+        interval: 35ms;
         running: root.down-shift-held && root.down-shift-repeat-ready;
         triggered => {
-            let new-pos = root.move-cursor-line(
-                inner-input.text,
-                inner-input.cursor-position-byte-offset,
-                1
-            );
-            inner-input.set-selection-offsets(root.sel-anchor, new-pos);
+            if (!root.down-shift-repeat-received) {
+                root.down-shift-key-seen = false;
+                let new-pos = root.move-cursor-line(inner-input.text,
+                    inner-input.cursor-position-byte-offset, 1);
+                inner-input.set-selection-offsets(root.sel-anchor, new-pos);
+            } else if (!root.down-shift-key-seen) {
+                root.down-shift-held = false;
+                root.down-shift-repeat-ready = false;
+                root.down-shift-repeat-received = false;
+            } else {
+                root.down-shift-key-seen = false;
+                let new-pos = root.move-cursor-line(inner-input.text,
+                    inner-input.cursor-position-byte-offset, 1);
+                inner-input.set-selection-offsets(root.sel-anchor, new-pos);
+            }
         }
     }
 
     // ── Auto-scroll ───────────────────────────────────────────────────────────
-    // When the cursor line changes (from poll timer or key timer), adjust
+    // When the cursor line changes (updated in cursor-position-changed), adjust
     // viewport-y so the cursor stays within the visible area.
     // viewport-y is 0 at top and becomes negative as content scrolls up.
-    // Visible content spans [-viewport-y, -viewport-y + height].
+    // Visible content spans [-viewport-y, -viewport-y + eff-height].
     changed current-line => {
         if (root.current-line * root.line-h < -editor-scroll.viewport-y) {
             editor-scroll.viewport-y = -(root.current-line * root.line-h);
-        } else if ((root.current-line + 1) * root.line-h > -editor-scroll.viewport-y + editor-scroll.height) {
-            editor-scroll.viewport-y = -((root.current-line + 1) * root.line-h - editor-scroll.height);
+        } else if ((root.current-line + 1) * root.line-h > -editor-scroll.viewport-y + root.eff-height) {
+            editor-scroll.viewport-y = -((root.current-line + 1) * root.line-h - root.eff-height);
         }
     }
 
@@ -263,11 +308,15 @@ export component Editor inherits Rectangle {
         ? inner-input.preferred-height / root.line-count
         : root.font-size-px * 1px + 5px;
 
+    // Effective visible height — clamped to at least 80 px so auto-scroll has
+    // room to operate even when the editor is very short.
+    property <length> eff-height: max(80px, editor-scroll.height);
+
     // Visible line range — used by the external gutter via out properties.
     property <int> vis-first: max(0, floor(-editor-scroll.viewport-y / root.line-h) - 1);
     property <int> vis-count: min(
         root.line-count - root.vis-first,
-        floor(editor-scroll.height / root.line-h) + 3
+        floor(root.eff-height / root.line-h) + 3
     );
 
     // ── Current-line highlight ───────────────────────────────────────────────
@@ -385,68 +434,66 @@ export component Editor inherits Rectangle {
                         && event.modifiers.shift
                         && !event.modifiers.control
                         && !event.modifiers.alt) {
+                    root.up-shift-key-seen = true;
                     if (!root.up-shift-held) {
-                        // Set held flag BEFORE set-selection-offsets so that
-                        // cursor-position-changed does not reset sel-anchor.
                         root.up-shift-held = true;
+                        root.up-shift-repeat-received = false;
                         if (root.sel-anchor < 0) {
                             root.sel-anchor = inner-input.cursor-position-byte-offset;
                         }
-                        let new-pos = root.move-cursor-line(
-                            inner-input.text,
-                            inner-input.cursor-position-byte-offset,
-                            -1
-                        );
+                        let new-pos = root.move-cursor-line(inner-input.text,
+                            inner-input.cursor-position-byte-offset, -1);
                         inner-input.set-selection-offsets(root.sel-anchor, new-pos);
+                    } else {
+                        root.up-shift-repeat-received = true;
                     }
                     EventResult.accept
                 } else if (event.text == Key.DownArrow
                         && event.modifiers.shift
                         && !event.modifiers.control
                         && !event.modifiers.alt) {
+                    root.down-shift-key-seen = true;
                     if (!root.down-shift-held) {
-                        // Set held flag BEFORE set-selection-offsets so that
-                        // cursor-position-changed does not reset sel-anchor.
                         root.down-shift-held = true;
+                        root.down-shift-repeat-received = false;
                         if (root.sel-anchor < 0) {
                             root.sel-anchor = inner-input.cursor-position-byte-offset;
                         }
-                        let new-pos = root.move-cursor-line(
-                            inner-input.text,
-                            inner-input.cursor-position-byte-offset,
-                            1
-                        );
+                        let new-pos = root.move-cursor-line(inner-input.text,
+                            inner-input.cursor-position-byte-offset, 1);
                         inner-input.set-selection-offsets(root.sel-anchor, new-pos);
+                    } else {
+                        root.down-shift-repeat-received = true;
                     }
                     EventResult.accept
                 } else if (event.text == Key.UpArrow
                         && !event.modifiers.shift
                         && !event.modifiers.control
                         && !event.modifiers.alt) {
+                    root.up-key-seen = true;
                     if (!root.up-held) {
-                        // First press: move cursor once right away.
-                        let new-pos = root.move-cursor-line(
-                            inner-input.text,
-                            inner-input.cursor-position-byte-offset,
-                            -1
-                        );
-                        inner-input.set-selection-offsets(new-pos, new-pos);
                         root.up-held = true;
+                        root.up-repeat-received = false;
+                        let new-pos = root.move-cursor-line(inner-input.text,
+                            inner-input.cursor-position-byte-offset, -1);
+                        inner-input.set-selection-offsets(new-pos, new-pos);
+                    } else {
+                        root.up-repeat-received = true;
                     }
-                    // Consume the event so TextInput never sees it.
                     EventResult.accept
                 } else if (event.text == Key.DownArrow
                         && !event.modifiers.shift
                         && !event.modifiers.control
                         && !event.modifiers.alt) {
+                    root.down-key-seen = true;
                     if (!root.down-held) {
-                        let new-pos = root.move-cursor-line(
-                            inner-input.text,
-                            inner-input.cursor-position-byte-offset,
-                            1
-                        );
-                        inner-input.set-selection-offsets(new-pos, new-pos);
                         root.down-held = true;
+                        root.down-repeat-received = false;
+                        let new-pos = root.move-cursor-line(inner-input.text,
+                            inner-input.cursor-position-byte-offset, 1);
+                        inner-input.set-selection-offsets(new-pos, new-pos);
+                    } else {
+                        root.down-repeat-received = true;
                     }
                     EventResult.accept
                 } else if (event.text == Key.Return
@@ -478,16 +525,24 @@ export component Editor inherits Rectangle {
 
             capture-key-released(event) => {
                 if (event.text == Key.UpArrow) {
-                    root.up-held               = false;
-                    root.up-repeat-ready       = false;
-                    root.up-shift-held         = false;
-                    root.up-shift-repeat-ready = false;
+                    root.up-held                    = false;
+                    root.up-repeat-ready            = false;
+                    root.up-repeat-received         = false;
+                    root.up-key-seen                = false;
+                    root.up-shift-held              = false;
+                    root.up-shift-repeat-ready      = false;
+                    root.up-shift-repeat-received   = false;
+                    root.up-shift-key-seen          = false;
                 }
                 if (event.text == Key.DownArrow) {
-                    root.down-held               = false;
-                    root.down-repeat-ready       = false;
-                    root.down-shift-held         = false;
-                    root.down-shift-repeat-ready = false;
+                    root.down-held                  = false;
+                    root.down-repeat-ready          = false;
+                    root.down-repeat-received       = false;
+                    root.down-key-seen              = false;
+                    root.down-shift-held            = false;
+                    root.down-shift-repeat-ready    = false;
+                    root.down-shift-repeat-received = false;
+                    root.down-shift-key-seen        = false;
                 }
                 EventResult.reject
             }
@@ -507,22 +562,54 @@ export component Editor inherits Rectangle {
                 font-family: root.font-family;
                 font-size:   root.font-size-px * 1px;
 
+                // Secondary path to clear hold-flags when a key is released.
+                // capture-key-released (on the FocusScope) is the primary path,
+                // but key-released fires on the normal dispatch chain and is more
+                // reliable when a render is in-flight and the event loop is busy.
+                key-released(event) => {
+                    if (event.text == Key.UpArrow) {
+                        root.up-held                    = false;
+                        root.up-repeat-ready            = false;
+                        root.up-repeat-received         = false;
+                        root.up-key-seen                = false;
+                        root.up-shift-held              = false;
+                        root.up-shift-repeat-ready      = false;
+                        root.up-shift-repeat-received   = false;
+                        root.up-shift-key-seen          = false;
+                    }
+                    if (event.text == Key.DownArrow) {
+                        root.down-held                  = false;
+                        root.down-repeat-ready          = false;
+                        root.down-repeat-received       = false;
+                        root.down-key-seen              = false;
+                        root.down-shift-held            = false;
+                        root.down-shift-repeat-ready    = false;
+                        root.down-shift-repeat-received = false;
+                        root.down-shift-key-seen        = false;
+                    }
+                    EventResult.reject
+                }
+
                 // Notify app.slint on every user keystroke so the completion
                 // debounce timer can be (re)started.
                 edited => {
                     root.text-edited(self.text, self.cursor-position-byte-offset);
                 }
 
-                // Horizontal auto-scroll: keep cursor inside the visible area
-                // whenever the cursor position changes (typing, keyboard nav,
-                // or mouse drag).  pos.x is the cursor's x coordinate in
-                // TextInput content space (independent of scroll offset).
-                // viewport-x is ≤ 0; visible content spans
-                //   [-viewport-x, -viewport-x + editor-scroll.width].
+                // Whenever the cursor moves (key nav, mouse click, set-selection-offsets,
+                // text edit) update current-line synchronously here.  Doing it here
+                // means the window is only dirtied on actual cursor movement — not by
+                // a 16 ms background timer — and the `changed current-line` auto-scroll
+                // runs before we compute popup-y, so popup-y reflects the adjusted
+                // viewport.
                 cursor-position-changed(pos) => {
-                    // Reset shift-selection anchor whenever the cursor moves
-                    // outside of an active Shift+arrow sequence (plain nav,
-                    // mouse click, typing, etc.).
+                    // Update current-line FIRST so `changed current-line` fires and
+                    // adjusts viewport-y before we need it for popup-y below.
+                    root.current-line = root.cursor-line(
+                        inner-input.text,
+                        inner-input.cursor-position-byte-offset
+                    );
+
                     if (!root.down-shift-held && !root.up-shift-held) {
                         root.sel-anchor = -1;
                     }
