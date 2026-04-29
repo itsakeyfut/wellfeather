@@ -19,7 +19,7 @@ description = "A lightweight, keyboard-centric SQL client built with Rust and Sl
 readme = "README.md"
 keywords = ["sql", "database", "gui", "slint", "tui"]
 categories = ["database", "gui"]
-# license = ""
+license = "Apache-2.0"
 repository = "https://github.com/itsakeyfut/wellfeather"
 authors = ["itsakeyfut"]
 
