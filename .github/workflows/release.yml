@@ -33,10 +33,19 @@ jobs:
           Compress-Archive -Path target/release/wellfeather.exe -DestinationPath $archive
           echo "ARCHIVE=$archive" >> $env:GITHUB_ENV
 
+      - name: Extract release notes from CHANGELOG
+        shell: bash
+        run: |
+          version="${{ github.ref_name }}"
+          version="${version#v}"
+          awk "/^## \[${version}\]/{found=1; next} found && /^## \[/{exit} found{print}" CHANGELOG.md \
+            | sed '/./,$!d' | sed -e :a -e '/^\n*$/{$d;N;ba}' > release_notes.txt
+          cat release_notes.txt
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: ${{ env.ARCHIVE }}
-          draft: true
+          draft: false
           generate_release_notes: false
-          body_path: CHANGELOG.md
+          body_path: release_notes.txt
