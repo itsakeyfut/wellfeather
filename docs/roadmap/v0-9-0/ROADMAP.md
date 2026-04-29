@@ -1,7 +1,7 @@
-# v1.2.0 — Keyboard Enhancement (Vim Mode + Command Palette)
+# v0.9.0 — Keyboard Enhancement (Vim Mode + Command Palette)
 
 > **Theme**: Complete wellfeather's keyboard-centric differentiation.
-> **Prerequisite**: v1.1.0
+> **Prerequisite**: v0.8.0
 
 ---
 
@@ -16,7 +16,7 @@ Implement Vim keybindings and a command palette to complete the experience of
 
 - [ ] Normal / Insert / Visual modes work in the editor
 - [ ] Vim basic operations work (movement, deletion, yank, paste, search)
-- [ ] Ctrl+K (or Ctrl+Shift+P) opens the command palette
+- [ ] `Ctrl+K` opens the command palette
 - [ ] Connection switching, query execution, and settings changes are accessible from the command palette
 - [ ] Fuzzy search filters the command palette
 
@@ -32,7 +32,7 @@ Implement Vim keybindings and a command palette to complete the experience of
 
 ## Task List
 
-See `docs/roadmap/tasks/v1-2-0.md` for details.
+See `docs/roadmap/tasks/v0-9-0.md` for details.
 
 | Task ID | Title | Issue |
 |---------|-------|-------|

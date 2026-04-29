@@ -1,7 +1,7 @@
-# v2.1.0 — CLI Integration and LSP Completion
+# v0.13.0 — CLI Integration and LSP Completion
 
 > **Theme**: Support hybrid GUI + CLI workflows and deliver top-tier SQL completion.
-> **Prerequisite**: v2.0.0
+> **Prerequisite**: v0.12.0
 
 ---
 
@@ -22,7 +22,7 @@ to support diverse developer workflows.
 
 ## Task List
 
-See `docs/roadmap/tasks/v2-1-0.md` for details.
+See `docs/roadmap/tasks/v0-13-0.md` for details.
 
 | Task ID | Title | Issue |
 |---------|-------|-------|

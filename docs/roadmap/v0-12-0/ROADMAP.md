@@ -1,14 +1,14 @@
-# v2.0.0 — Analysis and Optimization Hints (Phase 3)
+# v0.12.0 — Analysis and Optimization Hints
 
 > **Theme**: Evolve wellfeather from a tool you "just use" to one that helps you improve.
-> **Prerequisite**: v1.4.0
+> **Prerequisite**: v0.11.0
 
 ---
 
 ## Goal
 
 Implement lightweight analysis and performance hints so wellfeather can suggest improvements
-for missing indexes and slow queries.
+for missing indexes and slow queries. Also add OS keychain integration and Linux packaging.
 
 ---
 
@@ -23,7 +23,7 @@ for missing indexes and slow queries.
 
 ## Task List
 
-See `docs/roadmap/tasks/v2-0-0.md` for details.
+See `docs/roadmap/tasks/v0-12-0.md` for details.
 
 | Task ID | Title | Issue |
 |---------|-------|-------|

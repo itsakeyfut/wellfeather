@@ -1,7 +1,7 @@
-# v1.4.0 — EXPLAIN Visualization
+# v0.11.0 — EXPLAIN Visualization
 
 > **Theme**: Understand query performance visually.
-> **Prerequisite**: v1.3.0
+> **Prerequisite**: v0.10.0
 
 ---
 
@@ -24,7 +24,7 @@ identify query bottlenecks at a glance.
 
 ## Task List
 
-See `docs/roadmap/tasks/v1-4-0.md` for details.
+See `docs/roadmap/tasks/v0-11-0.md` for details.
 
 | Task ID | Title | Issue |
 |---------|-------|-------|
