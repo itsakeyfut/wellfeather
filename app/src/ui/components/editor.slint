@@ -103,14 +103,6 @@ export component Editor inherits Rectangle {
     out property <length> popup-x: 0px;
     out property <length> popup-y: 0px;
 
-    /// Height of an overlay panel that covers the bottom of this editor (e.g. the
-    /// result panel when open).  Auto-scroll uses `eff-height = height - overlay-height`
-    /// so the cursor stays in the actually-visible portion.  This prevents the
-    /// current-line highlight from entering the overlay region on every 16 ms tick,
-    /// which would force Slint to repaint all the overlay's cells as a side-effect of
-    /// the dirty-region overlap.
-    in property <length> overlay-height: 0px;
-
     // ── Key-hold state for timer-based UP/DOWN navigation ────────────────────
     property <bool> up-held:   false;
     property <bool> down-held: false;
@@ -157,16 +149,6 @@ export component Editor inherits Rectangle {
     // -1 = no active selection.  Set on first Shift+arrow press; reset when
     // the cursor moves outside of a shift-selection context.
     property <int>  sel-anchor: -1;
-
-    /// True while the repeat timer is armed (after the 250 ms initial-delay
-    /// fires).  app.slint hides the result panel while this is true so that
-    /// navigation renders are cheap (no 150+ result cells to evaluate).
-    /// Activates only on sustained holds — single key taps never set it.
-    out property <bool> is-navigating:
-        (root.up-held   && root.up-repeat-ready)
-        || (root.down-held && root.down-repeat-ready)
-        || (root.up-shift-held   && root.up-shift-repeat-ready)
-        || (root.down-shift-held && root.down-shift-repeat-ready);
 
     // current-line is updated inside cursor-position-changed (see below).
     // It is NOT driven by a poll timer — that would dirty the window at 60 fps
@@ -302,10 +284,6 @@ export component Editor inherits Rectangle {
     // viewport-y so the cursor stays within the visible area.
     // viewport-y is 0 at top and becomes negative as content scrolls up.
     // Visible content spans [-viewport-y, -viewport-y + eff-height].
-    //
-    // eff-height (= height - overlay-height) is used instead of editor-scroll.height
-    // so the cursor is kept in the portion of the editor that is NOT obscured by the
-    // result panel overlay.
     changed current-line => {
         if (root.current-line * root.line-h < -editor-scroll.viewport-y) {
             editor-scroll.viewport-y = -(root.current-line * root.line-h);
@@ -330,14 +308,11 @@ export component Editor inherits Rectangle {
         ? inner-input.preferred-height / root.line-count
         : root.font-size-px * 1px + 5px;
 
-    // Effective visible height — the portion of the editor not obscured by the
-    // overlay panel (result panel when open).  Clamped to at least 80 px so
-    // auto-scroll always has room to operate even when the panel is very tall.
-    property <length> eff-height: max(80px, editor-scroll.height - root.overlay-height);
+    // Effective visible height — clamped to at least 80 px so auto-scroll has
+    // room to operate even when the editor is very short.
+    property <length> eff-height: max(80px, editor-scroll.height);
 
     // Visible line range — used by the external gutter via out properties.
-    // Uses eff-height so the gutter only renders line numbers for lines that are
-    // actually visible above the overlay panel.
     property <int> vis-first: max(0, floor(-editor-scroll.viewport-y / root.line-h) - 1);
     property <int> vis-count: min(
         root.line-count - root.vis-first,
