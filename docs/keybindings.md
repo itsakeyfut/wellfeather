@@ -23,9 +23,15 @@ These shortcuts work from any pane (no modal must be open).
 
 | Key | Action |
 |-----|--------|
-| `Ctrl+Enter` | Run query (fires `run-query` callback) |
+| `Ctrl+Enter` | Execute SQL statement at the cursor |
+| `Ctrl+Shift+Enter` | Execute entire editor content |
+| `Shift+Enter` | Execute selected text only |
+| `Esc` | Cancel running query |
+| `Ctrl+Shift+F` | Format SQL |
+| `Ctrl+Space` | Manually show completion candidates |
 | `Ctrl+J` | Toggle result panel open / closed |
 | `↑` / `↓` | Move cursor up / down one line (timer-based, no key-repeat lag) |
+| `Shift+↑` / `Shift+↓` | Extend selection up / down one line |
 
 ### Standard text-editing shortcuts (via OS / TextInput)
 
@@ -59,9 +65,21 @@ The sidebar must be focused (`Alt+←` or click) for these keys to work.
 
 ---
 
-## Result Table
+## Completion Popup
 
-> **Note:** Row / cell / search mode navigation is planned in Issue #138 and not yet implemented. The section below documents the intended final behaviour.
+The completion popup appears automatically while typing in the SQL editor.
+
+| Key | Action |
+|-----|--------|
+| `↑` / `↓` | Navigate candidates up / down |
+| `Enter` | Accept selected candidate |
+| `Tab` | Cycle to next candidate |
+| `Esc` | Close popup without accepting |
+| `;` / ` ` / `,` / `)` / `(` | Accept and auto-close popup |
+
+---
+
+## Result Table
 
 The result table must be focused (`Alt+↓` or click) for these keys to work.
 
@@ -73,7 +91,7 @@ The result table must be focused (`Alt+↓` or click) for these keys to work.
 | `Page Up` / `Page Down` | Move by one viewport page |
 | `Home` / `End` | First / last row |
 | `Enter` | Enter cell mode (column 0 of current row) |
-| `F` | Enter search mode |
+| `f` | Enter search mode |
 | `Esc` | Deselect / clear active filter |
 | `Ctrl+C` | Copy selected cell value |
 
@@ -88,7 +106,7 @@ Navigates within a single row. `Esc` returns to row mode.
 | `Esc` | Return to row mode |
 | `Ctrl+C` | Copy current cell value |
 
-### Search mode (entered with `F` from row mode)
+### Search mode (entered with `f` from row mode)
 
 A search bar appears at the bottom of the panel. All keystrokes are captured by the search input.
 
