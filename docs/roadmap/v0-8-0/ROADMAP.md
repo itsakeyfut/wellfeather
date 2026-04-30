@@ -1,32 +1,37 @@
-# v0.8.0 — Editor Enhancement (Syntax Highlighting + Multi-tab)
+# v0.8.0 — Quick Wins (DDL Viewer, Safe DML, Find/Replace, and More)
 
-> **Theme**: Make the editor richer with syntax highlighting and multi-tab support.
+> **Theme**: High-value, low-cost improvements that sharpen the everyday SQL experience.
 > **Prerequisite**: v0.7.0
 
 ---
 
 ## Goal
 
-Implement syntax highlighting and multi-tab support so users can write multiple queries
-in parallel, each with its own result state.
+Deliver eight standalone improvements that each solve a real pain point with minimal
+cross-feature coupling. This milestone establishes patterns (DDL viewer, bottom-pane reuse,
+sidebar sections) that later milestones will extend.
 
 ---
 
 ## Exit Criteria
 
-- [ ] SQL keywords, string literals, and comments are color-coded in the editor
-- [ ] Multiple editor tabs can be opened, each managing an independent query and result
-- [ ] Tabs share the active connection (one connection per app)
-- [ ] Tabs can be added (`Ctrl+T`), closed (`Ctrl+W`), and navigated (`Ctrl+Tab`)
-- [ ] Tab state (query content + file path) is restored on restart
-- [ ] Result panel supports multiple result tabs for multi-statement queries
+- [ ] Sidebar object single-click shows the DDL CREATE statement in the bottom pane
+- [ ] Safe DML mode warns before executing `UPDATE`/`DELETE` without a `WHERE` clause
+- [ ] Read-only mode blocks writes and shows a lock icon on the connection
+- [ ] `Ctrl+F` opens an inline find bar; `Ctrl+H` opens find + replace
+- [ ] Bookmarks are saved to `bookmarks.toml` and accessible from a sidebar section
+- [ ] Connection color dots appear in the sidebar and the status bar active-connection display
+- [ ] Result table supports INSERT SQL export via File → Export → Insert SQL
+- [ ] `Ctrl+P` opens a floating metadata global search palette
 
 ---
 
 ## Key Risks
 
-- **Syntax highlighting in Slint**: Slint's `TextInput` does not natively support per-token styling. A custom rendering approach may be required. Complete the investigation spike (#84) before starting implementation
-- Multi-tab requires a state management redesign: `TabEntry` per tab, `active-tab-index`, independent query text and result per tab
+- **DDL viewer** — PostgreSQL has no single `pg_get_tabledef` function; DDL must be
+  reconstructed by combining `information_schema` and `pg_catalog` queries
+- **Find/replace in Slint** — `TextInput` selection-and-replace requires
+  `set-selection-offsets`; verify API availability before implementation
 
 ---
 
@@ -34,17 +39,13 @@ in parallel, each with its own result state.
 
 See `docs/roadmap/tasks/v0-8-0.md` for details.
 
-| Task ID | Title | Issue |
-|---------|-------|-------|
-| — | Slint syntax highlighting: technical investigation spike | #84 |
-| T111 | SQL syntax highlighting in editor | #59 |
-| T112 | Multi-tab editor UI | #60 |
-| T113 | Per-tab state management (TabState in AppState) | #61 |
-| — | Tab system foundation (TabEntry struct, UiState binding) | #120 |
-| — | Tab data model: TabEntry + UiState.tabs / active-tab-index | #125 |
-| — | Tab bar UI: scrollable bar with active highlight, dirty *, close × | #126 |
-| — | Tab content binding: sync editor text to active tab | #127 |
-| — | Tab keyboard shortcuts: Ctrl+T / Ctrl+W / Ctrl+Tab | #128 |
-| — | Session restore: persist tab query content + file paths | #129 |
-| — | Tab drag-and-drop reordering | #136 |
-| — | Result panel tabs for multi-statement query results | #186 |
+| Task ID | Title |
+|---------|-------|
+| T081 | DDL viewer: bottom-pane DDL display on sidebar click |
+| T082 | Safe DML mode: WHERE-less UPDATE/DELETE detection and confirmation dialog |
+| T083 | Read-only connection mode: write guard and UI indicator |
+| T084 | Editor find / find-replace floating bar (Ctrl+F / Ctrl+H) |
+| T085 | Query bookmarks: bookmarks.toml persistence and sidebar section |
+| T086 | Connection color coding: color dot in sidebar and status bar |
+| T087 | INSERT SQL export from result table |
+| T088 | Metadata global search palette (Ctrl+P) |

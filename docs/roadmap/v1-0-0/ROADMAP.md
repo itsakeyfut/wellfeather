@@ -1,59 +1,47 @@
-# v1.0.0 — Release Preparation (Stability, Performance, and Packaging)
+# v1.0.0 — Cloud Data Warehouses and AI SQL Generation
 
-> **Theme**: Verify quality and ship the first public release.
-> **Prerequisite**: v0.15.0 (all v0.x.0 milestones complete)
+> **Theme**: Connect to cloud-scale analytics databases and generate SQL with natural language.
+> **Prerequisite**: v0.12.0
 
 ---
 
 ## Goal
 
-Stabilize all features implemented through v0.15.0 and measure the core value proposition —
-startup < 1 second, low memory usage. Produce release packages for Windows, macOS, and Linux
-and ensure CI is in place before the first public release.
-
-> **Note**: The exact feature scope that constitutes "v1.0.0" is intentionally not fixed.
-> All v0.x.0 milestones must be complete before this milestone begins.
-> This milestone contains only release-preparation tasks (performance, packaging, docs, CI).
+Add BigQuery, Snowflake, and Amazon Redshift drivers so wellfeather covers the full
+spectrum of modern databases. Add an AI-assisted SQL generation side panel to lower the
+barrier for complex queries and help new users onboard faster.
 
 ---
 
 ## Exit Criteria
 
-- [ ] **Startup time < 1 second** (release build, measured on Windows and macOS)
-- [ ] Memory usage measured and recorded (compare against DBeaver / TablePlus)
-- [ ] Build passes and basic functionality verified on Windows, macOS, and Linux
-- [ ] All `cargo test` tests pass (unit + integration)
-- [ ] CI pipeline is in place (fmt-check, clippy, test) running on all 3 platforms
-- [ ] README.md contains setup instructions and basic usage
-- [ ] Platform abstraction layer in place (`app/src/platform/`, path DI, DPI awareness)
-- [ ] Windows MSIX and macOS DMG packages can be built via `cargo x package`
-- [ ] Linux packages built via `cargo x package --platform linux` (AppImage / .deb)
+- [ ] BigQuery connection via Service Account JSON; project/dataset/table browsing works
+- [ ] BigQuery query results page correctly using `pageToken`; dry-run byte estimate shown optionally
+- [ ] Snowflake connection via account/warehouse/database/schema parameters
+- [ ] Redshift connection via PostgreSQL-compatible driver with Redshift catalog support
+- [ ] AI side panel opens and closes via toolbar toggle; open/closed state persists across restarts
+- [ ] Natural language prompt → SQL inserted into the active editor tab (streaming display)
+- [ ] Full schema context (all MetadataCache tables/columns) sent automatically; truncated with user notice if too large
+- [ ] API key stored in `config.toml` under `[ai]` with AES-256-GCM encryption
+- [ ] Panel shows clear guidance when API key is not configured
+
+---
+
+## Key Risks
+
+- **BigQuery REST client** — `gcp-bigquery-client` crate maturity; evaluate and fall back to direct reqwest-based REST implementation if needed
+- **Snowflake Rust connector** — no official crate; JWT-based auth via REST API is feasible but requires custom implementation; budget extra time
+- **AI token context window** — large schemas (>200 tables) may exceed token limits; implement top-N table truncation with clear notification
+- **Streaming in Slint UI** — token-by-token preview updates must go through `slint::invoke_from_event_loop`; avoid holding locks across await points
 
 ---
 
 ## Performance Targets
 
-| Metric | Target | How to Measure |
-|--------|--------|---------------|
-| Startup time (cold) | < 1 second | `time ./wellfeather` |
-| Startup time (warm) | < 0.5 seconds | same (after config loaded) |
-| Idle memory | < 50 MB | OS process monitor |
-| Memory with 100k rows | < 200 MB | same |
-
----
-
-## Scope
-
-| Category | Content |
-|----------|---------|
-| Performance measurement | Startup time and memory profiling, optimization if needed |
-| Cross-platform | Build verification and path / shortcut testing on all 3 platforms |
-| Test coverage | Unit and integration test additions, CI pipeline setup |
-| Documentation | README.md, installation steps, basic usage, keyboard shortcuts |
-| Release build | `[profile.release]` optimization settings (LTO, strip, panic=abort) |
-| Platform abstraction | `app/src/platform/` — data/config/cache dirs, DPI awareness, dark mode detection |
-| Distribution packaging | Windows MSIX + macOS DMG + Linux AppImage via `cargo x package` |
-| Bug fixes | Fix issues discovered during v0.x.0 development |
+| Metric | Target |
+|--------|--------|
+| BigQuery query round-trip (first page) | < 5 seconds |
+| AI SQL generation (first token visible) | < 3 seconds |
 
 ---
 
@@ -61,14 +49,9 @@ and ensure CI is in place before the first public release.
 
 See `docs/roadmap/tasks/v1-0-0.md` for details.
 
-| Task ID | Title | Issue |
-|---------|-------|-------|
-| T101 | Startup time measurement and optimization (< 1 second) | #52 |
-| T102 | Memory usage measurement (idle < 50 MB, 100k rows < 200 MB) | #53 |
-| T103 | Cross-platform build verification (Windows + macOS + Linux) | #54 |
-| T104 | Test coverage audit + GitHub Actions CI pipeline | #55 |
-| T105 | README.md and user documentation | #56 |
-| T106 | Release build profile optimization (LTO, strip, panic=abort) | #57 |
-| T107 | v0.x bug fixes and clippy clean-up | #58 |
-| — | Platform abstraction layer (data/config/cache dirs, DPI awareness, dark mode) | #80 |
-| — | Distribution packaging: Windows MSIX + macOS DMG (MVP release) | #81 |
+| Task ID | Title |
+|---------|-------|
+| T200 | BigQuery driver: SA JSON auth, project/dataset browsing, pagination, dry-run |
+| T201 | Snowflake driver: JWT/password auth, account params, schema browsing |
+| T202 | Redshift driver: PG-compatible with Redshift catalog queries |
+| T203 | AI SQL side panel: prompt UI, streaming preview, schema context, API key storage |
