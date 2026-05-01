@@ -88,6 +88,26 @@ impl SessionManager {
         Ok(())
     }
 
+    /// Remove the connection with `id` from `config.connections`.
+    ///
+    /// If `last_connection_id` matches the removed connection it is cleared.
+    /// No-op if no connection with that id is found.
+    pub fn remove_connection(&self, id: &str) -> anyhow::Result<()> {
+        let mut config = self
+            .config_manager
+            .load()
+            .context("failed to load config for connection removal")?;
+        config.connections.retain(|c| c.id != id);
+        if config.session.last_connection_id.as_deref() == Some(id) {
+            config.session.last_connection_id = None;
+        }
+        self.config_manager
+            .save(&config)
+            .context("failed to save config after connection removal")?;
+        info!(conn_id = %id, "connection removed from config");
+        Ok(())
+    }
+
     /// Persist `size` (100 / 500 / 1000) as `[editor].page_size` in `config.toml`.
     ///
     /// Silently ignores unknown values (not in the `PageSize` enum); they are

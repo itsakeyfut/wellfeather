@@ -204,6 +204,8 @@ export global UiState {
     callback table-double-clicked(string);
     /// "Add" button: persists the connection if test passed, else shows confirm popup.
     callback add-connection();
+    /// Delete the connection currently being edited (is-edit mode only).
+    callback delete-connection();
     /// "Yes" in the add-without-test confirm popup.
     callback confirm-add-connection();
     /// Closes the test-result popup.
@@ -237,7 +239,7 @@ export global UiState {
 
 export component AppWindow inherits Window {
     title: "wellfeather";
-    default-font-family: "Inter, Noto Sans JP, Segoe UI, SF Pro, system-ui";
+    default-font-family: "Segoe UI, SF Pro, system-ui, Noto Sans JP";
     // preferred-width/height set the initial window size; the window is resizable.
     // All children are positioned with arithmetic derived from root.width/root.height,
     // so they track resize automatically.  min-width/min-height prevent the window
@@ -613,12 +615,14 @@ export component AppWindow inherits Window {
                             }
                         ]
 
-                        Text {
-                            text: "×";
-                            color: Colors.surface2;
-                            font-size: Typography.size-2xl;
-                            horizontal-alignment: center;
-                            vertical-alignment:   center;
+                        Image {
+                            x: (parent.width - self.width) / 2;
+                            y: (parent.height - self.height) / 2;
+                            width: 14px;
+                            height: 14px;
+                            source: @image-url("../../assets/icons/close.svg");
+                            colorize: Colors.surface2;
+                            image-fit: contain;
                         }
 
                         close-ta := TouchArea {
@@ -846,6 +850,7 @@ export component AppWindow inherits Window {
                 cancel => { UiState.close-connection-form(); }
                 test-connection => { UiState.test-connection(); }
                 add-connection => { UiState.add-connection(); }
+                delete-connection => { UiState.delete-connection(); }
                 test-ok: UiState.form-test-ok;
             }
         }

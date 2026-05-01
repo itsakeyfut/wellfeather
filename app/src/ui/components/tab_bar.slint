@@ -23,7 +23,7 @@ export component TabBar inherits Rectangle {
                 spacing: 0;
 
                 for tab[i] in root.tabs : Rectangle {
-                    width: min(max(tab-text.preferred-width + 40px, 80px), 180px);
+                    width: min(max(tab-text.preferred-width + 64px, 80px), 240px);
                     height: 32px;
                     background: i == root.active-index ? Colors.base : transparent;
 
@@ -40,9 +40,21 @@ export component TabBar inherits Rectangle {
                         padding-right: 4px;
                         spacing: 6px;
 
+                        if tab.kind == "sql-editor" : Image {
+                            width: 14px;
+                            source: @image-url("../../../assets/icons/sql-database.svg");
+                            image-fit: contain;
+                        }
+                        if tab.kind == "table-view" : Image {
+                            width: 14px;
+                            source: @image-url("../../../assets/icons/table-list.svg");
+                            colorize: i == root.active-index ? Colors.text : Colors.subtext1;
+                            image-fit: contain;
+                        }
+
                         tab-text := Text {
                             text: tab.title;
-                            width: min(self.preferred-width, 140px);
+                            width: min(self.preferred-width, 176px);
                             color: i == root.active-index ? Colors.text : Colors.subtext1;
                             font-size: Typography.size-lg;
                             vertical-alignment: center;
@@ -55,12 +67,14 @@ export component TabBar inherits Rectangle {
                             border-radius: 4px;
                             background: close-ta.has-hover ? Colors.surface1 : transparent;
 
-                            Text {
-                                text: "×";
-                                color: close-ta.has-hover ? Colors.text : Colors.subtext1;
-                                font-size: Typography.size-2xl;
-                                horizontal-alignment: center;
-                                vertical-alignment: center;
+                            Image {
+                                x: (parent.width - self.width) / 2;
+                                y: (parent.height - self.height) / 2;
+                                width: 14px;
+                                height: 14px;
+                                source: @image-url("../../../assets/icons/close.svg");
+                                colorize: close-ta.has-hover ? Colors.text : Colors.subtext1;
+                                image-fit: contain;
                             }
 
                             close-ta := TouchArea {
@@ -85,12 +99,14 @@ export component TabBar inherits Rectangle {
             height: 32px;
             background: new-ta.has-hover ? Colors.surface1 : transparent;
 
-            Text {
-                text: "+";
-                color: Colors.subtext1;
-                font-size: Typography.size-xl;
-                horizontal-alignment: center;
-                vertical-alignment: center;
+            Image {
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2;
+                width: 16px;
+                height: 16px;
+                source: @image-url("../../../assets/icons/plus.svg");
+                colorize: new-ta.has-hover ? Colors.text : Colors.subtext1;
+                image-fit: contain;
             }
 
             new-ta := TouchArea {

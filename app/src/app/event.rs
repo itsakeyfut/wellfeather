@@ -17,6 +17,7 @@ pub enum StateEvent {
 pub enum Event {
     Connected(String), // connection_id
     Disconnected(String),
+    ConnectionRemoved(String), // connection_id — deleted from config
     /// Fired when `Command::Connect` fails. Distinct from `QueryError` so the UI
     /// can display the message in the status bar / form without touching the result area.
     ConnectError(String),

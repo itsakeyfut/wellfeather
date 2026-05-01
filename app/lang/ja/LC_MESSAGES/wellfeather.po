@@ -113,8 +113,8 @@ msgid "Loading…"
 msgstr "読み込み中…"
 
 msgctxt "Sidebar"
-msgid "+ Add connection"
-msgstr "+ 接続を追加"
+msgid "Add connection"
+msgstr "接続を追加"
 
 msgctxt "ResultTableBody"
 msgid "Copy cell value"
@@ -155,6 +155,10 @@ msgstr "接続を編集"
 msgctxt "ConnectionForm"
 msgid "Save"
 msgstr "保存"
+
+msgctxt "ConnectionForm"
+msgid "Delete"
+msgstr "削除"
 
 msgctxt "ConnectionForm"
 msgid "Name"
@@ -289,8 +293,8 @@ msgid "Disconnect"
 msgstr "切断"
 
 msgctxt "DbManagerDialog"
-msgid "+ Add connection"
-msgstr "+ 接続を追加"
+msgid "Add connection"
+msgstr "接続を追加"
 
 msgctxt "TableView"
 msgid "Data"
@@ -305,8 +309,8 @@ msgid "DDL"
 msgstr "DDL"
 
 msgctxt "TableView"
-msgid "Copy DDL"
-msgstr "DDLをコピー"
+msgid "Copy"
+msgstr "コピー"
 
 msgctxt "TableView"
 msgid "Column"

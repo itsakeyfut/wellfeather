@@ -36,7 +36,8 @@ export component ResultTableToolbar inherits Rectangle {
         x: parent.width - 266px;
         y: (parent.height - self.height) / 2;
         width: 80px;
-        text: @tr("Export") + " \u{25BE}";
+        text: @tr("Export");
+        leading-icon: @image-url("../../../assets/icons/export.svg");
         clicked => { export-popup.show(); }
     }
 

@@ -270,11 +270,13 @@ export component MenuBar inherits Rectangle {
                         MenuItem { text: @tr("Font Settings (coming soon)"); }
                         Rectangle { height: 1px; background: Colors.surface1; }
                         MenuItem {
-                            text: (root.language == "en" ? "▶ " : "  ") + @tr("English");
+                            text: @tr("English");
+                            selected: root.language == "en";
                             clicked => { root.set-language("en"); }
                         }
                         MenuItem {
-                            text: (root.language == "ja" ? "▶ " : "  ") + @tr("Japanese");
+                            text: @tr("Japanese");
+                            selected: root.language == "ja";
                             clicked => { root.set-language("ja"); }
                         }
                     }

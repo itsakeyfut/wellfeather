@@ -12,6 +12,8 @@ import { Colors, Typography } from "../theme.slint";
 export component ToolbarButton inherits Rectangle {
     in property <string> text;
     in property <bool>   active: false;
+    in property <image>  leading-icon;
+    in property <image>  icon;
     callback clicked;
 
     height: 20px;
@@ -22,12 +24,27 @@ export component ToolbarButton inherits Rectangle {
     ta := TouchArea {
         clicked => { root.clicked(); }
     }
-    Text {
-        text: root.text;
-        color: root.active ? Colors.base : Colors.overlay2;
-        font-size: Typography.size-md;
-        horizontal-alignment: center;
-        vertical-alignment: center;
+    HorizontalLayout {
+        alignment: center;
+        spacing: 3px;
+        if root.leading-icon.width > 0 : Image {
+            width: 12px;
+            source: root.leading-icon;
+            colorize: root.active ? Colors.base : Colors.overlay2;
+            image-fit: contain;
+        }
+        Text {
+            text: root.text;
+            color: root.active ? Colors.base : Colors.overlay2;
+            font-size: Typography.size-md;
+            vertical-alignment: center;
+        }
+        if root.icon.width > 0 : Image {
+            width: 10px;
+            source: root.icon;
+            colorize: root.active ? Colors.base : Colors.overlay2;
+            image-fit: contain;
+        }
     }
 }
 
@@ -44,17 +61,27 @@ export component ActionButton inherits Rectangle {
     in property <bool>   enabled: true;
     in property <color>  bg: Colors.surface1;
     in property <color>  fg: Colors.text;
+    in property <image>  leading-icon;
     callback clicked;
 
     height: 32px;
     border-radius: 4px;
     background: root.bg;
 
-    Text {
-        text: root.text;
-        color: root.fg;
-        horizontal-alignment: center;
-        vertical-alignment: center;
+    HorizontalLayout {
+        alignment: center;
+        spacing: 5px;
+        if root.leading-icon.width > 0 : Image {
+            width: 14px;
+            source: root.leading-icon;
+            colorize: root.fg;
+            image-fit: contain;
+        }
+        Text {
+            text: root.text;
+            color: root.fg;
+            vertical-alignment: center;
+        }
     }
     TouchArea {
         enabled: root.enabled;
@@ -97,6 +124,7 @@ export component ModalOverlay inherits Rectangle {
 
 export component MenuItem inherits Rectangle {
     in property <string> text;
+    in property <bool>   selected: false;
     callback clicked;
 
     height: 30px;
@@ -105,11 +133,24 @@ export component MenuItem inherits Rectangle {
     ta := TouchArea {
         clicked => { root.clicked(); }
     }
-    Text {
-        x: 12px;
-        y: (parent.height - self.height) / 2;
-        text: root.text;
-        color: Colors.text;
-        font-size: Typography.size-base;
+    HorizontalLayout {
+        x: 0; y: 0;
+        width: parent.width; height: parent.height;
+        padding-left: 12px;
+        spacing: 6px;
+        alignment: start;
+        Image {
+            width: 10px;
+            source: @image-url("../../../assets/icons/chevron-right.svg");
+            colorize: Colors.text;
+            image-fit: contain;
+            opacity: root.selected ? 1.0 : 0.0;
+        }
+        Text {
+            text: root.text;
+            color: Colors.text;
+            font-size: Typography.size-base;
+            vertical-alignment: center;
+        }
     }
 }

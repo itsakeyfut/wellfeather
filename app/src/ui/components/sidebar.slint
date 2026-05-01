@@ -154,25 +154,28 @@ export component Sidebar inherits Rectangle {
                         height: parent.height;
                         padding-left: (8 + node.level * 14) * 1px;
                         padding-right: 8px;
-                        spacing: 4px;
+                        spacing: 8px;
 
                         // Expand/collapse toggle icon for connection and category nodes
-                        if node.level < 2 : Text {
-                            text: node.is-expanded ? "▼" : "▶";
-                            color: Colors.surface2;
-                            font-size: Typography.size-xs;
-                            vertical-alignment: center;
+                        if node.level < 2 : Image {
                             width: 14px;
+                            source: node.is-expanded
+                                ? @image-url("../../../assets/icons/chevron-down.svg")
+                                : @image-url("../../../assets/icons/chevron-right.svg");
+                            colorize: Colors.surface2;
+                            image-fit: contain;
                         }
                         // Spacer for item nodes
                         if node.level >= 2 : Rectangle { width: 14px; }
 
-                        // Connection status dot (● active / ○ inactive)
-                        if node.level == 0 : Text {
-                            text: node.is-active ? "●" : "○";
-                            color: node.is-active ? Colors.blue : Colors.surface2;
-                            font-size: Typography.size-sm;
-                            vertical-alignment: center;
+                        // Connection status dot (filled = active / empty = inactive)
+                        if node.level == 0 : Image {
+                            width: 16px;
+                            source: node.is-active
+                                ? @image-url("../../../assets/icons/dot-filled.svg")
+                                : @image-url("../../../assets/icons/dot-empty.svg");
+                            colorize: node.is-active ? Colors.blue : Colors.surface2;
+                            image-fit: contain;
                         }
 
                         // Main label
@@ -225,8 +228,15 @@ export component Sidebar inherits Rectangle {
 
                     HorizontalLayout {
                         padding-left: 12px;
+                        spacing: 6px;
+                        Image {
+                            width: 14px;
+                            source: @image-url("../../../assets/icons/plus.svg");
+                            colorize: Colors.blue;
+                            image-fit: contain;
+                        }
                         Text {
-                            text: @tr("+ Add connection");
+                            text: @tr("Add connection");
                             color: Colors.blue;
                             vertical-alignment: center;
                         }

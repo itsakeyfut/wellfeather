@@ -47,12 +47,16 @@ export component ResultTableHeader inherits Flickable {
                 overflow: elide;
             }
 
-            if root.sort-col == i: Text {
+            if root.sort-col == i: Image {
                 x: parent.width - 20px;
                 y: (parent.height - self.height) / 2;
-                text: root.sort-asc ? "▲" : "▼";
-                color: Colors.blue;
-                font-size: Typography.size-sm;
+                width: 12px;
+                height: 12px;
+                source: root.sort-asc
+                    ? @image-url("../../../assets/icons/sort-asc.svg")
+                    : @image-url("../../../assets/icons/sort-desc.svg");
+                colorize: Colors.blue;
+                image-fit: contain;
             }
 
             Rectangle {
