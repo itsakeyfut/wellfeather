@@ -50,8 +50,7 @@ export global Typography {
     out property <length> size-lg:  13px;
     out property <length> size-xl:  15px;
     out property <length> size-2xl: 16px;
-    // Font family tokens — update values here when #228 adds per-platform switching.
-    out property <string> font-ui:   "Segoe UI";       // system UI font
+    out property <string> font-ui: "Segoe UI"; // system UI font (Windows default; override via UiState.ui-font at runtime)
     out property <string> font-mono: "JetBrains Mono"; // monospace / code font
 }
 

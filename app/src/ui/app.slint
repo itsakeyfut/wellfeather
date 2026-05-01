@@ -1,8 +1,5 @@
-// Embed Inter, Noto Sans JP, and JetBrains Mono for consistent rendering across platforms.
-import "../../assets/fonts/Inter-Regular.ttf";
-import "../../assets/fonts/Inter-Medium.ttf";
-import "../../assets/fonts/Inter-SemiBold.ttf";
-import "../../assets/fonts/Inter-Bold.ttf";
+// Embed Noto Sans JP (CJK fallback on macOS/Linux) and JetBrains Mono (editor/result font).
+// UI chrome uses platform system fonts (Segoe UI / Helvetica Neue) to avoid fontique artefacts.
 import "../../assets/fonts/NotoSansJP-Regular.ttf";
 import "../../assets/fonts/NotoSansJP-Medium.ttf";
 import "../../assets/fonts/NotoSansJP-SemiBold.ttf";
@@ -39,6 +36,7 @@ export global UiState {
     // ── Appearance ────────────────────────────────────────────────────────────
     in-out property <string> font-family: "JetBrains Mono";
     in-out property <int>    font-size:   14;  // logical pixels
+    in-out property <string> ui-font:     "Segoe UI"; // platform system UI font, set at startup
 
     // ── Editor state ──────────────────────────────────────────────────────────
     in-out property <string> editor-text: "";
@@ -239,7 +237,7 @@ export global UiState {
 
 export component AppWindow inherits Window {
     title: "wellfeather";
-    default-font-family: "Segoe UI, SF Pro, system-ui, Noto Sans JP";
+    default-font-family: "Segoe UI, Helvetica Neue, sans-serif";
     // preferred-width/height set the initial window size; the window is resizable.
     // All children are positioned with arithmetic derived from root.width/root.height,
     // so they track resize automatically.  min-width/min-height prevent the window
@@ -834,6 +832,7 @@ export component AppWindow inherits Window {
                 x: (parent.width  - self.width)  / 2;
                 y: (parent.height - self.height) / 2;
 
+                ui-font:    UiState.ui-font;
                 tab-index   <=> UiState.form-tab-index;
                 db-type     <=> UiState.form-db-type;
                 name        <=> UiState.form-name;
