@@ -46,6 +46,17 @@ pub fn extract_all_statements(sql: &str) -> Vec<&str> {
         .collect()
 }
 
+/// Returns `true` if `sql` contains an UPDATE or DELETE statement with no WHERE clause.
+///
+/// Checks all semicolon-separated statements. Intended to guard against accidental
+/// full-table modifications when `safe_dml` is enabled on a connection.
+pub fn has_dangerous_dml(sql: &str) -> bool {
+    extract_all_statements(sql).iter().any(|stmt| {
+        let upper = stmt.to_uppercase();
+        (upper.starts_with("UPDATE ") || upper.starts_with("DELETE ")) && !upper.contains(" WHERE ")
+    })
+}
+
 /// Returns the substring of `sql` for the byte range `start..end`.
 ///
 /// The range is clamped to valid string boundaries.  If `start > end`
@@ -139,6 +150,60 @@ mod tests {
         let sql = "SELECT 1;\nSELECT 2;\n";
         assert_eq!(extract_statement_at(sql, 19), "SELECT 2");
         assert_eq!(extract_statement_at(sql, 20), "SELECT 2");
+    }
+
+    // ── has_dangerous_dml ────────────────────────────────────────────────────
+
+    #[test]
+    fn has_dangerous_dml_should_return_true_for_update_without_where() {
+        assert!(has_dangerous_dml("UPDATE users SET name = 'x'"));
+    }
+
+    #[test]
+    fn has_dangerous_dml_should_return_true_for_delete_without_where() {
+        assert!(has_dangerous_dml("DELETE FROM orders"));
+    }
+
+    #[test]
+    fn has_dangerous_dml_should_return_false_when_where_is_present() {
+        assert!(!has_dangerous_dml(
+            "UPDATE users SET name = 'x' WHERE id = 1"
+        ));
+        assert!(!has_dangerous_dml("DELETE FROM orders WHERE id = 42"));
+    }
+
+    #[test]
+    fn has_dangerous_dml_should_be_case_insensitive() {
+        assert!(has_dangerous_dml("update users set name = 'x'"));
+        assert!(has_dangerous_dml("delete from orders"));
+        assert!(!has_dangerous_dml(
+            "update users set name = 'x' where id = 1"
+        ));
+    }
+
+    #[test]
+    fn has_dangerous_dml_should_return_false_for_select() {
+        assert!(!has_dangerous_dml("SELECT * FROM users"));
+    }
+
+    #[test]
+    fn has_dangerous_dml_should_return_false_for_truncate() {
+        assert!(!has_dangerous_dml("TRUNCATE users"));
+    }
+
+    #[test]
+    fn has_dangerous_dml_should_detect_dangerous_stmt_in_multi_statement_sql() {
+        let sql = "SELECT 1; UPDATE users SET name = 'x'; SELECT 2";
+        assert!(has_dangerous_dml(sql));
+        let safe = "SELECT 1; UPDATE users SET name = 'x' WHERE id = 1; SELECT 2";
+        assert!(!has_dangerous_dml(safe));
+    }
+
+    #[test]
+    fn has_dangerous_dml_should_return_false_for_delete_from_without_where_when_keyword_is_embedded()
+     {
+        // "NOWHERE" or similar embedded strings must not be treated as WHERE
+        assert!(has_dangerous_dml("DELETE FROM nowhere_table"));
     }
 
     // ── extract_selection ───────────────────────────────────────────────────

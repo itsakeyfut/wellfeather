@@ -15,7 +15,7 @@ use tokio::sync::mpsc;
 use wf_completion::CompletionItem;
 use wf_config::crypto;
 use wf_db::models::{DbConnection, DbMetadata, DbType, QueryResult, TableInfo};
-use wf_query::analyzer::extract_statement_at;
+use wf_query::analyzer::{extract_statement_at, has_dangerous_dml};
 
 const COMPLETION_DEBOUNCE_MS: u64 = 300;
 const ERROR_TRUNCATION_CHARS: usize = 80;
@@ -45,6 +45,25 @@ fn set_status(weak: slint::Weak<crate::AppWindow>, msg: String) {
     let _ = slint::invoke_from_event_loop(move || {
         with_ui(&weak, |ui| ui.set_status_message(msg.into()));
     });
+}
+
+/// Returns true if a safe-DML warning was shown (caller should return early).
+/// Reads conn-safe-dml from UiState; if enabled and SQL is dangerous, shows dialog.
+fn check_safe_dml(weak: &slint::Weak<crate::AppWindow>, sql: &str, kind: &str) -> bool {
+    let Some(w) = weak.upgrade() else {
+        return false;
+    };
+    let ui = w.global::<crate::UiState>();
+    if !ui.get_conn_safe_dml() {
+        return false;
+    }
+    if !has_dangerous_dml(sql) {
+        return false;
+    }
+    ui.set_safe_dml_pending_sql(sql.into());
+    ui.set_safe_dml_pending_kind(kind.into());
+    ui.set_show_safe_dml_confirm(true);
+    true
 }
 
 // ---------------------------------------------------------------------------
@@ -507,12 +526,23 @@ impl UI {
             let connections = state.conn.all();
             build_sidebar_tree(&connections, &id, &sb.metadata, &sb.expanded)
         };
+        let safe_dml = wf_config::manager::ConfigManager::new()
+            .load()
+            .ok()
+            .and_then(|cfg| {
+                cfg.connections
+                    .iter()
+                    .find(|c| c.id == id)
+                    .map(|c| c.safe_dml)
+            })
+            .unwrap_or(true);
         // clone required: invoke_from_event_loop closure must be 'static
         let _ = slint::invoke_from_event_loop(move || {
             with_ui(&ww, move |ui| {
                 let model = Rc::new(slint::VecModel::from(entries));
                 ui.set_connection_list(model.into());
                 ui.set_active_connection_id(id.into());
+                ui.set_conn_safe_dml(safe_dml);
                 ui.set_show_connection_form(false);
                 // Reopen the DB manager if the form was launched from within it.
                 if ui.get_reopen_db_manager_on_form_close() {
@@ -1228,7 +1258,11 @@ impl UI {
         // run-all: execute the entire editor content
         {
             let tx_cmd = tx_cmd.clone(); // clone required: callback closure needs owned tx_cmd
+            let window_weak = window.as_weak(); // clone required: check_safe_dml needs window ref
             ui.on_run_all(move |sql| {
+                if check_safe_dml(&window_weak, &sql, "all") {
+                    return;
+                }
                 send_cmd(&tx_cmd, Command::RunAll(sql.to_string()));
             });
         }
@@ -1734,15 +1768,23 @@ impl UI {
 
         {
             let tx_cmd = tx_cmd.clone(); // clone required: callback closure needs owned tx_cmd
+            let window_weak = window.as_weak(); // clone required: check_safe_dml needs window ref
             ui.on_run_query(move |sql| {
+                if check_safe_dml(&window_weak, &sql, "query") {
+                    return;
+                }
                 send_cmd(&tx_cmd, Command::RunQuery(sql.to_string()));
             });
         }
         {
             let tx_cmd = tx_cmd.clone(); // clone required: callback closure needs owned tx_cmd
+            let window_weak = window.as_weak(); // clone required: check_safe_dml needs window ref
             ui.on_run_query_at_cursor(move |sql, cursor| {
                 let stmt = extract_statement_at(sql.as_str(), cursor as usize);
                 if !stmt.is_empty() {
+                    if check_safe_dml(&window_weak, stmt, "cursor") {
+                        return;
+                    }
                     send_cmd(&tx_cmd, Command::RunQuery(stmt.to_owned()));
                 }
             });
@@ -2221,6 +2263,38 @@ impl UI {
             let window_weak = window_weak.clone();
             ui_state.on_dismiss_all_rows_confirm(move || {
                 with_ui(&window_weak, |ui| ui.set_show_all_rows_confirm(false));
+            });
+        }
+
+        // confirm-safe-dml: user confirmed execution of dangerous DML.
+        {
+            // clone required: callback closure must be 'static
+            let window_weak = window_weak.clone();
+            let tx_cmd = tx_cmd.clone();
+            ui_state.on_confirm_safe_dml(move || {
+                with_ui(&window_weak, |ui| {
+                    let sql = ui.get_safe_dml_pending_sql().to_string();
+                    let kind = ui.get_safe_dml_pending_kind().to_string();
+                    ui.set_show_safe_dml_confirm(false);
+                    ui.set_safe_dml_pending_sql("".into());
+                    let cmd = match kind.as_str() {
+                        "all" => Command::RunAll(sql),
+                        _ => Command::RunQuery(sql),
+                    };
+                    send_cmd(&tx_cmd, cmd);
+                });
+            });
+        }
+
+        // dismiss-safe-dml-confirm: user cancelled the dangerous DML popup.
+        {
+            // clone required: callback closure must be 'static
+            let window_weak = window_weak.clone();
+            ui_state.on_dismiss_safe_dml_confirm(move || {
+                with_ui(&window_weak, |ui| {
+                    ui.set_show_safe_dml_confirm(false);
+                    ui.set_safe_dml_pending_sql("".into());
+                });
             });
         }
 
