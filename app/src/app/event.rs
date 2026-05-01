@@ -35,4 +35,20 @@ pub enum Event {
     InsertText(String),
     ConfigUpdated,
     StateChanged(StateEvent),
+    DdlLoaded {
+        tab_id: String,
+        ddl: String,
+    },
+    DdlFetchFailed {
+        tab_id: String,
+        msg: String,
+    },
+    TableDataLoaded {
+        tab_id: String,
+        result: QueryResult,
+    },
+    TableDataFailed {
+        tab_id: String,
+        msg: String,
+    },
 }

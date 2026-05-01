@@ -123,6 +123,27 @@ pub async fn fetch_metadata(pool: &SqlitePool) -> Result<DbMetadata, DbError> {
     })
 }
 
+/// Fetch the DDL `CREATE` statement for `name` from `sqlite_master`.
+///
+/// `kind` should be `"table"`, `"view"`, or `"index"`.
+/// Returns `DbError::QueryError` if no matching object is found.
+pub async fn fetch_ddl(pool: &SqlitePool, name: &str, kind: &str) -> Result<String, DbError> {
+    use sqlx::Row as _;
+    let type_filter = match kind {
+        "view" => "view",
+        "index" => "index",
+        _ => "table",
+    };
+    let row = sqlx::query("SELECT sql FROM sqlite_master WHERE type = ? AND name = ? LIMIT 1")
+        .bind(type_filter)
+        .bind(name)
+        .fetch_optional(pool)
+        .await
+        .map_err(DbError::from)?;
+    row.map(|r| r.get::<String, _>(0))
+        .ok_or_else(|| DbError::QueryError(format!("'{name}' not found in sqlite_master")))
+}
+
 /// Run `PRAGMA table_info` for `table_name` and return column descriptors.
 async fn pragma_columns(pool: &SqlitePool, table_name: &str) -> Result<Vec<ColumnInfo>, DbError> {
     use sqlx::Row as _;
@@ -458,6 +479,48 @@ mod tests {
         assert!(meta.views.is_empty());
         assert!(meta.indexes.is_empty());
         assert!(meta.stored_procs.is_empty());
+    }
+
+    // ── fetch_ddl ─────────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn fetch_ddl_should_return_create_statement_for_table() {
+        let pool = connect("sqlite::memory:").await.unwrap();
+        sqlx::query("CREATE TABLE orders (id INTEGER NOT NULL, total REAL)")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let ddl = fetch_ddl(&pool, "orders", "table").await.unwrap();
+
+        assert!(ddl.to_uppercase().contains("CREATE TABLE"));
+        assert!(ddl.contains("orders"));
+    }
+
+    #[tokio::test]
+    async fn fetch_ddl_should_return_error_for_unknown_table() {
+        let pool = connect("sqlite::memory:").await.unwrap();
+
+        let err = fetch_ddl(&pool, "nonexistent", "table").await.unwrap_err();
+
+        assert!(matches!(err, DbError::QueryError(_)));
+    }
+
+    #[tokio::test]
+    async fn fetch_ddl_should_return_create_statement_for_view() {
+        let pool = connect("sqlite::memory:").await.unwrap();
+        sqlx::query("CREATE TABLE items (id INTEGER NOT NULL, price REAL)")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("CREATE VIEW cheap AS SELECT id FROM items WHERE price < 10")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let ddl = fetch_ddl(&pool, "cheap", "view").await.unwrap();
+
+        assert!(ddl.to_uppercase().contains("CREATE VIEW"));
     }
 
     // ── execute — timing ─────────────────────────────────────────────────────

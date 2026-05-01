@@ -69,6 +69,17 @@ impl DbPool {
         }
     }
 
+    /// Fetch the DDL `CREATE` statement for the object named `name`.
+    ///
+    /// `kind` should be `"table"`, `"view"`, or `"index"`.
+    pub async fn fetch_ddl(&self, name: &str, kind: &str) -> Result<String, DbError> {
+        match self {
+            DbPool::Pg(p) => drivers::pg::fetch_ddl(p, name, kind).await,
+            DbPool::My(p) => drivers::my::fetch_ddl(p, name, kind).await,
+            DbPool::Sqlite(p) => drivers::sqlite::fetch_ddl(p, name, kind).await,
+        }
+    }
+
     /// Returns the [`DbKind`] variant that identifies which DB engine this pool targets.
     pub fn kind(&self) -> DbKind {
         match self {

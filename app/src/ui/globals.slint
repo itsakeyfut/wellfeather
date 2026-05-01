@@ -38,3 +38,15 @@ export struct CompletionRow {
     cursor-offset: int,
     table-name: string,
 }
+
+export struct TabEntry {
+    id: string,
+    title: string,
+    kind: string,   // "sql-editor" | "table-view"
+}
+
+export struct ColumnData {
+    name: string,
+    data-type: string,
+    nullable: bool,
+}

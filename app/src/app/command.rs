@@ -40,4 +40,18 @@ pub enum Command {
     FetchCompletion(String, usize), // sql, cursor_pos
     ExportResult(ExportFormat, PathBuf),
     UpdateConfig(ConfigUpdate),
+    /// Fetch the DDL CREATE statement for `name` (table/view/index) on `conn_id`.
+    FetchDdl {
+        tab_id: String,
+        conn_id: String,
+        name: String,
+        kind: String,
+    },
+    /// Fetch a page of rows from `table_name` on `conn_id` for a Table View tab.
+    FetchTableData {
+        tab_id: String,
+        conn_id: String,
+        table_name: String,
+        page_size: usize,
+    },
 }

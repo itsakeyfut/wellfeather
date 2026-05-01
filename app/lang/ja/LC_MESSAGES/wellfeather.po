@@ -291,3 +291,39 @@ msgstr "切断"
 msgctxt "DbManagerDialog"
 msgid "+ Add connection"
 msgstr "+ 接続を追加"
+
+msgctxt "TableView"
+msgid "Data"
+msgstr "データ"
+
+msgctxt "TableView"
+msgid "Columns"
+msgstr "カラム"
+
+msgctxt "TableView"
+msgid "DDL"
+msgstr "DDL"
+
+msgctxt "TableView"
+msgid "Copy DDL"
+msgstr "DDLをコピー"
+
+msgctxt "TableView"
+msgid "Column"
+msgstr "カラム"
+
+msgctxt "TableView"
+msgid "Type"
+msgstr "型"
+
+msgctxt "TableView"
+msgid "Nullable"
+msgstr "NULL許容"
+
+msgctxt "TableView"
+msgid "YES"
+msgstr "YES"
+
+msgctxt "TableView"
+msgid "NO"
+msgstr "NO"
