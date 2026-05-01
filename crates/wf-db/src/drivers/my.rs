@@ -159,6 +159,30 @@ pub async fn fetch_metadata(pool: &MySqlPool) -> Result<DbMetadata, DbError> {
     })
 }
 
+/// Fetch the DDL `CREATE` statement for `name` from MySQL.
+///
+/// Uses `SHOW CREATE TABLE` or `SHOW CREATE VIEW` depending on `kind`.
+/// Returns `DbError::QueryError` if the object does not exist.
+pub async fn fetch_ddl(pool: &MySqlPool, name: &str, kind: &str) -> Result<String, DbError> {
+    if kind == "view" {
+        let sql = format!("SHOW CREATE VIEW `{}`", name.replace('`', "``"));
+        let row = sqlx::query(&sql)
+            .fetch_optional(pool)
+            .await
+            .map_err(DbError::from)?
+            .ok_or_else(|| DbError::QueryError(format!("view '{name}' not found")))?;
+        Ok(get_meta_str(&row, 1))
+    } else {
+        let sql = format!("SHOW CREATE TABLE `{}`", name.replace('`', "``"));
+        let row = sqlx::query(&sql)
+            .fetch_optional(pool)
+            .await
+            .map_err(DbError::from)?
+            .ok_or_else(|| DbError::QueryError(format!("table '{name}' not found")))?;
+        Ok(get_meta_str(&row, 1))
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Metadata string decoding
 // ---------------------------------------------------------------------------

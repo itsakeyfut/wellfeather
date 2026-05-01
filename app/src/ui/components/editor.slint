@@ -86,6 +86,10 @@ export component Editor inherits Rectangle {
     /// Fired when the user presses Ctrl+Shift+F to reformat the SQL.
     callback format-sql();
 
+    // Pane navigation initiated from inside the editor.
+    callback focus-sidebar();
+    callback focus-result();
+
     // ── Out properties consumed by the external gutter in app.slint ──────────
     out property <length> gutter-scroll-y:  editor-scroll.viewport-y;
     out property <length> gutter-line-h:    root.line-h;
@@ -408,16 +412,13 @@ export component Editor inherits Rectangle {
                         }
                         root.completion-visible = false;
                         EventResult.accept
-                    } else if (event.text == Key.Tab) {
-                        if (root.completion-selected < root.completion-items.length - 1) {
-                            root.completion-selected += 1;
-                        } else {
-                            root.completion-selected = 0;
-                        }
-                        EventResult.accept
                     } else if (event.text == Key.Escape) {
                         root.completion-visible = false;
                         EventResult.accept
+                    } else if (event.text == Key.Tab && event.modifiers.control) {
+                        // Close popup; let event bubble to root key-pressed for tab switching.
+                        root.completion-visible = false;
+                        EventResult.reject
                     } else {
                         // Close popup immediately on characters that end a SQL token
                         // (statement terminator, space, comma, parentheses).  This
@@ -518,6 +519,12 @@ export component Editor inherits Rectangle {
                         && !event.modifiers.alt) {
                     root.format-sql();
                     EventResult.accept
+                } else if (event.modifiers.alt
+                        && !event.modifiers.control
+                        && !event.modifiers.shift) {
+                    if (event.text == Key.LeftArrow) { root.focus-sidebar(); EventResult.accept }
+                    else if (event.text == Key.DownArrow) { root.focus-result(); EventResult.accept }
+                    else { EventResult.reject }
                 } else {
                     EventResult.reject
                 }
@@ -561,6 +568,16 @@ export component Editor inherits Rectangle {
                 selection-foreground-color: Colors.text;
                 font-family: root.font-family;
                 font-size:   root.font-size-px * 1px;
+
+                // TextInput consumes all key events by default, preventing bubbling.
+                // Reject Ctrl+Tab here so it reaches the root FocusScope key-pressed.
+                key-pressed(event) => {
+                    if (event.modifiers.control && event.text == Key.Tab) {
+                        EventResult.reject
+                    } else {
+                        EventResult.accept
+                    }
+                }
 
                 // Secondary path to clear hold-flags when a key is released.
                 // capture-key-released (on the FocusScope) is the primary path,

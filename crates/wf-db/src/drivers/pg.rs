@@ -161,6 +161,119 @@ pub async fn fetch_metadata(pool: &PgPool) -> Result<DbMetadata, DbError> {
     })
 }
 
+/// Fetch the DDL `CREATE` statement for `name` from PostgreSQL.
+///
+/// For tables: reconstructs DDL from `pg_catalog` (columns + constraints + indexes).
+/// For views: builds `CREATE OR REPLACE VIEW … AS …` from `pg_views`.
+/// Returns `DbError::QueryError` if the object is not found in the `public` schema.
+pub async fn fetch_ddl(pool: &PgPool, name: &str, kind: &str) -> Result<String, DbError> {
+    use sqlx::Row as _;
+
+    if kind == "view" {
+        let row = sqlx::query(
+            "SELECT 'CREATE OR REPLACE VIEW ' || viewname || ' AS ' || chr(10) || definition \
+             FROM pg_catalog.pg_views WHERE viewname = $1 AND schemaname = 'public'",
+        )
+        .bind(name)
+        .fetch_optional(pool)
+        .await
+        .map_err(DbError::from)?;
+
+        return row.map(|r| r.get::<String, _>(0)).ok_or_else(|| {
+            DbError::QueryError(format!("view '{name}' not found in public schema"))
+        });
+    }
+
+    // ── columns with defaults ─────────────────────────────────────────────────
+    let col_rows = sqlx::query(
+        "SELECT a.attname, \
+                pg_catalog.format_type(a.atttypid, a.atttypmod), \
+                a.attnotnull, \
+                CASE WHEN a.atthasdef THEN pg_catalog.pg_get_expr(d.adbin, d.adrelid) ELSE NULL END \
+         FROM pg_catalog.pg_class c \
+         JOIN pg_catalog.pg_attribute a ON a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped \
+         LEFT JOIN pg_catalog.pg_attrdef d ON d.adrelid = c.oid AND d.adnum = a.attnum \
+         WHERE c.relname = $1 \
+           AND c.relnamespace = (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = 'public') \
+         ORDER BY a.attnum",
+    )
+    .bind(name)
+    .fetch_all(pool)
+    .await
+    .map_err(DbError::from)?;
+
+    if col_rows.is_empty() {
+        return Err(DbError::QueryError(format!(
+            "table '{name}' not found in public schema"
+        )));
+    }
+
+    // ── constraints ───────────────────────────────────────────────────────────
+    let con_rows = sqlx::query(
+        "SELECT conname, pg_catalog.pg_get_constraintdef(oid, true) \
+         FROM pg_catalog.pg_constraint \
+         WHERE conrelid = ( \
+             SELECT c.oid FROM pg_catalog.pg_class c \
+             WHERE c.relname = $1 AND c.relnamespace = \
+                 (SELECT oid FROM pg_catalog.pg_namespace WHERE nspname = 'public') \
+         ) \
+         ORDER BY contype, conname",
+    )
+    .bind(name)
+    .fetch_all(pool)
+    .await
+    .map_err(DbError::from)?;
+
+    // ── non-constraint indexes ────────────────────────────────────────────────
+    let idx_rows = sqlx::query(
+        "SELECT indexdef FROM pg_catalog.pg_indexes \
+         WHERE tablename = $1 AND schemaname = 'public' \
+           AND indexname NOT IN ( \
+               SELECT c.conname FROM pg_catalog.pg_constraint c \
+               JOIN pg_catalog.pg_class t ON t.oid = c.conrelid WHERE t.relname = $1 \
+           ) \
+         ORDER BY indexname",
+    )
+    .bind(name)
+    .fetch_all(pool)
+    .await
+    .map_err(DbError::from)?;
+
+    // ── reconstruct DDL ───────────────────────────────────────────────────────
+    let mut lines: Vec<String> = col_rows
+        .iter()
+        .map(|r| {
+            let col_name: String = r.get(0);
+            let col_type: String = r.get(1);
+            let not_null: bool = r.get(2);
+            let default: Option<String> = r.get(3);
+            let mut line = format!("  {col_name} {col_type}");
+            if not_null {
+                line.push_str(" NOT NULL");
+            }
+            if let Some(def) = default {
+                line.push_str(&format!(" DEFAULT {def}"));
+            }
+            line
+        })
+        .collect();
+
+    for r in &con_rows {
+        let con_name: String = r.get(0);
+        let con_def: String = r.get(1);
+        lines.push(format!("  CONSTRAINT {con_name} {con_def}"));
+    }
+
+    let mut ddl = format!("CREATE TABLE {name} (\n{}\n);", lines.join(",\n"));
+
+    for r in &idx_rows {
+        let idx_def: String = r.get(0);
+        ddl.push_str(&format!("\n\n{idx_def};"));
+    }
+
+    Ok(ddl)
+}
+
 // ---------------------------------------------------------------------------
 // Cell decoding
 // ---------------------------------------------------------------------------

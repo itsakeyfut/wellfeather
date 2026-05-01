@@ -1,5 +1,8 @@
 #![allow(dead_code)]
 
+mod tabs_state;
+
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
@@ -224,6 +227,33 @@ fn push_string_category(
 }
 
 // ---------------------------------------------------------------------------
+// Tab helpers
+// ---------------------------------------------------------------------------
+
+fn tabs_to_slint(tabs: &[tabs_state::TabEntry]) -> Vec<crate::TabEntry> {
+    tabs.iter()
+        .map(|t| crate::TabEntry {
+            id: t.id.clone().into(),
+            title: t.title.clone().into(),
+            kind: match &t.kind {
+                tabs_state::TabKind::SqlEditor { .. } => "sql-editor".into(),
+                tabs_state::TabKind::TableView { .. } => "table-view".into(),
+            },
+        })
+        .collect()
+}
+
+fn columns_to_slint(cols: &[wf_db::models::ColumnInfo]) -> Vec<crate::ColumnData> {
+    cols.iter()
+        .map(|c| crate::ColumnData {
+            name: c.name.clone().into(),
+            data_type: c.data_type.clone().into(),
+            nullable: c.nullable,
+        })
+        .collect()
+}
+
+// ---------------------------------------------------------------------------
 // UI
 // ---------------------------------------------------------------------------
 
@@ -247,12 +277,33 @@ impl UI {
         // handler on QueryFinished, read by the filter callbacks on the UI thread.
         let original_data: SharedOriginalData = Arc::new(Mutex::new(None));
 
+        // Restore or create tab state. Track whether tabs were loaded from file
+        // so we can fall back to last_query.sql on first launch.
+        let tabs_from_session;
+        let tabs_state: Rc<RefCell<tabs_state::TabsState>> = {
+            let session = SessionManager::new();
+            match session.restore_tabs() {
+                Ok(Some((active_index, entries))) => {
+                    tabs_from_session = true;
+                    Rc::new(RefCell::new(tabs_state::TabsState::from_session(
+                        active_index,
+                        entries,
+                    )))
+                }
+                _ => {
+                    tabs_from_session = false;
+                    Rc::new(RefCell::new(tabs_state::TabsState::new()))
+                }
+            }
+        };
+
         Self::register_sidebar_callbacks(
             &window,
             state.clone(),
             tx_cmd.clone(),
             Arc::clone(&sidebar_state),
             enc_key,
+            Rc::clone(&tabs_state),
         );
         Self::register_connection_form_callbacks(&window, tx_cmd.clone(), enc_key);
         Self::register_editor_callbacks(&window, state.clone(), tx_cmd.clone());
@@ -262,7 +313,13 @@ impl UI {
         Self::register_export_callbacks(&window, Arc::clone(&original_data));
         Self::register_theme_callback(&window, state.clone(), tx_cmd.clone());
         Self::register_menu_callbacks(&window, tx_cmd.clone());
-        Self::register_close_handler(&window);
+        Self::register_close_handler(&window, Rc::clone(&tabs_state));
+        Self::register_tab_callbacks(
+            &window,
+            tx_cmd.clone(),
+            Rc::clone(&tabs_state),
+            Arc::clone(&sidebar_state),
+        );
         // Set initial page size and theme on the Slint window from shared state.
         let ui_global = window.global::<crate::UiState>();
         ui_global.set_page_size(state.ui.page_size() as i32);
@@ -278,9 +335,28 @@ impl UI {
         let _ = slint::select_bundled_translation(lang);
         rust_i18n::set_locale(lang);
         ui_global.set_language(lang.clone().into());
-        // Restore last editor query from previous session (last_query.sql).
-        if let Ok(Some(query)) = SessionManager::new().restore_query_file() {
-            ui_global.set_editor_text(query.into());
+        // Initialise tab bar from the restored (or freshly created) tab state.
+        {
+            let ts = tabs_state.borrow();
+            let slint_tabs = tabs_to_slint(&ts.tabs);
+            ui_global.set_tabs(Rc::new(slint::VecModel::from(slint_tabs)).into());
+            ui_global.set_active_tab_index(ts.active_index as i32);
+            match ts.active_tab().map(|t| t.kind.clone()) {
+                Some(tabs_state::TabKind::SqlEditor { query_text }) => {
+                    ui_global.set_editor_text(query_text.into());
+                    ui_global.set_active_tab_kind_sql(true);
+                }
+                Some(tabs_state::TabKind::TableView { table_name, .. }) => {
+                    ui_global.set_tv_table_name(table_name.into());
+                    ui_global.set_active_tab_kind_sql(false);
+                }
+                None => {}
+            }
+        }
+        // Fall back to last_query.sql on first launch (no tabs.toml yet).
+        if !tabs_from_session && let Ok(Some(query)) = SessionManager::new().restore_query_file() {
+            ui_global.set_editor_text(query.clone().into());
+            tabs_state.borrow_mut().save_current_text(&query);
         }
 
         Self::register_result_callbacks(
@@ -358,6 +434,18 @@ impl UI {
                     }
                     Event::StateChanged(StateEvent::ThemeChanged(t)) => {
                         Self::handle_theme_changed(t, window_weak.clone())
+                    }
+                    Event::DdlLoaded { tab_id, ddl } => {
+                        Self::handle_ddl_loaded(tab_id, ddl, window_weak.clone())
+                    }
+                    Event::DdlFetchFailed { tab_id, msg } => {
+                        Self::handle_ddl_fetch_failed(tab_id, msg, window_weak.clone())
+                    }
+                    Event::TableDataLoaded { tab_id, result } => {
+                        Self::handle_table_data_loaded(tab_id, result, window_weak.clone())
+                    }
+                    Event::TableDataFailed { tab_id, msg } => {
+                        Self::handle_table_data_failed(tab_id, msg, window_weak.clone())
                     }
                     _ => {}
                 }
@@ -657,6 +745,64 @@ impl UI {
         });
     }
 
+    fn handle_ddl_loaded(_tab_id: String, ddl: String, ww: slint::Weak<crate::AppWindow>) {
+        // clone required: invoke_from_event_loop closure must be 'static
+        let _ = slint::invoke_from_event_loop(move || {
+            with_ui(&ww, move |ui| {
+                ui.set_tv_ddl(ddl.into());
+                ui.set_tv_ddl_loading(false);
+            });
+        });
+    }
+
+    fn handle_ddl_fetch_failed(_tab_id: String, msg: String, ww: slint::Weak<crate::AppWindow>) {
+        // clone required: invoke_from_event_loop closure must be 'static
+        let _ = slint::invoke_from_event_loop(move || {
+            with_ui(&ww, move |ui| {
+                ui.set_tv_ddl(format!("Error: {}", msg).into());
+                ui.set_tv_ddl_loading(false);
+            });
+        });
+    }
+
+    fn handle_table_data_loaded(
+        _tab_id: String,
+        result: QueryResult,
+        ww: slint::Weak<crate::AppWindow>,
+    ) {
+        let col_count = result.columns.len();
+        let columns: Vec<slint::SharedString> =
+            result.columns.iter().map(|c| c.clone().into()).collect();
+        let raw_rows: Vec<Vec<Option<String>>> = result.rows.iter().map(|r| r.to_vec()).collect();
+        let row_count = result.row_count as i32;
+        // clone required: invoke_from_event_loop closure must be 'static
+        let _ = slint::invoke_from_event_loop(move || {
+            with_ui(&ww, move |ui| {
+                ui.set_tv_data_loading(false);
+                ui.set_tv_data_error("".into());
+                let col_model = Rc::new(slint::VecModel::from(columns));
+                ui.set_result_columns(col_model.into());
+                let rows: Vec<crate::RowData> = raw_rows.into_iter().map(rows_to_ui).collect();
+                ui.set_result_rows(Rc::new(slint::VecModel::from(rows)).into());
+                ui.set_result_row_count(row_count);
+                let widths: Vec<f32> = vec![DEFAULT_COLUMN_WIDTH; col_count];
+                let total_w = col_count as f32 * DEFAULT_COLUMN_WIDTH;
+                ui.set_result_col_widths(Rc::new(slint::VecModel::from(widths)).into());
+                ui.set_result_total_col_width(total_w);
+            });
+        });
+    }
+
+    fn handle_table_data_failed(_tab_id: String, msg: String, ww: slint::Weak<crate::AppWindow>) {
+        // clone required: invoke_from_event_loop closure must be 'static
+        let _ = slint::invoke_from_event_loop(move || {
+            with_ui(&ww, move |ui| {
+                ui.set_tv_data_loading(false);
+                ui.set_tv_data_error(msg.into());
+            });
+        });
+    }
+
     // ── Theme callback ────────────────────────────────────────────────────────
 
     fn register_theme_callback(
@@ -683,19 +829,339 @@ impl UI {
 
     // ── Window lifecycle ──────────────────────────────────────────────────────
 
-    fn register_close_handler(window: &crate::AppWindow) {
+    fn register_close_handler(
+        window: &crate::AppWindow,
+        tabs_state: Rc<RefCell<tabs_state::TabsState>>,
+    ) {
         let window_weak = window.as_weak(); // clone required: on_close_requested closure
         window.window().on_close_requested(move || {
             let text = window_weak
                 .upgrade()
                 .map(|w| w.global::<crate::UiState>().get_editor_text().to_string())
                 .unwrap_or_default();
+            // Flush the active editor text into the tab before persisting.
+            tabs_state.borrow_mut().save_current_text(&text);
             let sm = SessionManager::new();
+            {
+                let ts = tabs_state.borrow();
+                let (active_sql_idx, entries) = ts.session_entries();
+                if let Err(e) = sm.save_tabs(active_sql_idx, &entries) {
+                    tracing::warn!(error = %e, "failed to save tabs.toml on close");
+                }
+            }
+            // Keep last_query.sql in sync for backwards compatibility.
             if let Err(e) = sm.save_query_file(&text) {
                 tracing::warn!(error = %e, "failed to save last_query.sql on close");
             }
             slint::CloseRequestResponse::HideWindow
         });
+    }
+
+    // ── Tab callbacks ─────────────────────────────────────────────────────────
+
+    fn register_tab_callbacks(
+        window: &crate::AppWindow,
+        tx_cmd: mpsc::Sender<Command>,
+        tabs_state: Rc<RefCell<tabs_state::TabsState>>,
+        sidebar_state: Arc<Mutex<SidebarUiState>>,
+    ) {
+        let ui = window.global::<crate::UiState>();
+
+        // on_new_tab: save current editor text, add a SQL Editor tab, switch to it.
+        {
+            let window_weak = window.as_weak();
+            let tabs_state = Rc::clone(&tabs_state); // clone required: callback closure needs owned tabs_state
+            ui.on_new_tab(move || {
+                let current_text = window_weak
+                    .upgrade()
+                    .map(|w| w.global::<crate::UiState>().get_editor_text().to_string())
+                    .unwrap_or_default();
+                let current_sub_tab = window_weak
+                    .upgrade()
+                    .map(|w| w.global::<crate::UiState>().get_tv_sub_tab() as usize)
+                    .unwrap_or(0);
+                let (slint_tabs, active_idx) = {
+                    let mut ts = tabs_state.borrow_mut();
+                    ts.save_current_text(&current_text);
+                    ts.save_tv_sub_tab(current_sub_tab);
+                    ts.add_sql_editor();
+                    (tabs_to_slint(&ts.tabs), ts.active_index as i32)
+                };
+                with_ui(&window_weak, |ui| {
+                    ui.set_tabs(Rc::new(slint::VecModel::from(slint_tabs)).into());
+                    ui.set_active_tab_index(active_idx);
+                    ui.set_active_tab_kind_sql(true);
+                    ui.set_editor_text("".into());
+                });
+            });
+        }
+
+        // on_switch_tab: save current text, switch active tab, restore tab content.
+        {
+            let window_weak = window.as_weak();
+            let tabs_state = Rc::clone(&tabs_state); // clone required: callback closure needs owned tabs_state
+            let sidebar_state = Arc::clone(&sidebar_state); // clone required: callback closure needs owned sidebar_state
+            ui.on_switch_tab(move |i| {
+                let i = i as usize;
+                let current_text = window_weak
+                    .upgrade()
+                    .map(|w| w.global::<crate::UiState>().get_editor_text().to_string())
+                    .unwrap_or_default();
+                let current_sub_tab = window_weak
+                    .upgrade()
+                    .map(|w| w.global::<crate::UiState>().get_tv_sub_tab() as usize)
+                    .unwrap_or(0);
+                let (slint_tabs, active_idx, kind_sql, editor_text, tv_name, tv_cols, tv_sub_tab) = {
+                    let mut ts = tabs_state.borrow_mut();
+                    ts.save_current_text(&current_text);
+                    ts.save_tv_sub_tab(current_sub_tab);
+                    ts.set_active(i);
+                    let slint_tabs = tabs_to_slint(&ts.tabs);
+                    let active_idx = ts.active_index as i32;
+                    match ts.active_tab().map(|t| t.kind.clone()) {
+                        Some(tabs_state::TabKind::SqlEditor { query_text }) => (
+                            slint_tabs,
+                            active_idx,
+                            true,
+                            query_text,
+                            String::new(),
+                            vec![],
+                            0usize,
+                        ),
+                        Some(tabs_state::TabKind::TableView {
+                            conn_id,
+                            table_name,
+                            sub_tab,
+                        }) => {
+                            let sb = sidebar_state.lock().unwrap_or_else(|p| p.into_inner());
+                            let cols = sb
+                                .metadata
+                                .get(&conn_id)
+                                .and_then(|meta| {
+                                    meta.tables
+                                        .iter()
+                                        .chain(meta.views.iter())
+                                        .find(|t| t.name == table_name)
+                                        .map(|ti| columns_to_slint(&ti.columns))
+                                })
+                                .unwrap_or_default();
+                            (
+                                slint_tabs,
+                                active_idx,
+                                false,
+                                String::new(),
+                                table_name,
+                                cols,
+                                sub_tab,
+                            )
+                        }
+                        None => (
+                            slint_tabs,
+                            active_idx,
+                            true,
+                            String::new(),
+                            String::new(),
+                            vec![],
+                            0usize,
+                        ),
+                    }
+                };
+                with_ui(&window_weak, |ui| {
+                    ui.set_tabs(Rc::new(slint::VecModel::from(slint_tabs)).into());
+                    ui.set_active_tab_index(active_idx);
+                    ui.set_active_tab_kind_sql(kind_sql);
+                    if kind_sql {
+                        ui.set_editor_text(editor_text.into());
+                    } else {
+                        ui.set_tv_table_name(tv_name.into());
+                        ui.set_tv_columns(Rc::new(slint::VecModel::from(tv_cols)).into());
+                        ui.set_tv_sub_tab(tv_sub_tab as i32);
+                    }
+                });
+            });
+        }
+
+        // on_close_tab: close the given tab; prevents closing the last SQL Editor tab.
+        {
+            let window_weak = window.as_weak();
+            let tabs_state = Rc::clone(&tabs_state); // clone required: callback closure needs owned tabs_state
+            ui.on_close_tab(move |i| {
+                let i = i as usize;
+                let current_text = window_weak
+                    .upgrade()
+                    .map(|w| w.global::<crate::UiState>().get_editor_text().to_string())
+                    .unwrap_or_default();
+                let mut ts = tabs_state.borrow_mut();
+                if ts.active_index != i {
+                    ts.save_current_text(&current_text);
+                }
+                if !ts.close(i) {
+                    return; // can't close the last SQL Editor tab
+                }
+                let slint_tabs = tabs_to_slint(&ts.tabs);
+                let active_idx = ts.active_index as i32;
+                let (kind_sql, editor_text) = match ts.active_tab().map(|t| t.kind.clone()) {
+                    Some(tabs_state::TabKind::SqlEditor { query_text }) => (true, query_text),
+                    _ => (false, String::new()),
+                };
+                drop(ts);
+                with_ui(&window_weak, |ui| {
+                    ui.set_tabs(Rc::new(slint::VecModel::from(slint_tabs)).into());
+                    ui.set_active_tab_index(active_idx);
+                    ui.set_active_tab_kind_sql(kind_sql);
+                    if kind_sql {
+                        ui.set_editor_text(editor_text.into());
+                    }
+                });
+            });
+        }
+
+        // on_copy_tv_ddl: write the DDL text to the system clipboard.
+        {
+            let window_weak = window.as_weak();
+            ui.on_copy_tv_ddl(move || {
+                let ddl = window_weak
+                    .upgrade()
+                    .map(|w| w.global::<crate::UiState>().get_tv_ddl().to_string())
+                    .unwrap_or_default();
+                if let Ok(mut clip) = arboard::Clipboard::new() {
+                    let _ = clip.set_text(ddl);
+                }
+            });
+        }
+
+        // on_refresh_tv_data: re-fetch the table data for the active Table View tab.
+        {
+            let window_weak = window.as_weak();
+            let tx_cmd = tx_cmd.clone(); // clone required: callback closure needs owned tx_cmd
+            let tabs_state = Rc::clone(&tabs_state); // clone required: callback closure needs owned tabs_state
+            ui.on_refresh_tv_data(move || {
+                let Some(w) = window_weak.upgrade() else {
+                    return;
+                };
+                let ui = w.global::<crate::UiState>();
+                let tv_table_name = ui.get_tv_table_name().to_string();
+                let conn_id = ui.get_active_connection_id().to_string();
+                let page_size = ui.get_tv_page_size() as usize;
+                if conn_id.is_empty() || tv_table_name.is_empty() {
+                    return;
+                }
+                let tab_id = {
+                    let ts = tabs_state.borrow();
+                    ts.find_table_view(&conn_id, &tv_table_name)
+                        .and_then(|idx| ts.tabs.get(idx))
+                        .map(|t| t.id.clone())
+                        .unwrap_or_default()
+                };
+                if tab_id.is_empty() {
+                    return;
+                }
+                with_ui(&window_weak, |ui| ui.set_tv_data_loading(true));
+                send_cmd(
+                    &tx_cmd,
+                    Command::FetchTableData {
+                        tab_id,
+                        conn_id,
+                        table_name: tv_table_name,
+                        page_size,
+                    },
+                );
+            });
+        }
+
+        // on_fetch_tv_ddl: fetch the DDL statement for the active Table View tab.
+        {
+            let window_weak = window.as_weak();
+            let tx_cmd = tx_cmd.clone(); // clone required: callback closure needs owned tx_cmd
+            let tabs_state = Rc::clone(&tabs_state); // clone required: callback closure needs owned tabs_state
+            let sidebar_state = Arc::clone(&sidebar_state); // clone required: callback closure needs owned sidebar_state
+            ui.on_fetch_tv_ddl(move || {
+                let Some(w) = window_weak.upgrade() else {
+                    return;
+                };
+                let ui = w.global::<crate::UiState>();
+                let tv_table_name = ui.get_tv_table_name().to_string();
+                let conn_id = ui.get_active_connection_id().to_string();
+                if conn_id.is_empty() || tv_table_name.is_empty() {
+                    return;
+                }
+                let tab_id = {
+                    let ts = tabs_state.borrow();
+                    ts.find_table_view(&conn_id, &tv_table_name)
+                        .and_then(|idx| ts.tabs.get(idx))
+                        .map(|t| t.id.clone())
+                        .unwrap_or_default()
+                };
+                if tab_id.is_empty() {
+                    return;
+                }
+                let kind = {
+                    let sb = sidebar_state.lock().unwrap_or_else(|p| p.into_inner());
+                    if let Some(meta) = sb.metadata.get(&conn_id) {
+                        if meta.views.iter().any(|v| v.name == tv_table_name) {
+                            "view".to_string()
+                        } else {
+                            "table".to_string()
+                        }
+                    } else {
+                        "table".to_string()
+                    }
+                };
+                with_ui(&window_weak, |ui| {
+                    ui.set_tv_ddl("".into());
+                    ui.set_tv_ddl_loading(true);
+                });
+                send_cmd(
+                    &tx_cmd,
+                    Command::FetchDdl {
+                        tab_id,
+                        conn_id,
+                        name: tv_table_name,
+                        kind,
+                    },
+                );
+            });
+        }
+
+        // on_change_tv_page_size: re-fetch table data with a new row limit.
+        {
+            let window_weak = window.as_weak();
+            let tx_cmd = tx_cmd.clone(); // clone required: callback closure needs owned tx_cmd
+            let tabs_state = Rc::clone(&tabs_state); // clone required: callback closure needs owned tabs_state
+            ui.on_change_tv_page_size(move |n| {
+                let Some(w) = window_weak.upgrade() else {
+                    return;
+                };
+                let ui = w.global::<crate::UiState>();
+                let page_size = n as usize;
+                ui.set_tv_page_size(n);
+                let tv_table_name = ui.get_tv_table_name().to_string();
+                let conn_id = ui.get_active_connection_id().to_string();
+                if conn_id.is_empty() || tv_table_name.is_empty() {
+                    return;
+                }
+                let tab_id = {
+                    let ts = tabs_state.borrow();
+                    ts.find_table_view(&conn_id, &tv_table_name)
+                        .and_then(|idx| ts.tabs.get(idx))
+                        .map(|t| t.id.clone())
+                        .unwrap_or_default()
+                };
+                if tab_id.is_empty() {
+                    return;
+                }
+                with_ui(&window_weak, |ui| ui.set_tv_data_loading(true));
+                send_cmd(
+                    &tx_cmd,
+                    Command::FetchTableData {
+                        tab_id,
+                        conn_id,
+                        table_name: tv_table_name,
+                        page_size,
+                    },
+                );
+            });
+        }
     }
 
     // ── Menu bar callbacks ────────────────────────────────────────────────────
@@ -725,6 +1191,7 @@ impl UI {
         tx_cmd: mpsc::Sender<Command>,
         sidebar_state: Arc<Mutex<SidebarUiState>>,
         enc_key: [u8; 32],
+        tabs_state: Rc<RefCell<tabs_state::TabsState>>,
     ) {
         let ui_state = window.global::<crate::UiState>();
 
@@ -973,19 +1440,79 @@ impl UI {
             });
         }
 
-        // table-double-clicked: insert SELECT * FROM <name> into the editor
-        // and immediately execute it so the result appears without a manual
-        // Ctrl+Enter.  tx_cmd is cloned here because the closure is 'static.
+        // table-double-clicked: open a Table View tab for the clicked table/view.
+        // Saves the active editor text, opens or focuses the TV tab, then triggers
+        // a FetchTableData command if the tab is new.
         {
             let window_weak = window.as_weak();
             let tx_cmd = tx_cmd.clone(); // clone required: callback closure needs owned tx_cmd
+            let tabs_state = Rc::clone(&tabs_state); // clone required: callback closure needs owned tabs_state
+            let sidebar_state = Arc::clone(&sidebar_state); // clone required: callback closure needs owned sidebar_state
             ui_state.on_table_double_clicked(move |name| {
-                let sql = format!("SELECT * FROM {}", name);
+                let name = name.to_string();
+                let (conn_id, current_text, current_sub_tab) = {
+                    let Some(w) = window_weak.upgrade() else {
+                        return;
+                    };
+                    let ui = w.global::<crate::UiState>();
+                    (
+                        ui.get_active_connection_id().to_string(),
+                        ui.get_editor_text().to_string(),
+                        ui.get_tv_sub_tab() as usize,
+                    )
+                };
+                if conn_id.is_empty() {
+                    return;
+                }
+                let (tab_id, is_new, slint_tabs, active_idx, tv_sub_tab) = {
+                    let mut ts = tabs_state.borrow_mut();
+                    ts.save_current_text(&current_text);
+                    ts.save_tv_sub_tab(current_sub_tab);
+                    let (tab_id, _idx, is_new) = ts.open_table_view(&conn_id, &name);
+                    let tv_sub_tab = ts.active_tv_sub_tab();
+                    let slint_tabs = tabs_to_slint(&ts.tabs);
+                    let active_idx = ts.active_index as i32;
+                    (tab_id, is_new, slint_tabs, active_idx, tv_sub_tab)
+                };
+                let tv_cols = {
+                    let sb = sidebar_state.lock().unwrap_or_else(|p| p.into_inner());
+                    sb.metadata
+                        .get(&conn_id)
+                        .and_then(|meta| {
+                            meta.tables
+                                .iter()
+                                .chain(meta.views.iter())
+                                .find(|t| t.name == name)
+                                .map(|ti| columns_to_slint(&ti.columns))
+                        })
+                        .unwrap_or_default()
+                };
                 with_ui(&window_weak, |ui| {
-                    let current = ui.get_editor_text().to_string();
-                    ui.set_editor_text(append_editor_text(&current, &sql).into());
+                    ui.set_tabs(Rc::new(slint::VecModel::from(slint_tabs)).into());
+                    ui.set_active_tab_index(active_idx);
+                    ui.set_active_tab_kind_sql(false);
+                    ui.set_tv_table_name(name.clone().into());
+                    ui.set_tv_sub_tab(tv_sub_tab as i32);
+                    if is_new {
+                        ui.set_tv_page_size(1000);
+                    }
+                    ui.set_tv_data_loading(is_new);
+                    ui.set_tv_data_error("".into());
+                    ui.set_tv_ddl("".into());
+                    ui.set_tv_ddl_loading(false);
+                    ui.set_tv_columns(Rc::new(slint::VecModel::from(tv_cols)).into());
                 });
-                send_cmd(&tx_cmd, Command::RunQuery(sql));
+                if is_new {
+                    send_cmd(
+                        &tx_cmd,
+                        Command::FetchTableData {
+                            tab_id,
+                            conn_id,
+                            table_name: name,
+                            page_size: 1000,
+                        },
+                    );
+                }
             });
         }
     }

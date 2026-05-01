@@ -21,7 +21,11 @@ use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
 use wf_completion::{cache::MetadataCache, service::CompletionService};
-use wf_db::{error::DbError, models::DbConnection, service::DbService};
+use wf_db::{
+    error::DbError,
+    models::{DbConnection, DbType},
+    service::DbService,
+};
 use wf_history::service::HistoryService;
 
 use crate::{
@@ -130,7 +134,22 @@ impl AppController {
                 Command::FetchCompletion(sql, cursor_pos) => {
                     self.handle_fetch_completion(sql, cursor_pos).await;
                 }
-                _ => {} // remaining commands handled in later tasks
+                Command::FetchDdl {
+                    tab_id,
+                    conn_id,
+                    name,
+                    kind,
+                } => self.handle_fetch_ddl(tab_id, conn_id, name, kind).await,
+                Command::FetchTableData {
+                    tab_id,
+                    conn_id,
+                    table_name,
+                    page_size,
+                } => {
+                    self.handle_fetch_table_data(tab_id, conn_id, table_name, page_size)
+                        .await
+                }
+                Command::ExportResult(_, _) => {} // handled client-side in UI layer
             }
         }
     }
@@ -474,6 +493,74 @@ impl AppController {
             let items = completion.complete(&conn_id, &sql, cursor_pos).await;
             let _ = self.tx_event.send(Event::CompletionReady(items)).await;
         }
+    }
+
+    /// Handle a `FetchDdl` command.
+    ///
+    /// Fetches the DDL CREATE statement for `name` on `conn_id` and sends
+    /// [`Event::DdlLoaded`] or [`Event::DdlFetchFailed`] to the UI.
+    async fn handle_fetch_ddl(&self, tab_id: String, conn_id: String, name: String, kind: String) {
+        let db = self.db.clone(); // clone required: tokio::spawn needs 'static
+        let tx = self.tx_event.clone(); // clone required: tokio::spawn needs 'static
+        tokio::spawn(async move {
+            match db.fetch_ddl(&conn_id, &name, &kind).await {
+                Ok(ddl) => {
+                    let _ = tx.send(Event::DdlLoaded { tab_id, ddl }).await;
+                }
+                Err(e) => {
+                    let _ = tx
+                        .send(Event::DdlFetchFailed {
+                            tab_id,
+                            msg: e.localized_message(),
+                        })
+                        .await;
+                }
+            }
+        });
+    }
+
+    /// Handle a `FetchTableData` command.
+    ///
+    /// Executes `SELECT * FROM "{table_name}" LIMIT {page_size}` and sends
+    /// [`Event::TableDataLoaded`] or [`Event::TableDataFailed`] to the UI.
+    async fn handle_fetch_table_data(
+        &self,
+        tab_id: String,
+        conn_id: String,
+        table_name: String,
+        page_size: usize,
+    ) {
+        let quote = self
+            .state
+            .conn
+            .all()
+            .iter()
+            .find(|c| c.id == conn_id)
+            .map(|c| if c.db_type == DbType::MySQL { '`' } else { '"' })
+            .unwrap_or('"');
+        let escaped = table_name.replace(quote, &format!("{quote}{quote}"));
+        let sql = if page_size > 0 {
+            format!("SELECT * FROM {quote}{escaped}{quote} LIMIT {page_size}")
+        } else {
+            format!("SELECT * FROM {quote}{escaped}{quote}")
+        };
+        let db = self.db.clone(); // clone required: tokio::spawn needs 'static
+        let tx = self.tx_event.clone(); // clone required: tokio::spawn needs 'static
+        tokio::spawn(async move {
+            match db.execute(&conn_id, &sql).await {
+                Ok(result) => {
+                    let _ = tx.send(Event::TableDataLoaded { tab_id, result }).await;
+                }
+                Err(e) => {
+                    let _ = tx
+                        .send(Event::TableDataFailed {
+                            tab_id,
+                            msg: e.localized_message(),
+                        })
+                        .await;
+                }
+            }
+        });
     }
 
     /// Handle a `CancelQuery` command.

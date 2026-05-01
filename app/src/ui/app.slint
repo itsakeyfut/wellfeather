@@ -10,7 +10,7 @@ import "../../assets/fonts/NotoSansJP-Bold.ttf";
 import "../../assets/fonts/JetBrainsMono-Regular.ttf";
 import "../../assets/fonts/JetBrainsMono-Bold.ttf";
 
-import { ConnectionEntry, RowData, SidebarNode, CompletionRow } from "globals.slint";
+import { ConnectionEntry, RowData, SidebarNode, CompletionRow, TabEntry, ColumnData } from "globals.slint";
 import { Colors, Typography } from "theme.slint";
 import { CompletionPopup } from "components/completion_popup.slint";
 import { ConnectionForm }  from "components/connection_form.slint";
@@ -19,6 +19,8 @@ import { Sidebar }         from "components/sidebar.slint";
 import { Editor }          from "components/editor.slint";
 import { ResultTable }     from "components/result_table.slint";
 import { StatusBar }       from "components/status_bar.slint";
+import { TabBar }          from "components/tab_bar.slint";
+import { TableView }       from "components/table_view.slint";
 import { TestResultDialog }    from "components/dialogs/test_result_dialog.slint";
 import { AddConnectionDialog } from "components/dialogs/add_connection_dialog.slint";
 import { AllRowsDialog }       from "components/dialogs/all_rows_dialog.slint";
@@ -208,6 +210,29 @@ export global UiState {
     callback dismiss-test-popup();
     /// "No" in the add-without-test confirm popup.
     callback dismiss-add-confirm();
+
+    // ── Tab management ────────────────────────────────────────────────────────
+    in-out property <[TabEntry]> tabs:               [];
+    in-out property <int>        active-tab-index:   0;
+    /// true = active tab is a SQL Editor tab; false = Table View tab.
+    in-out property <bool>       active-tab-kind-sql: true;
+    callback new-tab();
+    callback close-tab(int);
+    callback switch-tab(int);
+
+    // ── Table View state (active table-view tab) ──────────────────────────────
+    in-out property <string>       tv-table-name:   "";
+    in-out property <int>          tv-sub-tab:      0;    // 0=Data 1=Structure 2=DDL
+    in-out property <bool>         tv-data-loading: false;
+    in-out property <string>       tv-data-error:   "";
+    in-out property <bool>         tv-ddl-loading:  false;
+    in-out property <string>       tv-ddl:          "";
+    in-out property <[ColumnData]> tv-columns:      [];
+    in-out property <int>          tv-page-size:    1000;
+    callback copy-tv-ddl();
+    callback refresh-tv-data();
+    callback fetch-tv-ddl();
+    callback change-tv-page-size(int);
 }
 
 export component AppWindow inherits Window {
@@ -229,7 +254,8 @@ export component AppWindow inherits Window {
 
     // ── Layout geometry helpers ───────────────────────────────────────────────
     property <length> menu-bar-height:   28px;
-    property <length> content-height:    root.height - 24px - menu-bar-height;  // excludes status bar and menu bar
+    property <length> tab-bar-height:    32px;
+    property <length> content-height:    root.height - 24px - menu-bar-height - tab-bar-height;
     property <length> sidebar-width:     220px;
     property <length> main-width:        root.width - sidebar-width;
     property <length> divider-thickness: 5px;
@@ -276,10 +302,26 @@ export component AppWindow inherits Window {
         if (root._result-active) { root.focused-pane = 2; }
     }
 
+    // When switching to a Table View tab, give it focus so keyboard shortcuts work.
+    property <bool> _tab-kind: UiState.active-tab-kind-sql;
+    changed _tab-kind => {
+        if (!UiState.active-tab-kind-sql) {
+            root.focused-pane = 1;
+            tv-inst.grab-focus();
+        }
+    }
+
+    // Sync focused-pane when the Table View gains focus by click.
+    property <bool> _tv-active: tv-inst.tv-focused;
+    changed _tv-active => {
+        if (root._tv-active) { root.focused-pane = 1; }
+    }
+
     // ── Root key-intercept FocusScope ─────────────────────────────────────────
-    // Wraps all content so that capture-key-pressed fires whenever any descendant
-    // (e.g. the editor's TextInput) has keyboard focus.  focus-on-click: false
-    // prevents the FocusScope from stealing focus from its children on click.
+    // Global shortcuts live in key-pressed (bubble phase) so they fire regardless
+    // of which inner FocusScope — editor, table-view, sidebar, result — has focus.
+    // capture-key-pressed on the root would only fire if the root FocusScope itself
+    // held focus, which never happens with focus-on-click: false and inner scopes.
     FocusScope {
         x: 0;
         y: 0;
@@ -287,7 +329,7 @@ export component AppWindow inherits Window {
         height: root.height;
         focus-on-click: false;
 
-        capture-key-pressed(event) => {
+        key-pressed(event) => {
             // Don't intercept while a modal overlay is open.
             if (UiState.show-connection-form
                     || UiState.show-db-manager
@@ -295,6 +337,64 @@ export component AppWindow inherits Window {
                     || UiState.show-add-confirm-popup
                     || UiState.show-all-rows-confirm) {
                 EventResult.reject
+            } else if (event.modifiers.control
+                    && !event.modifiers.shift
+                    && !event.modifiers.alt
+                    && event.text == "t") {
+                UiState.new-tab();
+                EventResult.accept
+            } else if (event.modifiers.control
+                    && !event.modifiers.shift
+                    && !event.modifiers.alt
+                    && event.text == "w") {
+                UiState.close-tab(UiState.active-tab-index);
+                EventResult.accept
+            } else if (event.modifiers.control
+                    && !event.modifiers.shift
+                    && event.text == Key.Tab) {
+                UiState.switch-tab(Math.mod(UiState.active-tab-index + 1, max(1, UiState.tabs.length)));
+                EventResult.accept
+            } else if (event.modifiers.control
+                    && event.modifiers.shift
+                    && event.text == Key.Tab) {
+                UiState.switch-tab(Math.mod(
+                    UiState.active-tab-index + max(1, UiState.tabs.length) - 1,
+                    max(1, UiState.tabs.length)
+                ));
+                EventResult.accept
+            } else if (event.modifiers.control
+                    && !event.modifiers.shift
+                    && !event.modifiers.alt) {
+                if (event.text == "1" && UiState.tabs.length > 0) {
+                    UiState.switch-tab(0);
+                    EventResult.accept
+                } else if (event.text == "2" && UiState.tabs.length > 1) {
+                    UiState.switch-tab(1);
+                    EventResult.accept
+                } else if (event.text == "3" && UiState.tabs.length > 2) {
+                    UiState.switch-tab(2);
+                    EventResult.accept
+                } else if (event.text == "4" && UiState.tabs.length > 3) {
+                    UiState.switch-tab(3);
+                    EventResult.accept
+                } else if (event.text == "5" && UiState.tabs.length > 4) {
+                    UiState.switch-tab(4);
+                    EventResult.accept
+                } else if (event.text == "6" && UiState.tabs.length > 5) {
+                    UiState.switch-tab(5);
+                    EventResult.accept
+                } else if (event.text == "7" && UiState.tabs.length > 6) {
+                    UiState.switch-tab(6);
+                    EventResult.accept
+                } else if (event.text == "8" && UiState.tabs.length > 7) {
+                    UiState.switch-tab(7);
+                    EventResult.accept
+                } else if (event.text == "9") {
+                    UiState.switch-tab(UiState.tabs.length - 1);
+                    EventResult.accept
+                } else {
+                    EventResult.reject
+                }
             } else if (event.modifiers.alt
                     && !event.modifiers.shift
                     && !event.modifiers.control) {
@@ -350,12 +450,24 @@ export component AppWindow inherits Window {
             set-language(lang) => { UiState.set-language(lang); }
         }
 
+        // ── Tab bar (above the editor only) ──────────────────────────────────
+        TabBar {
+            x: sidebar-width;
+            y: menu-bar-height;
+            width:        main-width;
+            tabs:         UiState.tabs;
+            active-index: UiState.active-tab-index;
+            new-tab      => { UiState.new-tab(); }
+            close-tab(i) => { UiState.close-tab(i); }
+            switch-tab(i) => { UiState.switch-tab(i); }
+        }
+
         // ── Sidebar ───────────────────────────────────────────────────────────
         sidebar-inst := Sidebar {
             x: 0;
             y: menu-bar-height;
             width:  sidebar-width;
-            height: content-height;
+            height: content-height + tab-bar-height;
             tree:        UiState.sidebar-tree;
             is-loading:  UiState.sidebar-loading;
             toggle-node(id) => { UiState.toggle-sidebar-node(id); }
@@ -363,31 +475,19 @@ export component AppWindow inherits Window {
             add-connection => { UiState.open-connection-form(); }
         }
 
-        // ── Main content panel ────────────────────────────────────────────────
-        // Single container for all content right of the sidebar.
-        // Layout within the container:
-        //
-        //   x=0 .. gutter-col-width   : shared gutter column (spans full height)
-        //   x=gutter-col-width .. end : editor text area / divider / result table
-        //
-        // The gutter column renders line numbers by reading out-properties from
-        // editor-inst.  All three panels (editor, divider, result) start at the same
-        // x and share the same width, so they are always perfectly aligned.
+        // ── SQL Editor main content panel ─────────────────────────────────────
+        // Always instantiated so that named children (editor-inst, result-table-inst)
+        // remain accessible for focus tracking and grab-focus calls even when the
+        // active tab is a Table View.  Hidden via visible: when a Table View is active.
         Rectangle {
             x: sidebar-width;
-            y: menu-bar-height;
+            y: menu-bar-height + tab-bar-height;
             width:  main-width;
             height: content-height;
             clip: true;
+            visible: UiState.active-tab-kind-sql;
 
             // ── Shared gutter column ──────────────────────────────────────────
-            // Height is capped to the portion above the result panel when the panel
-            // is open.  The panel's opaque background already hides any gutter content
-            // below its top edge, but more importantly: gutter line-number colors
-            // depend on current-line (active-line highlight).  When the gutter's
-            // bounding box overlaps the result panel, every cursor-movement dirty mark
-            // causes Slint to repaint the result cells too.  Clipping the gutter to
-            // the area above the panel eliminates that dirty-region overlap.
             Rectangle {
                 x: 0;
                 y: 0;
@@ -412,13 +512,7 @@ export component AppWindow inherits Window {
                 }
             }
 
-            // ── SQL editor (text area only — gutter is the sibling above) ─────────
-            // Height is capped to the portion of the content area that is NOT covered
-            // by the result panel.  This is the key performance constraint: keeping
-            // the editor's bounds out of the result panel's screen region means Slint's
-            // dirty-region tracker never needs to repaint the result cells when cursor
-            // movement (current-line highlight, TextInput cursor blink, etc.) marks the
-            // editor dirty.  When the panel is closed the editor fills the full height.
+            // ── SQL editor (text area only — gutter is the sibling above) ─────
             editor-inst := Editor {
                 x: root.gutter-col-width;
                 y: 0;
@@ -447,12 +541,16 @@ export component AppWindow inherits Window {
                 completion-selected  <=> UiState.completion-selected;
                 editor-cursor-target <=> UiState.editor-cursor-target;
                 accept-completion(text, pos, offset, tname) => { UiState.accept-completion(text, pos, offset, tname); }
+                focus-sidebar => { root.focused-pane = 0; sidebar-inst.grab-focus(); }
+                focus-result  => {
+                    if (UiState.result-panel-open) {
+                        root.focused-pane = 2;
+                        result-table-inst.grab-focus();
+                    }
+                }
             }
 
             // ── Panel drag handle ─────────────────────────────────────────────
-            // Sits at the top boundary of the result panel.  Dragging grows/shrinks
-            // panel-height upward.  Rendered after the result panel so it is on
-            // top and receives pointer events without being clipped.
             if UiState.result-panel-open: Rectangle {
                 x: 0;
                 y: parent.height - root.panel-height;
@@ -474,9 +572,6 @@ export component AppWindow inherits Window {
             }
 
             // ── Result / error overlay panel ──────────────────────────────────
-            // Overlays the editor from the bottom (VSCode-style).
-            // Always instantiated (so result-table-inst is accessible from AppWindow
-            // scope for focus tracking and grab-focus); hidden via `visible:` when closed.
             Rectangle {
                 x: 0;
                 y: parent.height - root.panel-height;
@@ -572,8 +667,6 @@ export component AppWindow inherits Window {
                 }
 
                 // ── Cell-value preview strip ──────────────────────────────────
-                // Fixed-height strip at the bottom of the result panel; shows the
-                // full value of the last clicked cell with word-wrap and vertical scroll.
                 Rectangle {
                     x: 0;
                     y: root.panel-height - root.preview-strip-h;
@@ -627,12 +720,43 @@ export component AppWindow inherits Window {
             }
         }
 
+        // ── Table View (shown when active tab is a Table View tab) ────────────
+        // Always instantiated so tv-inst.grab-focus() and tv-inst.tv-focused are accessible.
+        tv-inst := TableView {
+            visible: !UiState.active-tab-kind-sql;
+            x: sidebar-width;
+            y: menu-bar-height + tab-bar-height;
+            width:  main-width;
+            height: content-height;
+            table-name:        UiState.tv-table-name;
+            sub-tab           <=> UiState.tv-sub-tab;
+            data-columns:      UiState.result-columns;
+            data-rows:         UiState.result-rows;
+            data-row-count:    UiState.result-row-count;
+            data-loading      <=> UiState.tv-data-loading;
+            data-error:        UiState.tv-data-error;
+            structure-columns: UiState.tv-columns;
+            ddl-text:          UiState.tv-ddl;
+            ddl-loading       <=> UiState.tv-ddl-loading;
+            page-size:         UiState.tv-page-size;
+            ddl-font-size-px:  UiState.font-size;
+            copy-ddl      => { UiState.copy-tv-ddl(); }
+            refresh-data  => { UiState.refresh-tv-data(); }
+            fetch-ddl     => { UiState.fetch-tv-ddl(); }
+            change-page-size(n) => { UiState.change-tv-page-size(n); }
+            copy-cell(v)  => { UiState.copy-result-cell(v); }
+            copy-row(i)   => { UiState.copy-result-row(i); }
+            copy-all-tsv  => { UiState.copy-result-tsv(); }
+            export-csv    => { UiState.export-csv(); }
+            export-json   => { UiState.export-json(); }
+        }
+
         // ── Completion popup overlay ──────────────────────────────────────────
-        // Lives at FocusScope level (not inside the clip:true main Rectangle) so
-        // it is never clipped even when the cursor is near the editor bottom.
-        if UiState.completion-visible && UiState.completion-items.length > 0: CompletionPopup {
+        // Only shown when the SQL editor is active (popup positions reference editor-inst).
+        if UiState.completion-visible && UiState.completion-items.length > 0
+                && UiState.active-tab-kind-sql: CompletionPopup {
             x: root.sidebar-width + root.gutter-col-width + editor-inst.popup-x;
-            y: menu-bar-height + editor-inst.popup-y;
+            y: menu-bar-height + tab-bar-height + editor-inst.popup-y;
             items: UiState.completion-items;
             selected-index <=> UiState.completion-selected;
         }
@@ -640,7 +764,7 @@ export component AppWindow inherits Window {
         // ── Status bar ────────────────────────────────────────────────────────
         StatusBar {
             x: 0;
-            y: menu-bar-height + content-height;
+            y: menu-bar-height + tab-bar-height + content-height;
             width:  root.width;
             height: 24px;
             connection-text: UiState.status-connection;
@@ -648,10 +772,6 @@ export component AppWindow inherits Window {
         }
 
         // ── Inner edge lines ──────────────────────────────────────────────────
-        // Subtle 1px vertical accents on the left and right sides of the client area.
-        // Rendered before focus borders so the focus border draws on top and remains
-        // fully visible when it aligns with a window edge.
-        // Dark mode: surface0 (#313244), light mode: surface0 (#ccd0da).
         Rectangle {
             x: 0; y: 0;
             width: 1px; height: root.height;
@@ -664,14 +784,11 @@ export component AppWindow inherits Window {
         }
 
         // ── Pane focus border indicators ──────────────────────────────────────
-        // Rendered after the inner edge lines so focus borders always appear on top
-        // and are not obscured at the window edges.
-        // Rendered before modal overlays so modals cover the borders.
 
         // Sidebar focus border
         if root.focused-pane == 0: Rectangle {
             x: 0;
-            y: menu-bar-height;
+            y: menu-bar-height + tab-bar-height;
             width:  sidebar-width;
             height: content-height;
             border-width: 1px;
@@ -682,7 +799,7 @@ export component AppWindow inherits Window {
         // Editor / main-content pane focus border
         if root.focused-pane == 1: Rectangle {
             x: sidebar-width;
-            y: menu-bar-height;
+            y: menu-bar-height + tab-bar-height;
             width:  main-width;
             height: content-height;
             border-width: 1px;
@@ -693,7 +810,7 @@ export component AppWindow inherits Window {
         // Result-table pane focus border
         if root.focused-pane == 2 && UiState.result-panel-open: Rectangle {
             x: sidebar-width;
-            y: menu-bar-height + content-height - panel-height;
+            y: menu-bar-height + tab-bar-height + content-height - panel-height;
             width:  main-width;
             height: panel-height;
             border-width: 1px;
@@ -702,7 +819,6 @@ export component AppWindow inherits Window {
         }
 
         // ── Connection form modal overlay ─────────────────────────────────────
-        // Rendered last so it appears above everything else.
         if UiState.show-connection-form: Rectangle {
             x: 0;
             y: 0;
@@ -774,8 +890,6 @@ export component AppWindow inherits Window {
                 UiState.edit-connection(id);
             }
             add-connection => {
-                // Close the DB manager first, then open the connection form.
-                // The flag tells the form to reopen the DB manager when it closes.
                 UiState.show-db-manager = false;
                 UiState.reopen-db-manager-on-form-close = true;
                 UiState.open-connection-form();

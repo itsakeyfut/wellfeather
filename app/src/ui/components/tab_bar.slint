@@ -1,0 +1,101 @@
+import { TabEntry } from "../globals.slint";
+import { Colors, Typography } from "../theme.slint";
+
+export component TabBar inherits Rectangle {
+    in property <[TabEntry]> tabs;
+    in property <int>        active-index;
+    callback new-tab();
+    callback close-tab(int);
+    callback switch-tab(int);
+
+    height: 32px;
+    background: Colors.surface0;
+
+    HorizontalLayout {
+        spacing: 0;
+
+        tab-flickable := Flickable {
+            horizontal-stretch: 1;
+            height: parent.height;
+            viewport-width: max(tab-row.preferred-width, self.width);
+
+            tab-row := HorizontalLayout {
+                spacing: 0;
+
+                for tab[i] in root.tabs : Rectangle {
+                    width: min(max(tab-text.preferred-width + 40px, 80px), 180px);
+                    height: 32px;
+                    background: i == root.active-index ? Colors.base : transparent;
+
+                    ta-tab := TouchArea {
+                        clicked => { root.switch-tab(i); }
+                    }
+
+                    HorizontalLayout {
+                        x: 0;
+                        y: (parent.height - 24px) / 2;
+                        width: parent.width;
+                        height: 24px;
+                        padding-left: 10px;
+                        padding-right: 4px;
+                        spacing: 6px;
+
+                        tab-text := Text {
+                            text: tab.title;
+                            width: min(self.preferred-width, 140px);
+                            color: i == root.active-index ? Colors.text : Colors.subtext1;
+                            font-size: Typography.size-lg;
+                            vertical-alignment: center;
+                            overflow: elide;
+                        }
+
+                        Rectangle {
+                            width: 24px;
+                            height: 24px;
+                            border-radius: 4px;
+                            background: close-ta.has-hover ? Colors.surface1 : transparent;
+
+                            Text {
+                                text: "×";
+                                color: close-ta.has-hover ? Colors.text : Colors.subtext1;
+                                font-size: Typography.size-2xl;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+
+                            close-ta := TouchArea {
+                                clicked => { root.close-tab(i); }
+                            }
+                        }
+                    }
+
+                    if i == root.active-index : Rectangle {
+                        x: 0;
+                        y: parent.height - 2px;
+                        width: parent.width;
+                        height: 2px;
+                        background: Colors.blue;
+                    }
+                }
+            }
+        }
+
+        Rectangle {
+            width: 32px;
+            height: 32px;
+            background: new-ta.has-hover ? Colors.surface1 : transparent;
+
+            Text {
+                text: "+";
+                color: Colors.subtext1;
+                font-size: Typography.size-xl;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+
+            new-ta := TouchArea {
+                clicked => { root.new-tab(); }
+            }
+        }
+    }
+}

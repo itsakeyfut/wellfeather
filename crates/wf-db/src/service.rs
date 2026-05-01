@@ -103,6 +103,20 @@ impl DbService {
         pool.fetch_metadata().await
     }
 
+    /// Fetch the DDL `CREATE` statement for `name` on `conn_id`.
+    ///
+    /// `kind` should be `"table"`, `"view"`, or `"index"`.
+    /// Returns `Err(DbError::ConnectionFailed)` if `conn_id` is not connected.
+    pub async fn fetch_ddl(
+        &self,
+        conn_id: &str,
+        name: &str,
+        kind: &str,
+    ) -> Result<String, DbError> {
+        let pool = self.pool_for(conn_id)?;
+        pool.fetch_ddl(name, kind).await
+    }
+
     /// Returns `true` if a pool for `conn_id` exists in the map.
     pub fn is_connected(&self, conn_id: &str) -> bool {
         self.pools

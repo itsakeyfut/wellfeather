@@ -291,3 +291,39 @@ msgstr "Disconnect"
 msgctxt "DbManagerDialog"
 msgid "+ Add connection"
 msgstr "+ Add connection"
+
+msgctxt "TableView"
+msgid "Data"
+msgstr "Data"
+
+msgctxt "TableView"
+msgid "Columns"
+msgstr "Columns"
+
+msgctxt "TableView"
+msgid "DDL"
+msgstr "DDL"
+
+msgctxt "TableView"
+msgid "Copy DDL"
+msgstr "Copy DDL"
+
+msgctxt "TableView"
+msgid "Column"
+msgstr "Column"
+
+msgctxt "TableView"
+msgid "Type"
+msgstr "Type"
+
+msgctxt "TableView"
+msgid "Nullable"
+msgstr "Nullable"
+
+msgctxt "TableView"
+msgid "YES"
+msgstr "YES"
+
+msgctxt "TableView"
+msgid "NO"
+msgstr "NO"

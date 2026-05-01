@@ -11,12 +11,27 @@
 //! lives here because `app/` is the only crate that depends on both.
 
 use anyhow::Context as _;
+use serde::{Deserialize, Serialize};
 use tracing::{info, warn};
 use wf_config::{
     manager::ConfigManager,
     models::{ConnectionConfig, DbTypeName, PageSize, Theme},
 };
 use wf_db::models::{DbConnection, DbType};
+
+/// Serializable record for a single SQL Editor tab (written to `tabs.toml`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TabSessionEntry {
+    pub id: String,
+    pub title: String,
+    pub query_text: String,
+}
+
+#[derive(Serialize, Deserialize)]
+struct TabsFile {
+    active_index: usize,
+    tabs: Vec<TabSessionEntry>,
+}
 
 /// Persists and restores the last active database connection across app restarts.
 ///
@@ -167,6 +182,50 @@ impl SessionManager {
         }
         info!(len = query.len(), "last_query.sql restored");
         Ok(Some(query))
+    }
+
+    /// Persist the current set of SQL Editor tabs to `tabs.toml`.
+    ///
+    /// `active_index` is the index within the serialized list (sql-editor tabs only).
+    /// Table View tabs are intentionally not persisted — they are easy to reopen.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the file cannot be written.
+    pub fn save_tabs(&self, active_index: usize, tabs: &[TabSessionEntry]) -> anyhow::Result<()> {
+        let path = self.config_manager.dir().join("tabs.toml");
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)
+                .with_context(|| format!("failed to create directory {}", parent.display()))?;
+        }
+        let file = TabsFile {
+            active_index,
+            tabs: tabs.to_vec(),
+        };
+        let s = toml::to_string_pretty(&file).context("failed to serialize tabs")?;
+        std::fs::write(&path, s.as_bytes())
+            .with_context(|| format!("failed to write {}", path.display()))?;
+        info!(count = tabs.len(), "tabs.toml saved");
+        Ok(())
+    }
+
+    /// Read `tabs.toml` and return `(active_index, tabs)`.
+    ///
+    /// Returns `Ok(None)` when the file does not exist.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the file exists but cannot be parsed.
+    pub fn restore_tabs(&self) -> anyhow::Result<Option<(usize, Vec<TabSessionEntry>)>> {
+        let path = self.config_manager.dir().join("tabs.toml");
+        if !path.exists() {
+            return Ok(None);
+        }
+        let s = std::fs::read_to_string(&path)
+            .with_context(|| format!("failed to read {}", path.display()))?;
+        let file: TabsFile = toml::from_str(&s).context("failed to parse tabs.toml")?;
+        info!(count = file.tabs.len(), "tabs.toml restored");
+        Ok(Some((file.active_index, file.tabs)))
     }
 
     /// Load the last session and return the connection to auto-connect to.
@@ -368,6 +427,43 @@ mod tests {
         let restored = sm.restore_query_file().unwrap();
         assert_eq!(restored, Some("SELECT 1".to_string()));
         assert!(dir.path().join("last_query.sql").exists());
+    }
+
+    #[test]
+    fn save_tabs_should_persist_and_restore() {
+        let dir = tempdir().unwrap();
+        let sm = SessionManager::with_config_manager(ConfigManager::with_path(
+            dir.path().join("config.toml"),
+        ));
+
+        let tabs = vec![
+            super::TabSessionEntry {
+                id: "t1".to_string(),
+                title: "Query 1".to_string(),
+                query_text: "SELECT 1".to_string(),
+            },
+            super::TabSessionEntry {
+                id: "t2".to_string(),
+                title: "Query 2".to_string(),
+                query_text: "SELECT 2".to_string(),
+            },
+        ];
+        sm.save_tabs(1, &tabs).unwrap();
+
+        let (active, restored) = sm.restore_tabs().unwrap().expect("should restore");
+        assert_eq!(active, 1);
+        assert_eq!(restored.len(), 2);
+        assert_eq!(restored[0].id, "t1");
+        assert_eq!(restored[1].query_text, "SELECT 2");
+    }
+
+    #[test]
+    fn restore_tabs_should_return_none_when_absent() {
+        let dir = tempdir().unwrap();
+        let sm = SessionManager::with_config_manager(ConfigManager::with_path(
+            dir.path().join("config.toml"),
+        ));
+        assert!(sm.restore_tabs().unwrap().is_none());
     }
 
     #[test]
