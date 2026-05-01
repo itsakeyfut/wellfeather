@@ -1,6 +1,6 @@
 import { ListView } from "std-widgets.slint";
 import { RowData } from "../globals.slint";
-import { Colors, Typography } from "../theme.slint";
+import { Colors, Typography, Layout } from "../theme.slint";
 import { MenuItem } from "common.slint";
 
 // Data body: keyboard handler (FocusScope), virtualised row list, and right-click context menu.
@@ -228,14 +228,14 @@ export component ResultTableBody inherits Rectangle {
             x: root.ctx-menu-x;
             y: root.ctx-menu-y;
             width: 204px;
-            height: 90px;
+            height: 3 * Layout.height-menu-item;
             close-policy: PopupClosePolicy.close-on-click;
 
             Rectangle {
                 width: 204px;
-                height: 90px;
+                height: 3 * Layout.height-menu-item;
                 background: Colors.surface0;
-                border-radius: 4px;
+                border-radius: Layout.radius-md;
                 border-width: 1px;
                 border-color: Colors.surface2;
                 drop-shadow-blur: 8px;
@@ -302,10 +302,10 @@ export component ResultTableBody inherits Rectangle {
                         }
 
                         if cell.is-null: Rectangle {
-                            x: 8px;
+                            x: Layout.padding-sm;
                             y: (parent.height - self.height) / 2;
                             width: 36px; height: 16px;
-                            border-radius: 3px;
+                            border-radius: Layout.radius-sm;
                             background: Colors.surface1;
                             Text {
                                 width: parent.width; height: parent.height;
@@ -318,9 +318,9 @@ export component ResultTableBody inherits Rectangle {
                         }
 
                         if !cell.is-null: Text {
-                            x: 8px;
+                            x: Layout.padding-sm;
                             y: (parent.height - self.height) / 2;
-                            width: parent.width - 16px;
+                            width: parent.width - Layout.padding-sm * 2;
                             text: cell.value;
                             color: i == root.selected-row ? Colors.selected-text : Colors.subtext0;
                             font-family: root.font-family;

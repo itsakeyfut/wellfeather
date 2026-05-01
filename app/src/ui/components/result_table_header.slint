@@ -1,4 +1,4 @@
-import { Colors, Typography } from "../theme.slint";
+import { Colors, Typography, Layout, Icons } from "../theme.slint";
 
 // Column header row with sort indicators and drag-to-resize handles.
 export component ResultTableHeader inherits Flickable {
@@ -36,11 +36,11 @@ export component ResultTableHeader inherits Flickable {
             }
 
             Text {
-                x: 8px;
+                x: Layout.padding-sm;
                 y: (parent.height - self.height) / 2;
                 width: root.sort-col == i
-                    ? parent.width - 28px
-                    : parent.width - 12px;
+                    ? parent.width - Layout.padding-md - Layout.icon-sm
+                    : parent.width - Layout.padding-md;
                 text: col;
                 color: Colors.text;
                 font-size: Typography.size-lg;
@@ -48,13 +48,13 @@ export component ResultTableHeader inherits Flickable {
             }
 
             if root.sort-col == i: Image {
-                x: parent.width - 20px;
+                x: parent.width - Layout.padding-md - Layout.icon-sm;
                 y: (parent.height - self.height) / 2;
-                width: 12px;
-                height: 12px;
+                width: Layout.icon-sm;
+                height: Layout.icon-sm;
                 source: root.sort-asc
-                    ? @image-url("../../../assets/icons/sort-asc.svg")
-                    : @image-url("../../../assets/icons/sort-desc.svg");
+                    ? Icons.sort-asc
+                    : Icons.sort-desc;
                 colorize: Colors.blue;
                 image-fit: contain;
             }

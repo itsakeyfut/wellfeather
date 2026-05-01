@@ -11,7 +11,7 @@ import "../../assets/fonts/JetBrainsMono-Regular.ttf";
 import "../../assets/fonts/JetBrainsMono-Bold.ttf";
 
 import { ConnectionEntry, RowData, SidebarNode, CompletionRow, TabEntry, ColumnData } from "globals.slint";
-import { Colors, Typography } from "theme.slint";
+import { Colors, Typography, Layout, Icons } from "theme.slint";
 import { CompletionPopup } from "components/completion_popup.slint";
 import { ConnectionForm }  from "components/connection_form.slint";
 import { MenuBar }         from "components/menu_bar.slint";
@@ -255,9 +255,9 @@ export component AppWindow inherits Window {
     changed _theme-sync => { Colors.is-dark = UiState.is-dark; }
 
     // ── Layout geometry helpers ───────────────────────────────────────────────
-    property <length> menu-bar-height:   28px;
-    property <length> tab-bar-height:    32px;
-    property <length> content-height:    root.height - 24px - menu-bar-height - tab-bar-height;
+    property <length> menu-bar-height:   Layout.height-bar;
+    property <length> tab-bar-height:    Layout.height-tab-bar;
+    property <length> content-height:    root.height - Layout.height-compact - menu-bar-height - tab-bar-height;
     property <length> sidebar-width:     220px;
     property <length> main-width:        root.width - sidebar-width;
     property <length> divider-thickness: 5px;
@@ -620,7 +620,7 @@ export component AppWindow inherits Window {
                             y: (parent.height - self.height) / 2;
                             width: 14px;
                             height: 14px;
-                            source: @image-url("../../assets/icons/close.svg");
+                            source: Icons.close;
                             colorize: Colors.surface2;
                             image-fit: contain;
                         }

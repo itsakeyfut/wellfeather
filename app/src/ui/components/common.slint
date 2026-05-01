@@ -1,7 +1,7 @@
 // Shared UI primitives used across multiple components.
 // All components here depend only on theme.slint — no circular imports.
 
-import { Colors, Typography } from "../theme.slint";
+import { Colors, Typography, Layout, Icons } from "../theme.slint";
 
 // ── ToolbarButton ─────────────────────────────────────────────────────────────
 // Small toggle button used in the result-table toolbar (page-size selector,
@@ -16,8 +16,8 @@ export component ToolbarButton inherits Rectangle {
     in property <image>  icon;
     callback clicked;
 
-    height: 20px;
-    border-radius: 3px;
+    height: Layout.height-btn-sm;
+    border-radius: Layout.radius-sm;
     background: ta.has-hover ? Colors.surface1
         : root.active ? Colors.blue : Colors.surface0;
 
@@ -26,9 +26,9 @@ export component ToolbarButton inherits Rectangle {
     }
     HorizontalLayout {
         alignment: center;
-        spacing: 3px;
+        spacing: Layout.spacing-btn;
         if root.leading-icon.width > 0 : Image {
-            width: 12px;
+            width: Layout.icon-sm;
             source: root.leading-icon;
             colorize: root.active ? Colors.base : Colors.overlay2;
             image-fit: contain;
@@ -40,7 +40,7 @@ export component ToolbarButton inherits Rectangle {
             vertical-alignment: center;
         }
         if root.icon.width > 0 : Image {
-            width: 10px;
+            width: Layout.icon-xs;
             source: root.icon;
             colorize: root.active ? Colors.base : Colors.overlay2;
             image-fit: contain;
@@ -64,15 +64,15 @@ export component ActionButton inherits Rectangle {
     in property <image>  leading-icon;
     callback clicked;
 
-    height: 32px;
-    border-radius: 4px;
+    height: Layout.height-btn-lg;
+    border-radius: Layout.radius-md;
     background: root.bg;
 
     HorizontalLayout {
         alignment: center;
-        spacing: 5px;
+        spacing: Layout.spacing-icon;
         if root.leading-icon.width > 0 : Image {
-            width: 14px;
+            width: Layout.icon-md;
             source: root.leading-icon;
             colorize: root.fg;
             image-fit: contain;
@@ -107,7 +107,7 @@ export component ModalOverlay inherits Rectangle {
             Rectangle {
                 width: 360px;
                 background: Colors.surface0;
-                border-radius: 8px;
+                border-radius: Layout.radius-lg;
                 border-width: 1px;
                 border-color: Colors.surface2;
                 drop-shadow-blur: 20px;
@@ -127,7 +127,7 @@ export component MenuItem inherits Rectangle {
     in property <bool>   selected: false;
     callback clicked;
 
-    height: 30px;
+    height: Layout.height-menu-item;
     background: ta.has-hover ? Colors.surface1 : transparent;
 
     ta := TouchArea {
@@ -136,12 +136,12 @@ export component MenuItem inherits Rectangle {
     HorizontalLayout {
         x: 0; y: 0;
         width: parent.width; height: parent.height;
-        padding-left: 12px;
-        spacing: 6px;
+        padding-left: Layout.padding-md;
+        spacing: Layout.spacing-md;
         alignment: start;
         Image {
-            width: 10px;
-            source: @image-url("../../../assets/icons/chevron-right.svg");
+            width: Layout.icon-xs;
+            source: Icons.chevron-right;
             colorize: Colors.text;
             image-fit: contain;
             opacity: root.selected ? 1.0 : 0.0;

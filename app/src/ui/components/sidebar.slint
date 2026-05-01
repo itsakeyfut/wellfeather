@@ -1,5 +1,5 @@
 import { SidebarNode } from "../globals.slint";
-import { Colors, Typography } from "../theme.slint";
+import { Colors, Typography, Layout, Icons } from "../theme.slint";
 
 export component Sidebar inherits Rectangle {
     background: Colors.base;
@@ -110,7 +110,7 @@ export component Sidebar inherits Rectangle {
             sidebar-content := VerticalLayout {
                 // ── Schema tree ───────────────────────────────────────────────────────
                 for node[i] in root.tree : Rectangle {
-                    height: 32px;
+                    height: Layout.height-sidebar-row;
                     clip: true;
 
                     background: i == root.kb-focus
@@ -152,28 +152,28 @@ export component Sidebar inherits Rectangle {
                         x: 0; y: 0;
                         width: parent.width;
                         height: parent.height;
-                        padding-left: (8 + node.level * 14) * 1px;
-                        padding-right: 8px;
-                        spacing: 8px;
+                        padding-left: Layout.padding-sm + node.level * Layout.sidebar-indent;
+                        padding-right: Layout.padding-sm;
+                        spacing: Layout.spacing-lg;
 
                         // Expand/collapse toggle icon for connection and category nodes
                         if node.level < 2 : Image {
-                            width: 14px;
+                            width: Layout.icon-md;
                             source: node.is-expanded
-                                ? @image-url("../../../assets/icons/chevron-down.svg")
-                                : @image-url("../../../assets/icons/chevron-right.svg");
+                                ? Icons.chevron-down
+                                : Icons.chevron-right;
                             colorize: Colors.surface2;
                             image-fit: contain;
                         }
                         // Spacer for item nodes
-                        if node.level >= 2 : Rectangle { width: 14px; }
+                        if node.level >= 2 : Rectangle { width: Layout.icon-md; }
 
                         // Connection status dot (filled = active / empty = inactive)
                         if node.level == 0 : Image {
-                            width: 16px;
+                            width: Layout.icon-lg;
                             source: node.is-active
-                                ? @image-url("../../../assets/icons/dot-filled.svg")
-                                : @image-url("../../../assets/icons/dot-empty.svg");
+                                ? Icons.dot-filled
+                                : Icons.dot-empty;
                             colorize: node.is-active ? Colors.blue : Colors.surface2;
                             image-fit: contain;
                         }
@@ -202,7 +202,7 @@ export component Sidebar inherits Rectangle {
 
                 // ── Metadata loading indicator ────────────────────────────────────────
                 if root.is-loading : Rectangle {
-                    height: 28px;
+                    height: Layout.height-row;
                     HorizontalLayout {
                         padding-left: 24px;
                         Text {
@@ -223,15 +223,15 @@ export component Sidebar inherits Rectangle {
 
                 // ── Add connection button ─────────────────────────────────────────────
                 Rectangle {
-                    height: 36px;
+                    height: Layout.height-sidebar-row + 4px;
                     background: transparent;
 
                     HorizontalLayout {
-                        padding-left: 12px;
-                        spacing: 6px;
+                        padding-left: Layout.padding-md;
+                        spacing: Layout.spacing-md;
                         Image {
-                            width: 14px;
-                            source: @image-url("../../../assets/icons/plus.svg");
+                            width: Layout.icon-md;
+                            source: Icons.plus;
                             colorize: Colors.blue;
                             image-fit: contain;
                         }

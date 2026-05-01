@@ -1,4 +1,4 @@
-import { Colors, Typography } from "../theme.slint";
+import { Colors, Typography, Layout } from "../theme.slint";
 
 // Search bar (shown when in search mode) + active-filter indicator banner.
 export component ResultTableSearch inherits Rectangle {
@@ -13,8 +13,8 @@ export component ResultTableSearch inherits Rectangle {
 
     public function grab-focus() { search-input.focus(); }
 
-    property <length> search-bar-h:    root.in-search-mode ? 32px : 0px;
-    property <length> filter-banner-h: root.active-filter != "" ? 24px : 0px;
+    property <length> search-bar-h:    root.in-search-mode ? Layout.height-tab-bar : 0px;
+    property <length> filter-banner-h: root.active-filter != "" ? Layout.height-compact : 0px;
 
     // Search bar
     Rectangle {
@@ -31,7 +31,7 @@ export component ResultTableSearch inherits Rectangle {
         }
 
         Text {
-            x: 10px;
+            x: Layout.padding-tab;
             y: (parent.height - self.height) / 2;
             text: "/";
             color: Colors.blue;
@@ -68,9 +68,9 @@ export component ResultTableSearch inherits Rectangle {
         }
 
         HorizontalLayout {
-            padding-left: 10px;
-            padding-right: 10px;
-            spacing: 6px;
+            padding-left: Layout.padding-tab;
+            padding-right: Layout.padding-tab;
+            spacing: Layout.spacing-md;
 
             Text {
                 text: @tr("Filter:");

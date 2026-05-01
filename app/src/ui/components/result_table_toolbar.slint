@@ -1,9 +1,9 @@
-import { Colors, Typography } from "../theme.slint";
+import { Colors, Typography, Layout, Icons } from "../theme.slint";
 import { ToolbarButton, MenuItem } from "common.slint";
 
 // Toolbar strip for the result table: row-count display, Export button, page-size selector.
 export component ResultTableToolbar inherits Rectangle {
-    height: 28px;
+    height: Layout.height-bar;
     background: Colors.mantle;
     clip: true;
 
@@ -37,7 +37,7 @@ export component ResultTableToolbar inherits Rectangle {
         y: (parent.height - self.height) / 2;
         width: 80px;
         text: @tr("Export");
-        leading-icon: @image-url("../../../assets/icons/export.svg");
+        leading-icon: Icons.export;
         clicked => { export-popup.show(); }
     }
 
@@ -45,8 +45,8 @@ export component ResultTableToolbar inherits Rectangle {
         x: parent.width - 178px;
         y: (parent.height - self.height) / 2;
         width: 170px;
-        height: 20px;
-        spacing: 2px;
+        height: Layout.height-btn-sm;
+        spacing: Layout.spacing-xs;
 
         ToolbarButton {
             width: 38px; text: "100";
@@ -81,7 +81,7 @@ export component ResultTableToolbar inherits Rectangle {
             width: 120px;
             height: 60px;
             background: Colors.surface0;
-            border-radius: 4px;
+            border-radius: Layout.radius-md;
             border-width: 1px;
             border-color: Colors.surface2;
             drop-shadow-blur: 8px;
