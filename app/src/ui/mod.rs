@@ -335,6 +335,15 @@ impl UI {
         let _ = slint::select_bundled_translation(lang);
         rust_i18n::set_locale(lang);
         ui_global.set_language(lang.clone().into());
+        // Route UI text through the platform's native renderer (DirectWrite / Core Text)
+        // by naming a system font that Slint resolves without falling back to the bundled
+        // fontique renderer, which garbles text at certain sizes.
+        #[cfg(target_os = "windows")]
+        ui_global.set_ui_font("Segoe UI".into());
+        #[cfg(target_os = "macos")]
+        ui_global.set_ui_font("Helvetica Neue".into());
+        #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+        ui_global.set_ui_font("Liberation Sans, DejaVu Sans".into());
         // Initialise tab bar from the restored (or freshly created) tab state.
         {
             let ts = tabs_state.borrow();

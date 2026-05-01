@@ -98,6 +98,7 @@ component DbTypeButton inherits Rectangle {
     in property <string> label-text;
     in property <image>  icon;
     in property <bool>   active;
+    in property <string> ui-font: Typography.font-ui;
     callback clicked;
 
     background: active ? Colors.blue : Colors.surface1;
@@ -123,7 +124,7 @@ component DbTypeButton inherits Rectangle {
             text: label-text;
             color: active ? Colors.base : Colors.text;
             font-size: Typography.size-xl;
-            font-family: Typography.font-ui;
+            font-family: root.ui-font;
             vertical-alignment: center;
             wrap: no-wrap;
         }
@@ -135,7 +136,8 @@ component DbTypeButton inherits Rectangle {
 
 export component ConnectionForm inherits Rectangle {
     // ── Properties bound from UiState in app.slint ───────────────────────────
-    in-out property <int>    tab-index:   0;
+    in property <string>  ui-font:     "Segoe UI"; // platform system font, passed from app.slint
+    in-out property <int> tab-index:   0;
     in-out property <int>    db-type:     0;
     in-out property <string> name:        "";
     in-out property <string> conn-string: "";
@@ -206,18 +208,21 @@ export component ConnectionForm inherits Rectangle {
                 label-text: "PostgreSQL";
                 icon: Icons.brand-postgresql;
                 active: root.db-type == 0;
+                ui-font: root.ui-font;
                 clicked => { root.db-type = 0; }
             }
             DbTypeButton {
                 label-text: "MySQL";
                 icon: Icons.brand-mysql;
                 active: root.db-type == 1;
+                ui-font: root.ui-font;
                 clicked => { root.db-type = 1; }
             }
             DbTypeButton {
                 label-text: "SQLite";
                 icon: Icons.brand-sqlite;
                 active: root.db-type == 2;
+                ui-font: root.ui-font;
                 clicked => { root.db-type = 2; }
             }
         }
