@@ -102,21 +102,30 @@ component DbTypeButton inherits Rectangle {
 
     background: active ? Colors.blue : Colors.surface1;
     border-radius: 4px;
-    height: 28px;
+    height: 32px;
     horizontal-stretch: 1;
+    // Wrapping Image in a Rectangle with explicit width prevents Slint from using
+    // the SVG's intrinsic size (800px) in the alignment: center group calculation.
     HorizontalLayout {
         alignment: center;
         spacing: 6px;
-        if root.icon.width > 0 : Image {
-            width: 16px;
-            height: 16px;
-            source: root.icon;
-            image-fit: contain;
+        Rectangle {
+            width: root.icon.width > 0 ? 18px : 0px;
+            horizontal-stretch: 0;
+            Image {
+                width: parent.width;
+                height: parent.height;
+                source: root.icon;
+                image-fit: contain;
+            }
         }
         Text {
             text: label-text;
             color: active ? Colors.base : Colors.text;
+            font-size: Typography.size-xl;
+            font-family: "Segoe UI";
             vertical-alignment: center;
+            wrap: no-wrap;
         }
     }
     TouchArea { clicked => { root.clicked(); } }
