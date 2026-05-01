@@ -113,8 +113,8 @@ msgid "Loading…"
 msgstr "Loading…"
 
 msgctxt "Sidebar"
-msgid "+ Add connection"
-msgstr "+ Add connection"
+msgid "Add connection"
+msgstr "Add connection"
 
 msgctxt "ResultTableBody"
 msgid "Copy cell value"
@@ -155,6 +155,10 @@ msgstr "Edit Connection"
 msgctxt "ConnectionForm"
 msgid "Save"
 msgstr "Save"
+
+msgctxt "ConnectionForm"
+msgid "Delete"
+msgstr "Delete"
 
 msgctxt "ConnectionForm"
 msgid "Name"
@@ -289,8 +293,8 @@ msgid "Disconnect"
 msgstr "Disconnect"
 
 msgctxt "DbManagerDialog"
-msgid "+ Add connection"
-msgstr "+ Add connection"
+msgid "Add connection"
+msgstr "Add connection"
 
 msgctxt "TableView"
 msgid "Data"
@@ -305,8 +309,8 @@ msgid "DDL"
 msgstr "DDL"
 
 msgctxt "TableView"
-msgid "Copy DDL"
-msgstr "Copy DDL"
+msgid "Copy"
+msgstr "Copy"
 
 msgctxt "TableView"
 msgid "Column"

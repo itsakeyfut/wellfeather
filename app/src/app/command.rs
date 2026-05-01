@@ -32,10 +32,11 @@ pub enum Command {
     /// On success sends [`Event::TestConnectionOk`]; on failure sends
     /// [`Event::TestConnectionFailed`].
     TestConnection(DbConnection, Option<String>),
-    Disconnect(String),   // connection_id
-    RunQuery(String),     // sql
-    RunSelection(String), // sql (selected range)
-    RunAll(String),       // sql (entire editor)
+    Disconnect(String),       // connection_id
+    RemoveConnection(String), // connection_id — disconnect + delete from config
+    RunQuery(String),         // sql
+    RunSelection(String),     // sql (selected range)
+    RunAll(String),           // sql (entire editor)
     CancelQuery,
     FetchCompletion(String, usize), // sql, cursor_pos
     ExportResult(ExportFormat, PathBuf),

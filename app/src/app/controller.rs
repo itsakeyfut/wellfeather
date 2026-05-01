@@ -126,6 +126,7 @@ impl AppController {
                 Command::Connect(conn, pw) => self.handle_connect(conn, pw).await,
                 Command::TestConnection(conn, pw) => self.handle_test_connection(conn, pw).await,
                 Command::Disconnect(id) => self.handle_disconnect(id).await,
+                Command::RemoveConnection(id) => self.handle_remove_connection(id).await,
                 Command::RunQuery(sql) => self.handle_run_query(sql).await,
                 Command::RunAll(sql) => self.handle_run_all(sql).await,
                 Command::RunSelection(sql) => self.handle_run_query(sql).await,
@@ -247,6 +248,19 @@ impl AppController {
         info!(conn_id = %id, "handling Disconnect command");
         self.db.disconnect(&id);
         let _ = self.tx_event.send(Event::Disconnected(id)).await;
+    }
+
+    /// Handle a `RemoveConnection` command.
+    ///
+    /// Drops the connection pool if active, removes from state, and deletes from config.
+    async fn handle_remove_connection(&self, id: String) {
+        info!(conn_id = %id, "handling RemoveConnection command");
+        self.db.disconnect(&id);
+        self.state.conn.remove(&id);
+        if let Err(e) = self.session.remove_connection(&id) {
+            warn!(conn_id = %id, error = %e, "failed to remove connection from config");
+        }
+        let _ = self.tx_event.send(Event::ConnectionRemoved(id)).await;
     }
 
     /// Handle a `RunQuery` / `RunAll` / `RunSelection` command.

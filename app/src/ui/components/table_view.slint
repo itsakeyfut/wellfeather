@@ -68,12 +68,33 @@ export component TableView inherits Rectangle {
                 height: 32px;
                 background: i == root.sub-tab ? Colors.base : transparent;
 
-                Text {
-                    text: label;
-                    color: i == root.sub-tab ? Colors.text : Colors.subtext1;
-                    font-size: Typography.size-base;
-                    horizontal-alignment: center;
-                    vertical-alignment: center;
+                HorizontalLayout {
+                    alignment: center;
+                    spacing: 4px;
+                    if i == 0 : Image {
+                        width: 14px;
+                        source: @image-url("../../../assets/icons/table-list.svg");
+                        colorize: i == root.sub-tab ? Colors.text : Colors.subtext1;
+                        image-fit: contain;
+                    }
+                    if i == 1 : Image {
+                        width: 14px;
+                        source: @image-url("../../../assets/icons/columns.svg");
+                        colorize: i == root.sub-tab ? Colors.text : Colors.subtext1;
+                        image-fit: contain;
+                    }
+                    if i == 2 : Image {
+                        width: 14px;
+                        source: @image-url("../../../assets/icons/code.svg");
+                        colorize: i == root.sub-tab ? Colors.text : Colors.subtext1;
+                        image-fit: contain;
+                    }
+                    Text {
+                        text: label;
+                        color: i == root.sub-tab ? Colors.text : Colors.subtext1;
+                        font-size: Typography.size-base;
+                        vertical-alignment: center;
+                    }
                 }
 
                 TouchArea {
@@ -238,12 +259,21 @@ export component TableView inherits Rectangle {
                 border-radius: 4px;
                 background: copy-ta.has-hover ? Colors.surface1 : Colors.surface0;
 
-                Text {
-                    text: @tr("Copy DDL");
-                    color: Colors.text;
-                    font-size: Typography.size-sm;
-                    horizontal-alignment: center;
-                    vertical-alignment: center;
+                HorizontalLayout {
+                    alignment: center;
+                    spacing: 5px;
+                    Image {
+                        width: 12px;
+                        source: @image-url("../../../assets/icons/copy.svg");
+                        colorize: Colors.text;
+                        image-fit: contain;
+                    }
+                    Text {
+                        text: @tr("Copy");
+                        color: Colors.text;
+                        font-size: Typography.size-sm;
+                        vertical-alignment: center;
+                    }
                 }
 
                 copy-ta := TouchArea {

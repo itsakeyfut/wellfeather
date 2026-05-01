@@ -418,6 +418,12 @@ impl UI {
                     Event::QueryCancelled => Self::handle_query_cancelled(window_weak.clone()),
                     Event::QueryError(msg) => Self::handle_query_error(msg, window_weak.clone()),
                     Event::Disconnected(id) => Self::handle_disconnected(id, window_weak.clone()),
+                    Event::ConnectionRemoved(id) => Self::handle_connection_removed(
+                        id,
+                        window_weak.clone(),
+                        state.clone(),
+                        Arc::clone(&sidebar_state),
+                    ),
                     Event::MetadataLoaded(conn_id, meta) => Self::handle_metadata_loaded(
                         conn_id,
                         meta,
@@ -651,6 +657,42 @@ impl UI {
             with_ui(&ww, move |ui| {
                 ui.set_status_message(t!("status.disconnected", id = id).to_string().into());
                 ui.set_status_connection(t!("status.not_connected").to_string().into());
+            });
+        });
+    }
+
+    fn handle_connection_removed(
+        id: String,
+        ww: slint::Weak<crate::AppWindow>,
+        state: SharedState,
+        sidebar_state: Arc<Mutex<SidebarUiState>>,
+    ) {
+        let entries: Vec<crate::ConnectionEntry> = state
+            .conn
+            .all()
+            .into_iter()
+            .map(|c| crate::ConnectionEntry {
+                is_active: false,
+                db_type: db_type_label(&c.db_type).into(),
+                name: c.name.clone().into(),
+                id: c.id.clone().into(),
+            })
+            .collect();
+        let sidebar_nodes = {
+            let sb = sidebar_state.lock().unwrap_or_else(|p| p.into_inner());
+            let connections = state.conn.all();
+            build_sidebar_tree(&connections, "", &sb.metadata, &sb.expanded)
+        };
+        // clone required: invoke_from_event_loop closure must be 'static
+        let _ = slint::invoke_from_event_loop(move || {
+            with_ui(&ww, move |ui| {
+                let model = Rc::new(slint::VecModel::from(entries));
+                ui.set_connection_list(model.into());
+                ui.set_active_connection_id("".into());
+                ui.set_status_connection(t!("status.not_connected").to_string().into());
+                ui.set_status_message(t!("status.disconnected", id = id).to_string().into());
+                ui.set_sidebar_tree(Rc::new(slint::VecModel::from(sidebar_nodes)).into());
+                ui.set_show_db_manager(true);
             });
         });
     }
@@ -1602,6 +1644,22 @@ impl UI {
             let window_weak = window.as_weak();
             ui_state.on_dismiss_add_confirm(move || {
                 with_ui(&window_weak, |ui| ui.set_show_add_confirm_popup(false));
+            });
+        }
+
+        // delete-connection: remove from config, disconnect if active
+        {
+            let window_weak = window.as_weak();
+            // clone required: callback closure needs owned tx_cmd
+            let tx_cmd = tx_cmd.clone();
+            ui_state.on_delete_connection(move || {
+                with_ui(&window_weak, |ui| {
+                    let id = ui.get_form_edit_id().to_string();
+                    if !id.is_empty() {
+                        send_cmd(&tx_cmd, Command::RemoveConnection(id));
+                        ui.set_show_connection_form(false);
+                    }
+                });
             });
         }
     }

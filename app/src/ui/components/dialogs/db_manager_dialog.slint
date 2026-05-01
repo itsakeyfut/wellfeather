@@ -106,12 +106,14 @@ export component DbManagerDialog inherits Rectangle {
                             border-radius: 4px;
                             background: close-ta.has-hover ? Colors.surface1 : transparent;
 
-                            Text {
-                                text: "×";
-                                color: Colors.subtext0;
-                                font-size: Typography.size-2xl;
-                                horizontal-alignment: center;
-                                vertical-alignment: center;
+                            Image {
+                                x: (parent.width - self.width) / 2;
+                                y: (parent.height - self.height) / 2;
+                                width: 16px;
+                                height: 16px;
+                                source: @image-url("../../../../assets/icons/close.svg");
+                                colorize: Colors.subtext0;
+                                image-fit: contain;
                             }
                             close-ta := TouchArea {
                                 clicked => { root.close(); }
@@ -207,12 +209,21 @@ export component DbManagerDialog inherits Rectangle {
                                         background: edit-ta.has-hover
                                             ? Colors.surface2 : Colors.surface1;
 
-                                        Text {
-                                            text: @tr("Edit");
-                                            color: Colors.text;
-                                            font-size: Typography.size-sm;
-                                            horizontal-alignment: center;
-                                            vertical-alignment: center;
+                                        HorizontalLayout {
+                                            alignment: center;
+                                            spacing: 4px;
+                                            Image {
+                                                width: 12px;
+                                                source: @image-url("../../../../assets/icons/edit.svg");
+                                                colorize: Colors.text;
+                                                image-fit: contain;
+                                            }
+                                            Text {
+                                                text: @tr("Edit");
+                                                color: Colors.text;
+                                                font-size: Typography.size-sm;
+                                                vertical-alignment: center;
+                                            }
                                         }
                                         edit-ta := TouchArea {
                                             clicked => { root.edit(conn.id); }
@@ -232,12 +243,23 @@ export component DbManagerDialog inherits Rectangle {
                                             ? Colors.surface2
                                             : Colors.blue;
 
-                                        Text {
-                                            text: conn.is-active ? @tr("Disconnect") : @tr("Connect");
-                                            color: Colors.base;
-                                            font-size: Typography.size-sm;
-                                            horizontal-alignment: center;
-                                            vertical-alignment: center;
+                                        HorizontalLayout {
+                                            alignment: center;
+                                            spacing: 4px;
+                                            Image {
+                                                width: 12px;
+                                                source: conn.is-active
+                                                    ? @image-url("../../../../assets/icons/unlink.svg")
+                                                    : @image-url("../../../../assets/icons/link.svg");
+                                                colorize: Colors.base;
+                                                image-fit: contain;
+                                            }
+                                            Text {
+                                                text: conn.is-active ? @tr("Disconnect") : @tr("Connect");
+                                                color: Colors.base;
+                                                font-size: Typography.size-sm;
+                                                vertical-alignment: center;
+                                            }
                                         }
                                         btn-ta := TouchArea {
                                             clicked => {
@@ -279,8 +301,15 @@ export component DbManagerDialog inherits Rectangle {
 
                     HorizontalLayout {
                         padding-left: 16px;
+                        spacing: 6px;
+                        Image {
+                            width: 14px;
+                            source: @image-url("../../../../assets/icons/plus.svg");
+                            colorize: Colors.blue;
+                            image-fit: contain;
+                        }
                         Text {
-                            text: @tr("+ Add connection");
+                            text: @tr("Add connection");
                             color: Colors.blue;
                             vertical-alignment: center;
                         }

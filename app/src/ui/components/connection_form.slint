@@ -96,6 +96,7 @@ component TabButton inherits VerticalLayout {
 
 component DbTypeButton inherits Rectangle {
     in property <string> label-text;
+    in property <image>  icon;
     in property <bool>   active;
     callback clicked;
 
@@ -103,11 +104,20 @@ component DbTypeButton inherits Rectangle {
     border-radius: 4px;
     height: 28px;
     horizontal-stretch: 1;
-    Text {
-        text: label-text;
-        color: active ? Colors.base : Colors.text;
-        horizontal-alignment: center;
-        vertical-alignment: center;
+    HorizontalLayout {
+        alignment: center;
+        spacing: 6px;
+        if root.icon.width > 0 : Image {
+            width: 16px;
+            height: 16px;
+            source: root.icon;
+            image-fit: contain;
+        }
+        Text {
+            text: label-text;
+            color: active ? Colors.base : Colors.text;
+            vertical-alignment: center;
+        }
     }
     TouchArea { clicked => { root.clicked(); } }
 }
@@ -137,6 +147,7 @@ export component ConnectionForm inherits Rectangle {
     callback cancel();
     callback test-connection();
     callback add-connection();
+    callback delete-connection();
 
     // Auto-focus the Name field when the form opens and whenever the active tab changes.
     init => { name-field.grab-focus(); }
@@ -184,16 +195,19 @@ export component ConnectionForm inherits Rectangle {
             spacing: 6px;
             DbTypeButton {
                 label-text: "PostgreSQL";
+                icon: @image-url("../../../assets/icons/brand-postgresql.svg");
                 active: root.db-type == 0;
                 clicked => { root.db-type = 0; }
             }
             DbTypeButton {
                 label-text: "MySQL";
+                icon: @image-url("../../../assets/icons/brand-mysql.svg");
                 active: root.db-type == 1;
                 clicked => { root.db-type = 1; }
             }
             DbTypeButton {
                 label-text: "SQLite";
+                icon: @image-url("../../../assets/icons/brand-sqlite.svg");
                 active: root.db-type == 2;
                 clicked => { root.db-type = 2; }
             }
@@ -320,18 +334,39 @@ export component ConnectionForm inherits Rectangle {
         }
 
         // Status message (shown only when not empty)
-        Text {
-            text: root.status;
-            color: root.status == "" ? transparent : Colors.red;
+        HorizontalLayout {
             height: 20px;
-            font-size: Typography.size-base;
-            overflow: elide;
+            spacing: 5px;
+            if root.status != "" : Image {
+                width: 14px;
+                source: @image-url("../../../assets/icons/alert-error.svg");
+                colorize: Colors.red;
+                image-fit: contain;
+            }
+            Text {
+                text: root.status;
+                color: root.status == "" ? transparent : Colors.red;
+                font-size: Typography.size-base;
+                vertical-alignment: center;
+                overflow: elide;
+                horizontal-stretch: 1;
+            }
         }
 
         // Buttons
         HorizontalLayout {
             spacing: 8px;
             alignment: end;
+
+            if root.is-edit : ActionButton {
+                width: 100px;
+                text: @tr("Delete");
+                bg: Colors.red;
+                fg: Colors.base;
+                leading-icon: @image-url("../../../assets/icons/delete.svg");
+                enabled: !root.testing;
+                clicked => { root.delete-connection(); }
+            }
 
             ActionButton {
                 width: 80px;
@@ -340,18 +375,32 @@ export component ConnectionForm inherits Rectangle {
             }
 
             ActionButton {
-                width: 150px;
+                width: 160px;
                 text: root.testing ? @tr("Testing\u{2026}") : @tr("Test Connection");
                 bg: root.testing ? Colors.surface2 : Colors.blue;
                 fg: root.testing ? Colors.subtext0 : Colors.base;
+                leading-icon: @image-url("../../../assets/icons/test-connection.svg");
                 enabled: !root.testing;
                 clicked => { root.test-connection(); }
             }
 
-            // Add / Save — green when test passed, muted when not yet tested / failed
-            ActionButton {
+            // Save — only in edit mode, with confirm icon
+            if root.is-edit : ActionButton {
+                width: 90px;
+                text: @tr("Save");
+                bg: root.testing ? Colors.surface2
+                  : root.test-ok  ? Colors.green
+                  :                 Colors.overlay0;
+                fg: root.testing ? Colors.subtext0 : Colors.base;
+                leading-icon: @image-url("../../../assets/icons/confirm.svg");
+                enabled: !root.testing;
+                clicked => { root.add-connection(); }
+            }
+
+            // Add — only when creating a new connection
+            if !root.is-edit : ActionButton {
                 width: 80px;
-                text: root.is-edit ? @tr("Save") : @tr("Add");
+                text: @tr("Add");
                 bg: root.testing ? Colors.surface2
                   : root.test-ok  ? Colors.green
                   :                 Colors.overlay0;

@@ -137,11 +137,21 @@ export component ResultTable inherits Rectangle {
             alignment: start;
             padding: 16px;
             spacing: 8px;
-            Text {
-                text: @tr("Query Error");
-                color: Colors.red;
-                font-size: Typography.size-lg;
-                font-weight: 700;
+            HorizontalLayout {
+                spacing: 6px;
+                Image {
+                    width: 18px;
+                    source: @image-url("../../../assets/icons/alert-error.svg");
+                    colorize: Colors.red;
+                    image-fit: contain;
+                }
+                Text {
+                    text: @tr("Query Error");
+                    color: Colors.red;
+                    font-size: Typography.size-lg;
+                    font-weight: 700;
+                    vertical-alignment: center;
+                }
             }
             Text {
                 text: root.error-message;
