@@ -23,7 +23,7 @@ export component TabBar inherits Rectangle {
                 spacing: 0;
 
                 for tab[i] in root.tabs : Rectangle {
-                    width: min(max(tab-text.preferred-width + 40px, 80px), 180px);
+                    width: min(max(tab-text.preferred-width + 64px, 80px), 240px);
                     height: 32px;
                     background: i == root.active-index ? Colors.base : transparent;
 
@@ -54,7 +54,7 @@ export component TabBar inherits Rectangle {
 
                         tab-text := Text {
                             text: tab.title;
-                            width: min(self.preferred-width, 140px);
+                            width: min(self.preferred-width, 176px);
                             color: i == root.active-index ? Colors.text : Colors.subtext1;
                             font-size: Typography.size-lg;
                             vertical-alignment: center;
