@@ -154,7 +154,7 @@ export component Sidebar inherits Rectangle {
                         height: parent.height;
                         padding-left: (8 + node.level * 14) * 1px;
                         padding-right: 8px;
-                        spacing: 4px;
+                        spacing: 8px;
 
                         // Expand/collapse toggle icon for connection and category nodes
                         if node.level < 2 : Image {
@@ -170,7 +170,7 @@ export component Sidebar inherits Rectangle {
 
                         // Connection status dot (filled = active / empty = inactive)
                         if node.level == 0 : Image {
-                            width: 10px;
+                            width: 16px;
                             source: node.is-active
                                 ? @image-url("../../../assets/icons/dot-filled.svg")
                                 : @image-url("../../../assets/icons/dot-empty.svg");

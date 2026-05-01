@@ -173,16 +173,16 @@ export component DbManagerDialog inherits Rectangle {
                                 Text {
                                     text: conn.is-active ? "●" : "○";
                                     color: conn.is-active ? Colors.blue : Colors.surface2;
-                                    font-size: Typography.size-sm;
+                                    font-size: Typography.size-lg;
                                     vertical-alignment: center;
-                                    width: 12px;
+                                    width: 16px;
                                 }
 
                                 // Connection name
                                 Text {
                                     text: conn.name;
                                     color: conn.is-active ? Colors.text : Colors.subtext1;
-                                    font-size: Typography.size-base;
+                                    font-size: Typography.size-lg;
                                     vertical-alignment: center;
                                     overflow: elide;
                                     horizontal-stretch: 1;
