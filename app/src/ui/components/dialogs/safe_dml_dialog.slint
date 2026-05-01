@@ -1,0 +1,44 @@
+import { Colors, Typography, Layout } from "../../theme.slint";
+import { ActionButton, ModalOverlay } from "../common.slint";
+
+export component SafeDmlDialog inherits ModalOverlay {
+    callback cancel-clicked;
+    callback execute-clicked;
+
+    VerticalLayout {
+        padding: Layout.padding-2xl;
+        spacing: Layout.spacing-2xl;
+        alignment: start;
+
+        Text {
+            text: @tr("No WHERE clause detected");
+            color: Colors.yellow;
+            font-size: Typography.size-xl;
+            font-weight: 700;
+        }
+
+        Text {
+            text: @tr("This UPDATE/DELETE has no WHERE clause and will affect all rows. Are you sure?");
+            color: Colors.text;
+            font-size: Typography.size-lg;
+            wrap: word-wrap;
+        }
+
+        HorizontalLayout {
+            spacing: Layout.spacing-lg;
+            alignment: end;
+            ActionButton {
+                width: 80px;
+                text: @tr("Cancel");
+                clicked => { root.cancel-clicked(); }
+            }
+            ActionButton {
+                width: 80px;
+                text: @tr("Execute");
+                bg: Colors.red;
+                fg: Colors.base;
+                clicked => { root.execute-clicked(); }
+            }
+        }
+    }
+}

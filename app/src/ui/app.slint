@@ -21,6 +21,7 @@ import { TableView }       from "components/table_view.slint";
 import { TestResultDialog }    from "components/dialogs/test_result_dialog.slint";
 import { AddConnectionDialog } from "components/dialogs/add_connection_dialog.slint";
 import { AllRowsDialog }       from "components/dialogs/all_rows_dialog.slint";
+import { SafeDmlDialog }       from "components/dialogs/safe_dml_dialog.slint";
 import { DbManagerDialog }     from "components/dialogs/db_manager_dialog.slint";
 
 // UiState is defined here (root file) so that Slint generates Rust bindings for it.
@@ -140,6 +141,18 @@ export global UiState {
     callback confirm-all-rows();
     /// User dismissed the "fetch all rows" confirm popup.
     callback dismiss-all-rows-confirm();
+    /// Controls the "dangerous DML" confirmation popup.
+    in-out property <bool>   show-safe-dml-confirm:  false;
+    /// SQL to execute if the user confirms.
+    in-out property <string> safe-dml-pending-sql:   "";
+    /// Command kind: "query" | "all" | "cursor"
+    in-out property <string> safe-dml-pending-kind:  "query";
+    /// Active connection safe_dml setting (set by Rust on connect).
+    in-out property <bool>   conn-safe-dml: true;
+    /// User confirmed dangerous DML execution.
+    callback confirm-safe-dml();
+    /// User dismissed the dangerous DML confirm popup.
+    callback dismiss-safe-dml-confirm();
 
     // ── Completion ────────────────────────────────────────────────────────────
     /// Fired by the editor on every user text edit; Rust debounces 300 ms then
@@ -335,7 +348,8 @@ export component AppWindow inherits Window {
                     || UiState.show-db-manager
                     || UiState.show-test-result-popup
                     || UiState.show-add-confirm-popup
-                    || UiState.show-all-rows-confirm) {
+                    || UiState.show-all-rows-confirm
+                    || UiState.show-safe-dml-confirm) {
                 EventResult.reject
             } else if (event.modifiers.control
                     && !event.modifiers.shift
@@ -877,6 +891,14 @@ export component AppWindow inherits Window {
             width: root.width; height: root.height;
             cancel-clicked => { UiState.dismiss-all-rows-confirm(); }
             fetch-clicked  => { UiState.confirm-all-rows(); }
+        }
+
+        // ── Safe-DML confirmation popup ───────────────────────────────────────
+        if UiState.show-safe-dml-confirm: SafeDmlDialog {
+            x: 0; y: 0;
+            width: root.width; height: root.height;
+            cancel-clicked  => { UiState.dismiss-safe-dml-confirm(); }
+            execute-clicked => { UiState.confirm-safe-dml(); }
         }
 
         // ── DB manager dialog ─────────────────────────────────────────────────

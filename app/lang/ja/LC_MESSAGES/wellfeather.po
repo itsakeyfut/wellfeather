@@ -331,3 +331,19 @@ msgstr "YES"
 msgctxt "TableView"
 msgid "NO"
 msgstr "NO"
+
+msgctxt "SafeDmlDialog"
+msgid "No WHERE clause detected"
+msgstr "WHERE 句のない操作が検出されました"
+
+msgctxt "SafeDmlDialog"
+msgid "This UPDATE/DELETE has no WHERE clause and will affect all rows. Are you sure?"
+msgstr "この UPDATE/DELETE には WHERE 句がありません。全行が対象になります。実行しますか？"
+
+msgctxt "SafeDmlDialog"
+msgid "Cancel"
+msgstr "キャンセル"
+
+msgctxt "SafeDmlDialog"
+msgid "Execute"
+msgstr "実行"

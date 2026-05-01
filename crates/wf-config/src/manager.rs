@@ -149,6 +149,7 @@ mod tests {
                 user: None,
                 password_encrypted: None,
                 database: Some("local.db".to_string()),
+                safe_dml: true,
             }],
             ..Config::default()
         };

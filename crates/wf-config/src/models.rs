@@ -152,6 +152,13 @@ pub struct ConnectionConfig {
     pub password_encrypted: Option<String>,
     #[serde(default)]
     pub database: Option<String>,
+    /// When true, UPDATE/DELETE without WHERE shows a confirmation dialog.
+    #[serde(default = "default_safe_dml")]
+    pub safe_dml: bool,
+}
+
+fn default_safe_dml() -> bool {
+    true
 }
 
 // ---------------------------------------------------------------------------
@@ -313,6 +320,7 @@ database = "local.db"
                 user: Some("root".to_string()),
                 password_encrypted: Some("AES256GCM:xyz".to_string()),
                 database: Some("testdb".to_string()),
+                safe_dml: false,
             }],
         };
 

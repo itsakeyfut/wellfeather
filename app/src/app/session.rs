@@ -74,9 +74,12 @@ impl SessionManager {
             .load()
             .context("failed to load config for session save")?;
 
-        let cc = db_to_config_conn(conn);
+        let mut cc = db_to_config_conn(conn);
         match config.connections.iter_mut().find(|c| c.id == conn.id) {
-            Some(existing) => *existing = cc,
+            Some(existing) => {
+                cc.safe_dml = existing.safe_dml; // preserve per-connection safe_dml setting
+                *existing = cc;
+            }
             None => config.connections.push(cc),
         }
         config.session.last_connection_id = Some(conn.id.clone());
@@ -327,6 +330,7 @@ fn db_to_config_conn(conn: &DbConnection) -> ConnectionConfig {
         user: conn.user.clone(),
         password_encrypted: conn.password_encrypted.clone(),
         database: conn.database.clone(),
+        safe_dml: true, // default; overwritten by save_connection when updating existing entry
     }
 }
 

@@ -331,3 +331,19 @@ msgstr "YES"
 msgctxt "TableView"
 msgid "NO"
 msgstr "NO"
+
+msgctxt "SafeDmlDialog"
+msgid "No WHERE clause detected"
+msgstr "No WHERE clause detected"
+
+msgctxt "SafeDmlDialog"
+msgid "This UPDATE/DELETE has no WHERE clause and will affect all rows. Are you sure?"
+msgstr "This UPDATE/DELETE has no WHERE clause and will affect all rows. Are you sure?"
+
+msgctxt "SafeDmlDialog"
+msgid "Cancel"
+msgstr "Cancel"
+
+msgctxt "SafeDmlDialog"
+msgid "Execute"
+msgstr "Execute"
