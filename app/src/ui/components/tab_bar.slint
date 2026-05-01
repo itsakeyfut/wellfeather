@@ -1,5 +1,5 @@
 import { TabEntry } from "../globals.slint";
-import { Colors, Typography } from "../theme.slint";
+import { Colors, Typography, Layout, Icons } from "../theme.slint";
 
 export component TabBar inherits Rectangle {
     in property <[TabEntry]> tabs;
@@ -8,7 +8,7 @@ export component TabBar inherits Rectangle {
     callback close-tab(int);
     callback switch-tab(int);
 
-    height: 32px;
+    height: Layout.height-tab-bar;
     background: Colors.surface0;
 
     HorizontalLayout {
@@ -24,7 +24,7 @@ export component TabBar inherits Rectangle {
 
                 for tab[i] in root.tabs : Rectangle {
                     width: min(max(tab-text.preferred-width + 64px, 80px), 240px);
-                    height: 32px;
+                    height: Layout.height-tab-bar;
                     background: i == root.active-index ? Colors.base : transparent;
 
                     ta-tab := TouchArea {
@@ -33,21 +33,21 @@ export component TabBar inherits Rectangle {
 
                     HorizontalLayout {
                         x: 0;
-                        y: (parent.height - 24px) / 2;
+                        y: (parent.height - Layout.height-compact) / 2;
                         width: parent.width;
-                        height: 24px;
-                        padding-left: 10px;
-                        padding-right: 4px;
-                        spacing: 6px;
+                        height: Layout.height-compact;
+                        padding-left: Layout.padding-tab;
+                        padding-right: Layout.padding-xs;
+                        spacing: Layout.spacing-md;
 
                         if tab.kind == "sql-editor" : Image {
-                            width: 14px;
-                            source: @image-url("../../../assets/icons/sql-database.svg");
+                            width: Layout.icon-md;
+                            source: Icons.sql-database;
                             image-fit: contain;
                         }
                         if tab.kind == "table-view" : Image {
-                            width: 14px;
-                            source: @image-url("../../../assets/icons/table-list.svg");
+                            width: Layout.icon-md;
+                            source: Icons.table-list;
                             colorize: i == root.active-index ? Colors.text : Colors.subtext1;
                             image-fit: contain;
                         }
@@ -62,17 +62,17 @@ export component TabBar inherits Rectangle {
                         }
 
                         Rectangle {
-                            width: 24px;
-                            height: 24px;
-                            border-radius: 4px;
+                            width: Layout.height-compact;
+                            height: Layout.height-compact;
+                            border-radius: Layout.radius-md;
                             background: close-ta.has-hover ? Colors.surface1 : transparent;
 
                             Image {
                                 x: (parent.width - self.width) / 2;
                                 y: (parent.height - self.height) / 2;
-                                width: 14px;
-                                height: 14px;
-                                source: @image-url("../../../assets/icons/close.svg");
+                                width: Layout.icon-md;
+                                height: Layout.icon-md;
+                                source: Icons.close;
                                 colorize: close-ta.has-hover ? Colors.text : Colors.subtext1;
                                 image-fit: contain;
                             }
@@ -95,16 +95,16 @@ export component TabBar inherits Rectangle {
         }
 
         Rectangle {
-            width: 32px;
-            height: 32px;
+            width: Layout.height-tab-bar;
+            height: Layout.height-tab-bar;
             background: new-ta.has-hover ? Colors.surface1 : transparent;
 
             Image {
                 x: (parent.width - self.width) / 2;
                 y: (parent.height - self.height) / 2;
-                width: 16px;
-                height: 16px;
-                source: @image-url("../../../assets/icons/plus.svg");
+                width: Layout.icon-lg;
+                height: Layout.icon-lg;
+                source: Icons.plus;
                 colorize: new-ta.has-hover ? Colors.text : Colors.subtext1;
                 image-fit: contain;
             }

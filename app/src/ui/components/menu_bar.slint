@@ -2,11 +2,11 @@
 // Each top-level label shows a PopupWindow dropdown on click.
 // Items reuse MenuItem from common.slint.
 
-import { Colors, Typography } from "../theme.slint";
+import { Colors, Typography, Layout } from "../theme.slint";
 import { MenuItem } from "common.slint";
 
 export component MenuBar inherits Rectangle {
-    height: 28px;
+    height: Layout.height-bar;
     background: Colors.mantle;
 
     callback export-csv();
@@ -33,7 +33,7 @@ export component MenuBar inherits Rectangle {
     }
 
     HorizontalLayout {
-        padding-left:   4px;
+        padding-left:   Layout.padding-xs;
         padding-top:    2px;
         padding-bottom: 2px;
         alignment:      start;
@@ -43,7 +43,7 @@ export component MenuBar inherits Rectangle {
         Rectangle {
             width: 60px;
             background: file-ta.has-hover ? Colors.surface1 : transparent;
-            border-radius: 3px;
+            border-radius: Layout.radius-sm;
 
             Text {
                 text: @tr("File");
@@ -59,14 +59,14 @@ export component MenuBar inherits Rectangle {
                 x: 0;
                 y: root.height;
                 width:  180px;
-                height: 91px;
+                height: 3 * Layout.height-menu-item + 1px;
                 close-policy: PopupClosePolicy.close-on-click;
 
                 Rectangle {
                     width:  180px;
-                    height: 91px;
+                    height: 3 * Layout.height-menu-item + 1px;
                     background:    Colors.surface0;
-                    border-radius: 4px;
+                    border-radius: Layout.radius-md;
                     border-width:  1px;
                     border-color:  Colors.surface2;
                     drop-shadow-blur:  8px;
@@ -88,7 +88,7 @@ export component MenuBar inherits Rectangle {
         Rectangle {
             width: 60px;
             background: edit-ta.has-hover ? Colors.surface1 : transparent;
-            border-radius: 3px;
+            border-radius: Layout.radius-sm;
 
             Text {
                 text: @tr("Edit");
@@ -104,14 +104,14 @@ export component MenuBar inherits Rectangle {
                 x: 0;
                 y: root.height;
                 width:  180px;
-                height: 30px;
+                height: Layout.height-menu-item;
                 close-policy: PopupClosePolicy.close-on-click;
 
                 Rectangle {
                     width:  180px;
-                    height: 30px;
+                    height: Layout.height-menu-item;
                     background:    Colors.surface0;
-                    border-radius: 4px;
+                    border-radius: Layout.radius-md;
                     border-width:  1px;
                     border-color:  Colors.surface2;
                     drop-shadow-blur:  8px;
@@ -130,7 +130,7 @@ export component MenuBar inherits Rectangle {
         Rectangle {
             width: 80px;
             background: db-ta.has-hover ? Colors.surface1 : transparent;
-            border-radius: 3px;
+            border-radius: Layout.radius-sm;
 
             Text {
                 text: @tr("Database");
@@ -146,14 +146,18 @@ export component MenuBar inherits Rectangle {
                 x: 0;
                 y: root.height;
                 width:  220px;
-                height: root.has-active-connection ? 61px : 30px;
+                height: root.has-active-connection
+                    ? 2 * Layout.height-menu-item + 1px
+                    : Layout.height-menu-item;
                 close-policy: PopupClosePolicy.close-on-click;
 
                 Rectangle {
                     width:  220px;
-                    height: root.has-active-connection ? 61px : 30px;
+                    height: root.has-active-connection
+                        ? 2 * Layout.height-menu-item + 1px
+                        : Layout.height-menu-item;
                     background:    Colors.surface0;
-                    border-radius: 4px;
+                    border-radius: Layout.radius-md;
                     border-width:  1px;
                     border-color:  Colors.surface2;
                     drop-shadow-blur:  8px;
@@ -182,7 +186,7 @@ export component MenuBar inherits Rectangle {
         Rectangle {
             width: 70px;
             background: query-ta.has-hover ? Colors.surface1 : transparent;
-            border-radius: 3px;
+            border-radius: Layout.radius-sm;
 
             Text {
                 text: @tr("Query");
@@ -198,14 +202,14 @@ export component MenuBar inherits Rectangle {
                 x: 0;
                 y: root.height;
                 width:  220px;
-                height: 90px;
+                height: 3 * Layout.height-menu-item;
                 close-policy: PopupClosePolicy.close-on-click;
 
                 Rectangle {
                     width:  220px;
-                    height: 90px;
+                    height: 3 * Layout.height-menu-item;
                     background:    Colors.surface0;
-                    border-radius: 4px;
+                    border-radius: Layout.radius-md;
                     border-width:  1px;
                     border-color:  Colors.surface2;
                     drop-shadow-blur:  8px;
@@ -235,7 +239,7 @@ export component MenuBar inherits Rectangle {
         Rectangle {
             width: 80px;
             background: settings-ta.has-hover ? Colors.surface1 : transparent;
-            border-radius: 3px;
+            border-radius: Layout.radius-sm;
 
             Text {
                 text: @tr("Settings");
@@ -251,14 +255,14 @@ export component MenuBar inherits Rectangle {
                 x: 0;
                 y: root.height;
                 width:  220px;
-                height: 91px;
+                height: 3 * Layout.height-menu-item + 1px;
                 close-policy: PopupClosePolicy.close-on-click;
 
                 Rectangle {
                     width:  220px;
-                    height: 91px;
+                    height: 3 * Layout.height-menu-item + 1px;
                     background:    Colors.surface0;
-                    border-radius: 4px;
+                    border-radius: Layout.radius-md;
                     border-width:  1px;
                     border-color:  Colors.surface2;
                     drop-shadow-blur:  8px;

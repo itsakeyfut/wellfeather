@@ -1,5 +1,5 @@
 import { ConnectionEntry } from "../../globals.slint";
-import { Colors, Typography } from "../../theme.slint";
+import { Colors, Typography, Layout, Icons } from "../../theme.slint";
 
 export component DbManagerDialog inherits Rectangle {
     in property <[ConnectionEntry]> connections: [];
@@ -24,8 +24,8 @@ export component DbManagerDialog inherits Rectangle {
     // viewport-y is 0 at top and negative as content scrolls down.
     changed kb-focus => {
         if (root.kb-focus >= 0) {
-            let row-top = root.kb-focus * 48px;
-            let row-bot = row-top + 48px;
+            let row-top = root.kb-focus * Layout.height-dialog-row;
+            let row-bot = row-top + Layout.height-dialog-row;
             if (row-top < -dialog-scroll.viewport-y) {
                 dialog-scroll.viewport-y = -row-top;
             } else if (row-bot > -dialog-scroll.viewport-y + dialog-scroll.height) {
@@ -73,7 +73,7 @@ export component DbManagerDialog inherits Rectangle {
             width: 560px;
             height: 520px;
             background: Colors.surface0;
-            border-radius: 8px;
+            border-radius: Layout.radius-lg;
             border-width: 1px;
             border-color: Colors.surface2;
             drop-shadow-blur: 24px;
@@ -83,12 +83,12 @@ export component DbManagerDialog inherits Rectangle {
             VerticalLayout {
                 // ── Header ────────────────────────────────────────────────────
                 Rectangle {
-                    height: 48px;
+                    height: Layout.height-dialog-row;
                     background: Colors.mantle;
 
                     HorizontalLayout {
-                        padding-left: 16px;
-                        padding-right: 8px;
+                        padding-left: Layout.padding-2xl;
+                        padding-right: Layout.padding-sm;
                         spacing: 0;
 
                         Text {
@@ -103,15 +103,15 @@ export component DbManagerDialog inherits Rectangle {
                         // Close button
                         close-rect := Rectangle {
                             width: 36px;
-                            border-radius: 4px;
+                            border-radius: Layout.radius-md;
                             background: close-ta.has-hover ? Colors.surface1 : transparent;
 
                             Image {
                                 x: (parent.width - self.width) / 2;
                                 y: (parent.height - self.height) / 2;
-                                width: 16px;
-                                height: 16px;
-                                source: @image-url("../../../../assets/icons/close.svg");
+                                width: Layout.icon-lg;
+                                height: Layout.icon-lg;
+                                source: Icons.close;
                                 colorize: Colors.subtext0;
                                 image-fit: contain;
                             }
@@ -138,7 +138,7 @@ export component DbManagerDialog inherits Rectangle {
 
                     dialog-content := VerticalLayout {
                         for conn[i] in root.connections: Rectangle {
-                            height: 48px;
+                            height: Layout.height-dialog-row;
                             clip: true;
 
                             background: i == root.kb-focus
@@ -165,9 +165,9 @@ export component DbManagerDialog inherits Rectangle {
                                 x: 0; y: 0;
                                 width: parent.width;
                                 height: parent.height;
-                                padding-left: 16px;
-                                padding-right: 12px;
-                                spacing: 8px;
+                                padding-left: Layout.padding-2xl;
+                                padding-right: Layout.padding-md;
+                                spacing: Layout.spacing-lg;
 
                                 // Active / inactive indicator dot
                                 Text {
@@ -175,7 +175,7 @@ export component DbManagerDialog inherits Rectangle {
                                     color: conn.is-active ? Colors.blue : Colors.surface2;
                                     font-size: Typography.size-lg;
                                     vertical-alignment: center;
-                                    width: 16px;
+                                    width: Layout.icon-lg;
                                 }
 
                                 // Connection name
@@ -204,17 +204,17 @@ export component DbManagerDialog inherits Rectangle {
                                     width: 60px;
 
                                     edit-rect := Rectangle {
-                                        height: 26px;
-                                        border-radius: 4px;
+                                        height: Layout.height-btn-md;
+                                        border-radius: Layout.radius-md;
                                         background: edit-ta.has-hover
                                             ? Colors.surface2 : Colors.surface1;
 
                                         HorizontalLayout {
                                             alignment: center;
-                                            spacing: 4px;
+                                            spacing: Layout.spacing-sm;
                                             Image {
-                                                width: 12px;
-                                                source: @image-url("../../../../assets/icons/edit.svg");
+                                                width: Layout.icon-sm;
+                                                source: Icons.edit;
                                                 colorize: Colors.text;
                                                 image-fit: contain;
                                             }
@@ -237,20 +237,20 @@ export component DbManagerDialog inherits Rectangle {
                                     width: 100px;
 
                                     btn-rect := Rectangle {
-                                        height: 26px;
-                                        border-radius: 4px;
+                                        height: Layout.height-btn-md;
+                                        border-radius: Layout.radius-md;
                                         background: conn.is-active
                                             ? Colors.surface2
                                             : Colors.blue;
 
                                         HorizontalLayout {
                                             alignment: center;
-                                            spacing: 4px;
+                                            spacing: Layout.spacing-sm;
                                             Image {
-                                                width: 12px;
+                                                width: Layout.icon-sm;
                                                 source: conn.is-active
-                                                    ? @image-url("../../../../assets/icons/unlink.svg")
-                                                    : @image-url("../../../../assets/icons/link.svg");
+                                                    ? Icons.unlink
+                                                    : Icons.link;
                                                 colorize: Colors.base;
                                                 image-fit: contain;
                                             }
@@ -285,7 +285,7 @@ export component DbManagerDialog inherits Rectangle {
 
                 // ── Add connection footer ──────────────────────────────────────
                 Rectangle {
-                    height: 44px;
+                    height: Layout.height-footer;
 
                     footer-ta := TouchArea {
                         width: parent.width;
@@ -300,11 +300,11 @@ export component DbManagerDialog inherits Rectangle {
                     }
 
                     HorizontalLayout {
-                        padding-left: 16px;
-                        spacing: 6px;
+                        padding-left: Layout.padding-2xl;
+                        spacing: Layout.spacing-md;
                         Image {
-                            width: 14px;
-                            source: @image-url("../../../../assets/icons/plus.svg");
+                            width: Layout.icon-md;
+                            source: Icons.plus;
                             colorize: Colors.blue;
                             image-fit: contain;
                         }

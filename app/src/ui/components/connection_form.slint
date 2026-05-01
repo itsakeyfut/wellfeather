@@ -3,7 +3,7 @@
 // Does not import UiState directly to avoid circular imports
 // (app.slint imports this file; UiState is defined in app.slint).
 
-import { Colors, Typography } from "../theme.slint";
+import { Colors, Typography, Layout, Icons } from "../theme.slint";
 import { ActionButton } from "common.slint";
 
 // ── Helper: labelled text field row ──────────────────────────────────────────
@@ -18,7 +18,7 @@ component FieldRow inherits HorizontalLayout {
     callback move-focus(int);
     public function grab-focus() { field-input.focus(); }
 
-    spacing: 8px;
+    spacing: Layout.spacing-lg;
     Text {
         text: label-text;
         color: Colors.subtext0;
@@ -28,15 +28,15 @@ component FieldRow inherits HorizontalLayout {
     Rectangle {
         horizontal-stretch: 1;
         background: Colors.base;
-        border-radius: 4px;
-        height: 28px;
+        border-radius: Layout.radius-md;
+        height: Layout.height-row;
         // Placeholder overlaid at the same position as TextInput.
         // Rendered first (behind) so TextInput stays on top and receives focus.
         // Not shown for password fields.
         if !is-password && root.placeholder != "" && root.value == "": Text {
-            x: 6px;
+            x: Layout.padding-input;
             y: 0;
-            width: parent.width - 12px;
+            width: parent.width - Layout.padding-input * 2;
             height: parent.height;
             text: root.placeholder;
             color: Colors.surface2;
@@ -44,9 +44,9 @@ component FieldRow inherits HorizontalLayout {
         }
         // TextInput rendered last → on top → receives all pointer/focus events.
         field-input := TextInput {
-            x: 6px;
+            x: Layout.padding-input;
             y: 0;
-            width: parent.width - 12px;
+            width: parent.width - Layout.padding-input * 2;
             height: parent.height;
             vertical-alignment: center;
             text <=> value;
@@ -83,7 +83,7 @@ component TabButton inherits VerticalLayout {
         color: active ? Colors.blue : Colors.subtext0;
         horizontal-alignment: center;
         vertical-alignment: center;
-        height: 28px;
+        height: Layout.height-row;
     }
     Rectangle {
         height: 2px;
@@ -101,16 +101,16 @@ component DbTypeButton inherits Rectangle {
     callback clicked;
 
     background: active ? Colors.blue : Colors.surface1;
-    border-radius: 4px;
-    height: 32px;
+    border-radius: Layout.radius-md;
+    height: Layout.height-btn-lg;
     horizontal-stretch: 1;
     // Wrapping Image in a Rectangle with explicit width prevents Slint from using
     // the SVG's intrinsic size (800px) in the alignment: center group calculation.
     HorizontalLayout {
         alignment: center;
-        spacing: 6px;
+        spacing: Layout.spacing-md;
         Rectangle {
-            width: root.icon.width > 0 ? 18px : 0px;
+            width: root.icon.width > 0 ? Layout.icon-xl : 0;
             horizontal-stretch: 0;
             Image {
                 width: parent.width;
@@ -123,7 +123,7 @@ component DbTypeButton inherits Rectangle {
             text: label-text;
             color: active ? Colors.base : Colors.text;
             font-size: Typography.size-xl;
-            font-family: "Segoe UI";
+            font-family: Typography.font-ui;
             vertical-alignment: center;
             wrap: no-wrap;
         }
@@ -164,7 +164,7 @@ export component ConnectionForm inherits Rectangle {
 
     // ── Layout ────────────────────────────────────────────────────────────────
     background: Colors.surface0;
-    border-radius: 8px;
+    border-radius: Layout.radius-lg;
     border-width: 1px;
     border-color: Colors.surface2;
     drop-shadow-blur: 24px;
@@ -174,8 +174,8 @@ export component ConnectionForm inherits Rectangle {
     clip: true;
 
     VerticalLayout {
-        padding: 20px;
-        spacing: 10px;
+        padding: Layout.padding-xl;
+        spacing: Layout.spacing-xl;
 
         // Title
         Text {
@@ -201,22 +201,22 @@ export component ConnectionForm inherits Rectangle {
 
         // DB type selector
         HorizontalLayout {
-            spacing: 6px;
+            spacing: Layout.spacing-md;
             DbTypeButton {
                 label-text: "PostgreSQL";
-                icon: @image-url("../../../assets/icons/brand-postgresql.svg");
+                icon: Icons.brand-postgresql;
                 active: root.db-type == 0;
                 clicked => { root.db-type = 0; }
             }
             DbTypeButton {
                 label-text: "MySQL";
-                icon: @image-url("../../../assets/icons/brand-mysql.svg");
+                icon: Icons.brand-mysql;
                 active: root.db-type == 1;
                 clicked => { root.db-type = 1; }
             }
             DbTypeButton {
                 label-text: "SQLite";
-                icon: @image-url("../../../assets/icons/brand-sqlite.svg");
+                icon: Icons.brand-sqlite;
                 active: root.db-type == 2;
                 clicked => { root.db-type = 2; }
             }
@@ -253,25 +253,25 @@ export component ConnectionForm inherits Rectangle {
             Rectangle {
                 visible: root.tab-index == 0;
                 background: Colors.base;
-                border-radius: 4px;
+                border-radius: Layout.radius-md;
                 width: parent.width;
-                height: 28px;
-                y: parent.height - 28px;
+                height: Layout.height-row;
+                y: parent.height - Layout.height-row;
 
                 if root.conn-string == "": Text {
-                    x: 6px;
+                    x: Layout.padding-input;
                     y: 0;
-                    width: parent.width - 12px;
-                    height: 28px;
+                    width: parent.width - Layout.padding-input * 2;
+                    height: Layout.height-row;
                     text: "postgres://user:pass@host:5432/db";
                     color: Colors.surface2;
                     vertical-alignment: center;
                 }
                 conn-string-input := TextInput {
-                    x: 6px;
+                    x: Layout.padding-input;
                     y: 0;
-                    width: parent.width - 12px;
-                    height: 28px;
+                    width: parent.width - Layout.padding-input * 2;
+                    height: Layout.height-row;
                     vertical-alignment: center;
                     text <=> root.conn-string;
                     color: Colors.text;
@@ -293,7 +293,7 @@ export component ConnectionForm inherits Rectangle {
             // Individual Fields tab
             fields-layout := VerticalLayout {
                 visible: root.tab-index == 1;
-                spacing: 6px;
+                spacing: Layout.spacing-md;
 
                 host-field := FieldRow {
                     label-text: @tr("Host");
@@ -344,11 +344,11 @@ export component ConnectionForm inherits Rectangle {
 
         // Status message (shown only when not empty)
         HorizontalLayout {
-            height: 20px;
-            spacing: 5px;
+            height: Layout.height-btn-sm;
+            spacing: Layout.spacing-icon;
             if root.status != "" : Image {
-                width: 14px;
-                source: @image-url("../../../assets/icons/alert-error.svg");
+                width: Layout.icon-md;
+                source: Icons.alert-error;
                 colorize: Colors.red;
                 image-fit: contain;
             }
@@ -364,7 +364,7 @@ export component ConnectionForm inherits Rectangle {
 
         // Buttons
         HorizontalLayout {
-            spacing: 8px;
+            spacing: Layout.spacing-lg;
             alignment: end;
 
             if root.is-edit : ActionButton {
@@ -372,7 +372,7 @@ export component ConnectionForm inherits Rectangle {
                 text: @tr("Delete");
                 bg: Colors.red;
                 fg: Colors.base;
-                leading-icon: @image-url("../../../assets/icons/delete.svg");
+                leading-icon: Icons.delete;
                 enabled: !root.testing;
                 clicked => { root.delete-connection(); }
             }
@@ -388,7 +388,7 @@ export component ConnectionForm inherits Rectangle {
                 text: root.testing ? @tr("Testing\u{2026}") : @tr("Test Connection");
                 bg: root.testing ? Colors.surface2 : Colors.blue;
                 fg: root.testing ? Colors.subtext0 : Colors.base;
-                leading-icon: @image-url("../../../assets/icons/test-connection.svg");
+                leading-icon: Icons.test-connection;
                 enabled: !root.testing;
                 clicked => { root.test-connection(); }
             }
@@ -401,7 +401,7 @@ export component ConnectionForm inherits Rectangle {
                   : root.test-ok  ? Colors.green
                   :                 Colors.overlay0;
                 fg: root.testing ? Colors.subtext0 : Colors.base;
-                leading-icon: @image-url("../../../assets/icons/confirm.svg");
+                leading-icon: Icons.confirm;
                 enabled: !root.testing;
                 clicked => { root.add-connection(); }
             }

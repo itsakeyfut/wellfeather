@@ -1,5 +1,5 @@
 import { RowData } from "../globals.slint";
-import { Colors, Typography } from "../theme.slint";
+import { Colors, Typography, Layout, Icons } from "../theme.slint";
 import { ResultTableToolbar } from "result_table_toolbar.slint";
 import { ResultTableHeader } from "result_table_header.slint";
 import { ResultTableBody }   from "result_table_body.slint";
@@ -41,14 +41,14 @@ export component ResultTable inherits Rectangle {
     out property <string> selected-cell-value:   body-inst.selected-cell-value;
     out property <bool>   selected-cell-is-null: body-inst.selected-cell-is-null;
     public function grab-focus() { body-inst.grab-focus(); }
-    property <length> row-height:    28px;
+    property <length> row-height:    Layout.height-row;
     property <length> default-col-w: 150px;
     property <length> min-col-w:     48px;
     property <length> vp-w: root.total-col-width > 0
         ? max(root.total-col-width * 1px, root.width)
         : max(root.columns.length * root.default-col-w, root.width);
-    property <length> filter-banner-h: root.active-filter != "" ? 24px : 0px;
-    property <length> search-bar-h:    body-inst.nav-mode == 2 ? 32px : 0px;
+    property <length> filter-banner-h: root.active-filter != "" ? Layout.height-compact : 0px;
+    property <length> search-bar-h:    body-inst.nav-mode == 2 ? Layout.height-tab-bar : 0px;
     property <length> bottom-total:    root.filter-banner-h + root.search-bar-h;
     property <string> search-query: "";
 
@@ -141,7 +141,7 @@ export component ResultTable inherits Rectangle {
                 spacing: 6px;
                 Image {
                     width: 18px;
-                    source: @image-url("../../../assets/icons/alert-error.svg");
+                    source: Icons.alert-error;
                     colorize: Colors.red;
                     image-fit: contain;
                 }

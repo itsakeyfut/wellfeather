@@ -1,4 +1,4 @@
-import { Colors, Typography } from "../../theme.slint";
+import { Colors, Typography, Layout } from "../../theme.slint";
 import { ActionButton, ModalOverlay } from "../common.slint";
 
 export component AllRowsDialog inherits ModalOverlay {
@@ -6,8 +6,8 @@ export component AllRowsDialog inherits ModalOverlay {
     callback fetch-clicked;
 
     VerticalLayout {
-        padding: 24px;
-        spacing: 16px;
+        padding: Layout.padding-2xl;
+        spacing: Layout.spacing-2xl;
         alignment: start;
 
         Text {
@@ -25,7 +25,7 @@ export component AllRowsDialog inherits ModalOverlay {
         }
 
         HorizontalLayout {
-            spacing: 8px;
+            spacing: Layout.spacing-lg;
             alignment: end;
             ActionButton {
                 width: 80px;

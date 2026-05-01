@@ -1,4 +1,4 @@
-import { Colors, Typography } from "../theme.slint";
+import { Colors, Typography, Layout, Icons } from "../theme.slint";
 import { ColumnData, RowData } from "../globals.slint";
 import { ResultTable } from "result_table.slint";
 
@@ -57,7 +57,7 @@ export component TableView inherits Rectangle {
     Rectangle {
         x: 0; y: 0;
         width: parent.width;
-        height: 32px;
+        height: Layout.height-tab-bar;
         background: Colors.surface0;
 
         HorizontalLayout {
@@ -65,27 +65,27 @@ export component TableView inherits Rectangle {
 
             for label[i] in [@tr("Data"), @tr("Columns"), @tr("DDL")] : Rectangle {
                 width: 80px;
-                height: 32px;
+                height: Layout.height-tab-bar;
                 background: i == root.sub-tab ? Colors.base : transparent;
 
                 HorizontalLayout {
                     alignment: center;
-                    spacing: 4px;
+                    spacing: Layout.spacing-sm;
                     if i == 0 : Image {
-                        width: 14px;
-                        source: @image-url("../../../assets/icons/table-list.svg");
+                        width: Layout.icon-md;
+                        source: Icons.table-list;
                         colorize: i == root.sub-tab ? Colors.text : Colors.subtext1;
                         image-fit: contain;
                     }
                     if i == 1 : Image {
-                        width: 14px;
-                        source: @image-url("../../../assets/icons/columns.svg");
+                        width: Layout.icon-md;
+                        source: Icons.columns;
                         colorize: i == root.sub-tab ? Colors.text : Colors.subtext1;
                         image-fit: contain;
                     }
                     if i == 2 : Image {
-                        width: 14px;
-                        source: @image-url("../../../assets/icons/code.svg");
+                        width: Layout.icon-md;
+                        source: Icons.code;
                         colorize: i == root.sub-tab ? Colors.text : Colors.subtext1;
                         image-fit: contain;
                     }
@@ -106,7 +106,7 @@ export component TableView inherits Rectangle {
 
                 if i == root.sub-tab : Rectangle {
                     x: 0;
-                    y: 28px;
+                    y: Layout.height-tab-bar - 2px;
                     width: parent.width;
                     height: 2px;
                     background: Colors.blue;
@@ -118,9 +118,9 @@ export component TableView inherits Rectangle {
     // ── content area ──────────────────────────────────────────────────────────
     Rectangle {
         x: 0;
-        y: 32px;
+        y: Layout.height-tab-bar;
         width: parent.width;
-        height: parent.height - 32px;
+        height: parent.height - Layout.height-tab-bar;
 
         // Data sub-tab
         if root.sub-tab == 0 : ResultTable {
@@ -151,11 +151,11 @@ export component TableView inherits Rectangle {
 
             col-list := VerticalLayout {
                 Rectangle {
-                    height: 28px;
+                    height: Layout.height-row;
                     background: Colors.surface0;
 
                     HorizontalLayout {
-                        padding-left: 12px;
+                        padding-left: Layout.padding-md;
                         spacing: 0;
 
                         Text {
@@ -184,11 +184,11 @@ export component TableView inherits Rectangle {
                 }
 
                 for col[i] in root.structure-columns : Rectangle {
-                    height: 28px;
+                    height: Layout.height-row;
                     background: Math.mod(i, 2) == 0 ? Colors.base : Colors.mantle;
 
                     HorizontalLayout {
-                        padding-left: 12px;
+                        padding-left: Layout.padding-md;
                         spacing: 0;
 
                         Text {
@@ -241,11 +241,11 @@ export component TableView inherits Rectangle {
                 viewport-height: max(ddl-text-el.preferred-height + 16px, self.height);
 
                 ddl-text-el := Text {
-                    x: 12px; y: 8px;
-                    width: parent.width - 24px;
+                    x: Layout.padding-md; y: Layout.padding-sm;
+                    width: parent.width - Layout.padding-md * 2;
                     text: root.ddl-text;
                     color: Colors.text;
-                    font-family: "JetBrains Mono";
+                    font-family: Typography.font-mono;
                     font-size: root.ddl-font-size-px * 1px;
                     wrap: word-wrap;
                 }
@@ -255,16 +255,16 @@ export component TableView inherits Rectangle {
                 x: parent.width - 100px;
                 y: parent.height - 36px;
                 width: 88px;
-                height: 28px;
-                border-radius: 4px;
+                height: Layout.height-row;
+                border-radius: Layout.radius-md;
                 background: copy-ta.has-hover ? Colors.surface1 : Colors.surface0;
 
                 HorizontalLayout {
                     alignment: center;
-                    spacing: 5px;
+                    spacing: Layout.spacing-icon;
                     Image {
-                        width: 12px;
-                        source: @image-url("../../../assets/icons/copy.svg");
+                        width: Layout.icon-sm;
+                        source: Icons.copy;
                         colorize: Colors.text;
                         image-fit: contain;
                     }

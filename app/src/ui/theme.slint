@@ -50,4 +50,89 @@ export global Typography {
     out property <length> size-lg:  13px;
     out property <length> size-xl:  15px;
     out property <length> size-2xl: 16px;
+    // Font family tokens — update values here when #228 adds per-platform switching.
+    out property <string> font-ui:   "Segoe UI";       // system UI font
+    out property <string> font-mono: "JetBrains Mono"; // monospace / code font
+}
+
+export global Layout {
+    // ── Heights: chrome bars ──────────────────────────────────────────────────
+    out property <length> height-bar:        28px;  // MenuBar, result toolbar strip
+    out property <length> height-tab-bar:    32px;  // TabBar
+    out property <length> height-compact:    24px;  // compact rows (filter banner, tab text area)
+
+    // ── Heights: content rows and inputs ─────────────────────────────────────
+    out property <length> height-row:         28px;  // data rows, form inputs, structure rows
+    out property <length> height-sidebar-row: 32px;  // sidebar tree row
+    out property <length> height-dialog-row:  48px;  // db_manager list rows
+    out property <length> height-footer:      44px;  // db_manager add-connection footer
+    out property <length> height-completion-item: 22px; // completion popup row
+
+    // ── Heights: buttons and menu items ───────────────────────────────────────
+    out property <length> height-menu-item: 30px;  // MenuItem dropdown row
+    out property <length> height-btn-sm:    20px;  // ToolbarButton (compact)
+    out property <length> height-btn-md:    26px;  // inline modal buttons (Edit, Connect)
+    out property <length> height-btn-lg:    32px;  // ActionButton, DbTypeButton
+
+    // ── Icon widths ───────────────────────────────────────────────────────────
+    out property <length> icon-xs:  10px;
+    out property <length> icon-sm:  12px;
+    out property <length> icon-md:  14px;
+    out property <length> icon-lg:  16px;
+    out property <length> icon-xl:  18px;
+
+    // ── Spacing (gap between siblings in a layout) ────────────────────────────
+    out property <length> spacing-xs:   2px;
+    out property <length> spacing-sm:   4px;
+    out property <length> spacing-md:   6px;
+    out property <length> spacing-lg:   8px;
+    out property <length> spacing-xl:  10px;   // form content gap
+    out property <length> spacing-2xl: 16px;   // dialog section gap
+    out property <length> spacing-btn:  3px;   // icon-to-label gap inside ToolbarButton
+    out property <length> spacing-icon: 5px;   // icon-to-label gap inside ActionButton
+
+    // ── Padding (inset from container edge) ───────────────────────────────────
+    out property <length> padding-xs:    4px;
+    out property <length> padding-sm:    8px;
+    out property <length> padding-md:   12px;
+    out property <length> padding-lg:   16px;
+    out property <length> padding-xl:   20px;
+    out property <length> padding-2xl:  24px;
+    out property <length> padding-tab:  10px;  // tab strip left edge
+    out property <length> padding-input: 6px;  // TextInput horizontal inset
+
+    // ── Border radius ─────────────────────────────────────────────────────────
+    out property <length> radius-sm: 3px;
+    out property <length> radius-md: 4px;
+    out property <length> radius-lg: 8px;
+
+    // ── Sidebar-specific ──────────────────────────────────────────────────────
+    out property <length> sidebar-indent: 14px;  // per-level indentation in tree
+}
+
+export global Icons {
+    out property <image> alert-error:      @image-url("../../assets/icons/alert-error.svg");
+    out property <image> brand-mysql:      @image-url("../../assets/icons/brand-mysql.svg");
+    out property <image> brand-postgresql: @image-url("../../assets/icons/brand-postgresql.svg");
+    out property <image> brand-sqlite:     @image-url("../../assets/icons/brand-sqlite.svg");
+    out property <image> chevron-down:     @image-url("../../assets/icons/chevron-down.svg");
+    out property <image> chevron-right:    @image-url("../../assets/icons/chevron-right.svg");
+    out property <image> close:            @image-url("../../assets/icons/close.svg");
+    out property <image> code:             @image-url("../../assets/icons/code.svg");
+    out property <image> columns:          @image-url("../../assets/icons/columns.svg");
+    out property <image> confirm:          @image-url("../../assets/icons/confirm.svg");
+    out property <image> copy:             @image-url("../../assets/icons/copy.svg");
+    out property <image> delete:           @image-url("../../assets/icons/delete.svg");
+    out property <image> dot-empty:        @image-url("../../assets/icons/dot-empty.svg");
+    out property <image> dot-filled:       @image-url("../../assets/icons/dot-filled.svg");
+    out property <image> edit:             @image-url("../../assets/icons/edit.svg");
+    out property <image> export:           @image-url("../../assets/icons/export.svg");
+    out property <image> link:             @image-url("../../assets/icons/link.svg");
+    out property <image> plus:             @image-url("../../assets/icons/plus.svg");
+    out property <image> sort-asc:         @image-url("../../assets/icons/sort-asc.svg");
+    out property <image> sort-desc:        @image-url("../../assets/icons/sort-desc.svg");
+    out property <image> sql-database:     @image-url("../../assets/icons/sql-database.svg");
+    out property <image> table-list:       @image-url("../../assets/icons/table-list.svg");
+    out property <image> test-connection:  @image-url("../../assets/icons/test-connection.svg");
+    out property <image> unlink:           @image-url("../../assets/icons/unlink.svg");
 }

@@ -2,7 +2,7 @@
 // Left: active connection name (and DB) or "Not connected".
 // Right: query lifecycle status — "Running…", "N ms · M rows", "Cancelled", "Error: …".
 
-import { Colors, Typography } from "../theme.slint";
+import { Colors, Typography, Layout } from "../theme.slint";
 
 export component StatusBar inherits Rectangle {
     background: Colors.crust;
@@ -15,9 +15,9 @@ export component StatusBar inherits Rectangle {
     in property <string> query-status;
 
     HorizontalLayout {
-        padding-left:  12px;
-        padding-right: 12px;
-        spacing: 8px;
+        padding-left:  Layout.padding-md;
+        padding-right: Layout.padding-md;
+        spacing: Layout.spacing-lg;
 
         Text {
             text: root.connection-text;

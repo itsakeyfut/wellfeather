@@ -1,4 +1,4 @@
-import { Colors, Typography } from "../../theme.slint";
+import { Colors, Typography, Layout } from "../../theme.slint";
 import { ActionButton, ModalOverlay } from "../common.slint";
 
 export component TestResultDialog inherits ModalOverlay {
@@ -7,8 +7,8 @@ export component TestResultDialog inherits ModalOverlay {
     callback ok-clicked;
 
     VerticalLayout {
-        padding: 24px;
-        spacing: 16px;
+        padding: Layout.padding-2xl;
+        spacing: Layout.spacing-2xl;
         alignment: start;
 
         Text {
