@@ -569,15 +569,9 @@ export component Editor inherits Rectangle {
                 font-family: root.font-family;
                 font-size:   root.font-size-px * 1px;
 
-                // TextInput consumes all key events by default, preventing bubbling.
-                // Reject Ctrl+Tab here so it reaches the root FocusScope key-pressed.
-                key-pressed(event) => {
-                    if (event.modifiers.control && event.text == Key.Tab) {
-                        EventResult.reject
-                    } else {
-                        EventResult.accept
-                    }
-                }
+                // Reject all key events so built-in TextInput editing runs and
+                // Ctrl+Tab can bubble up to the root FocusScope for tab switching.
+                key-pressed(event) => { EventResult.reject }
 
                 // Secondary path to clear hold-flags when a key is released.
                 // capture-key-released (on the FocusScope) is the primary path,
