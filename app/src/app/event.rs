@@ -1,5 +1,5 @@
 use wf_completion::CompletionItem;
-use wf_config::models::Theme;
+use wf_config::models::{ConnectionConfig, Theme};
 use wf_db::models::{DbMetadata, QueryResult};
 
 /// Fine-grained state transitions forwarded to the UI via `StateChanged`.
@@ -15,7 +15,13 @@ pub enum StateEvent {
 /// Controller → UI channel messages.
 #[derive(Debug)]
 pub enum Event {
-    Connected(String), // connection_id
+    Connected {
+        id: String,
+        /// Full list of all saved connections at connect time.
+        connections: Vec<ConnectionConfig>,
+        safe_dml: bool,
+        read_only: bool,
+    },
     Disconnected(String),
     ConnectionRemoved(String), // connection_id — deleted from config
     /// Fired when `Command::Connect` fails. Distinct from `QueryError` so the UI

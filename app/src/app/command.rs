@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use wf_config::models::{ConnectionConfig, PageSize, Theme};
+use wf_config::models::{PageSize, Theme};
 use wf_db::models::DbConnection;
 
 /// Format for result export.
@@ -18,7 +18,6 @@ pub enum ConfigUpdate {
     FontFamily(String),
     FontSize(u32),
     Language(String),
-    Connection(ConnectionConfig),
     /// Update only safe_dml / read_only flags for an existing connection entry.
     ConnectionFlags {
         id: String,

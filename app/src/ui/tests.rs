@@ -1,5 +1,6 @@
 use super::*;
-use wf_db::models::{DbConnection, DbMetadata, DbType, TableInfo};
+use wf_config::models::{ConnectionConfig, DbTypeName};
+use wf_db::models::{DbMetadata, TableInfo};
 
 // ── find_prefix_start ────────────────────────────────────────────────────────
 
@@ -94,17 +95,19 @@ fn is_terminal_expression_should_not_match_word_ending_with_null_suffix() {
     assert!(!is_terminal_expression("SELECT is_not_null_col"));
 }
 
-fn make_conn(id: &str, name: &str) -> DbConnection {
-    DbConnection {
+fn make_conn(id: &str, name: &str) -> ConnectionConfig {
+    ConnectionConfig {
         id: id.to_string(),
         name: name.to_string(),
-        db_type: DbType::SQLite,
+        db_type: DbTypeName::SQLite,
         connection_string: None,
         host: None,
         port: None,
         user: None,
         password_encrypted: None,
         database: None,
+        safe_dml: true,
+        read_only: false,
     }
 }
 

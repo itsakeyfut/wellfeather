@@ -13,7 +13,7 @@
 //! Both channels are bounded (`capacity = CMD_CHANNEL_CAPACITY`). The controller task exits cleanly
 //! when all `Sender<Command>` clones are dropped (i.e. when the UI window closes).
 
-use std::path::PathBuf;
+use std::{path::PathBuf, sync::Arc};
 
 use chrono::Utc;
 use rust_i18n::t;
@@ -21,7 +21,7 @@ use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
 use wf_completion::{cache::MetadataCache, service::CompletionService};
-use wf_config::manager::ConfigManager;
+use wf_config::ConnectionRepository;
 use wf_db::{
     error::DbError,
     models::{DbConnection, DbType},
@@ -34,7 +34,7 @@ use crate::{
         LocalizedMessage,
         command::{Command, ConfigUpdate},
         event::{Event, StateEvent},
-        session::SessionManager,
+        session::{SessionManager, db_to_config_conn},
     },
     state::SharedState,
 };
@@ -50,6 +50,7 @@ pub struct AppController {
     state: SharedState,
     db: DbService,
     session: SessionManager,
+    repo: Arc<ConnectionRepository>,
     /// Path to `history.db`; opened asynchronously at the start of `run()`.
     history_path: PathBuf,
     /// `None` until `run()` opens the database; failures are non-fatal (logged).
@@ -75,6 +76,7 @@ impl AppController {
         state: SharedState,
         db: DbService,
         session: SessionManager,
+        repo: Arc<ConnectionRepository>,
         history_path: PathBuf,
         metadata_cache_path: PathBuf,
     ) -> (Self, mpsc::Sender<Command>, mpsc::Receiver<Event>) {
@@ -85,6 +87,7 @@ impl AppController {
                 state,
                 db,
                 session,
+                repo,
                 history_path,
                 history: None,
                 metadata_cache_path,
@@ -170,11 +173,15 @@ impl AppController {
         info!(conn_id = %id, "handling Connect command");
         match self.db.connect(&conn, password.as_deref()).await {
             Ok(()) => {
-                // persist session so we can auto-reconnect on next launch
-                if let Err(e) = self.session.save_connection(&conn) {
-                    warn!(conn_id = %id, error = %e, "failed to save session");
+                // Persist to repository so we can auto-reconnect on next launch.
+                let conn_cfg = db_to_config_conn(&conn);
+                if let Err(e) = self.repo.upsert(&conn_cfg).await {
+                    warn!(conn_id = %id, error = %e, "failed to upsert connection");
                 }
-                // Add or update the connection in the saved list.
+                if let Err(e) = self.repo.touch_last_used(&id).await {
+                    warn!(conn_id = %id, error = %e, "failed to touch last_used");
+                }
+                // Add or update the connection in the runtime list.
                 let already_saved = self.state.conn.all().iter().any(|c| c.id == id);
                 if already_saved {
                     self.state.conn.update(conn);
@@ -183,7 +190,22 @@ impl AppController {
                 }
                 self.state.conn.set_active(&id);
                 info!(conn_id = %id, "connected successfully");
-                let _ = self.tx_event.send(Event::Connected(id.clone())).await;
+                // Load the full list from the repo so the UI can show all saved connections.
+                let connections = self.repo.all().await.unwrap_or_default();
+                let (safe_dml, read_only) = connections
+                    .iter()
+                    .find(|c| c.id == id)
+                    .map(|c| (c.safe_dml, c.read_only))
+                    .unwrap_or((true, false));
+                let _ = self
+                    .tx_event
+                    .send(Event::Connected {
+                        id: id.clone(),
+                        connections,
+                        safe_dml,
+                        read_only,
+                    })
+                    .await;
 
                 let db = self.db.clone(); // clone required: tokio::spawn needs 'static
                 let tx = self.tx_event.clone(); // clone required: tokio::spawn needs 'static
@@ -258,8 +280,8 @@ impl AppController {
         info!(conn_id = %id, "handling RemoveConnection command");
         self.db.disconnect(&id);
         self.state.conn.remove(&id);
-        if let Err(e) = self.session.remove_connection(&id) {
-            warn!(conn_id = %id, error = %e, "failed to remove connection from config");
+        if let Err(e) = self.repo.delete(&id).await {
+            warn!(conn_id = %id, error = %e, "failed to delete connection from repo");
         }
         let _ = self.tx_event.send(Event::ConnectionRemoved(id)).await;
     }
@@ -503,20 +525,8 @@ impl AppController {
                 safe_dml,
                 read_only,
             } => {
-                let cm = ConfigManager::new();
-                match cm.load() {
-                    Ok(mut config) => {
-                        if let Some(entry) = config.connections.iter_mut().find(|c| c.id == id) {
-                            entry.safe_dml = safe_dml;
-                            entry.read_only = read_only;
-                            if let Err(e) = cm.save(&config) {
-                                warn!(error = %e, "failed to persist connection flags to config");
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        warn!(error = %e, "failed to load config for connection flags update")
-                    }
+                if let Err(e) = self.repo.update_flags(&id, safe_dml, read_only).await {
+                    warn!(error = %e, "failed to update connection flags in repo");
                 }
                 let _ = self
                     .tx_event
@@ -630,15 +640,13 @@ impl AppController {
     /// When `true`, sends `Event::QueryError` with a localized "blocked" message so the
     /// caller can return early without executing the query.
     async fn is_read_only_blocked(&self, conn_id: &str, sql: &str) -> bool {
-        let read_only = ConfigManager::new()
-            .load()
+        let read_only = self
+            .repo
+            .find(conn_id)
+            .await
             .ok()
-            .and_then(|cfg| {
-                cfg.connections
-                    .iter()
-                    .find(|c| c.id == conn_id)
-                    .map(|c| c.read_only)
-            })
+            .flatten()
+            .map(|c| c.read_only)
             .unwrap_or(false);
         if read_only && wf_query::analyzer::is_write_statement(sql) {
             warn!(conn_id = %conn_id, "RunQuery blocked: connection is read-only");
@@ -683,7 +691,7 @@ mod tests {
     use std::{path::PathBuf, sync::Arc};
 
     use tempfile::tempdir;
-    use wf_config::manager::ConfigManager;
+    use wf_config::{ConnectionRepository, manager::ConfigManager};
     use wf_db::{
         models::{DbConnection, DbType},
         service::DbService,
@@ -702,6 +710,10 @@ mod tests {
         let dir = tempdir().unwrap();
         let path = dir.keep().join("config.toml");
         SessionManager::with_config_manager(ConfigManager::with_path(path))
+    }
+
+    async fn test_repo() -> Arc<ConnectionRepository> {
+        Arc::new(ConnectionRepository::open_memory().await.unwrap())
     }
 
     /// Return a path to a temporary `history.db` (file created lazily by the controller).
@@ -795,6 +807,7 @@ mod tests {
             state.clone(),
             db,
             test_session(),
+            test_repo().await,
             test_history_path(),
             test_metadata_path(),
         );
@@ -809,7 +822,6 @@ mod tests {
 
         let event = rx_event.recv().await.expect("expected event");
         assert!(matches!(event, Event::TestConnectionOk));
-        // Must NOT be added to state
         assert!(state.conn.all().is_empty(), "test conn should not be saved");
     }
 
@@ -821,6 +833,7 @@ mod tests {
             state.clone(),
             db,
             test_session(),
+            test_repo().await,
             test_history_path(),
             test_metadata_path(),
         );
@@ -860,6 +873,7 @@ mod tests {
             state.clone(),
             db,
             test_session(),
+            test_repo().await,
             test_history_path(),
             test_metadata_path(),
         );
@@ -868,12 +882,12 @@ mod tests {
             .send(Command::Connect(sqlite_conn("c1"), None))
             .await
             .unwrap();
-        drop(tx_cmd); // close channel → run() exits after processing
+        drop(tx_cmd);
 
         controller.run().await;
 
         let event = rx_event.recv().await.expect("expected event");
-        assert!(matches!(event, Event::Connected(ref id) if id == "c1"));
+        assert!(matches!(event, Event::Connected { ref id, .. } if id == "c1"));
         assert!(state.conn.active().is_some());
     }
 
@@ -885,6 +899,7 @@ mod tests {
             state.clone(),
             db,
             test_session(),
+            test_repo().await,
             test_history_path(),
             test_metadata_path(),
         );
@@ -917,6 +932,7 @@ mod tests {
             state.clone(),
             db,
             test_session(),
+            test_repo().await,
             test_history_path(),
             test_metadata_path(),
         );
@@ -934,7 +950,7 @@ mod tests {
         tokio::spawn(controller.run());
 
         let e1 = rx_event.recv().await.unwrap();
-        assert!(matches!(e1, Event::Connected(_)));
+        assert!(matches!(e1, Event::Connected { .. }));
         // Drain any MetadataLoaded/MetadataFetchFailed from the background fetch.
         let e2 = loop {
             match rx_event.recv().await.unwrap() {
@@ -955,11 +971,11 @@ mod tests {
             state.clone(),
             db,
             test_session(),
+            test_repo().await,
             test_history_path(),
             test_metadata_path(),
         );
 
-        // Connect first so there is an active connection.
         tx_cmd
             .send(Command::Connect(sqlite_conn("q1"), None))
             .await
@@ -973,8 +989,7 @@ mod tests {
         tokio::spawn(controller.run());
 
         let e1 = rx_event.recv().await.unwrap();
-        assert!(matches!(e1, Event::Connected(_)));
-        // Drain any MetadataLoaded/MetadataFetchFailed before QueryStarted.
+        assert!(matches!(e1, Event::Connected { .. }));
         let e2 = loop {
             match rx_event.recv().await.unwrap() {
                 Event::MetadataLoaded(_, _) | Event::MetadataFetchFailed(_) => continue,
@@ -982,7 +997,6 @@ mod tests {
             }
         };
         assert!(matches!(e2, Event::QueryStarted));
-        // Drain any late MetadataLoaded/MetadataFetchFailed before QueryFinished.
         let e3 = loop {
             match rx_event.recv().await.unwrap() {
                 Event::MetadataLoaded(_, _) | Event::MetadataFetchFailed(_) => continue,
@@ -1000,6 +1014,7 @@ mod tests {
             state.clone(),
             db,
             test_session(),
+            test_repo().await,
             test_history_path(),
             test_metadata_path(),
         );
@@ -1024,6 +1039,7 @@ mod tests {
             state.clone(),
             db,
             test_session(),
+            test_repo().await,
             test_history_path(),
             test_metadata_path(),
         );
@@ -1045,6 +1061,7 @@ mod tests {
             state.clone(),
             db,
             test_session(),
+            test_repo().await,
             test_history_path(),
             test_metadata_path(),
         );
@@ -1058,7 +1075,7 @@ mod tests {
         tokio::spawn(controller.run());
 
         let e1 = rx_event.recv().await.unwrap();
-        assert!(matches!(e1, Event::Connected(_)));
+        assert!(matches!(e1, Event::Connected { .. }));
         let e2 = rx_event.recv().await.unwrap();
         assert!(
             matches!(
@@ -1077,6 +1094,7 @@ mod tests {
             state.clone(),
             db,
             test_session(),
+            test_repo().await,
             test_history_path(),
             test_metadata_path(),
         );
@@ -1093,11 +1111,10 @@ mod tests {
 
         tokio::spawn(controller.run());
 
-        // Drain the 2 Connected events plus any MetadataLoaded/MetadataFetchFailed events.
         let mut connected_count = 0;
         while connected_count < 2 {
             match rx_event.recv().await.unwrap() {
-                Event::Connected(_) => connected_count += 1,
+                Event::Connected { .. } => connected_count += 1,
                 Event::MetadataLoaded(_, _) | Event::MetadataFetchFailed(_) => {}
                 _ => {}
             }

@@ -81,13 +81,13 @@ struct OriginalQueryData {
 
 type SharedOriginalData = Arc<Mutex<Option<OriginalQueryData>>>;
 
-use wf_config::models::Theme;
+use wf_config::models::{ConnectionConfig, DbTypeName, Theme};
 
 use crate::{
     app::{
         command::{Command, ConfigUpdate},
         event::{Event, StateEvent},
-        session::SessionManager,
+        session::{SessionManager, config_to_db_conn},
     },
     state::SharedState,
 };
@@ -101,24 +101,27 @@ struct SidebarUiState {
     metadata: HashMap<String, DbMetadata>,
     expanded: HashSet<String>,
     read_only: HashMap<String, bool>,
+    /// All saved connections (from ConnectionRepository). Used to build the
+    /// sidebar and DB manager list even when no DB is running.
+    config_connections: Vec<ConnectionConfig>,
 }
 
 fn build_sidebar_tree(
-    connections: &[DbConnection],
+    config_conns: &[ConnectionConfig],
     active_id: &str,
     metadata: &HashMap<String, DbMetadata>,
     expanded: &HashSet<String>,
     read_only: &HashMap<String, bool>,
 ) -> Vec<crate::SidebarNode> {
     let mut nodes = vec![];
-    for conn in connections {
+    for conn in config_conns {
         let conn_node_id = format!("conn:{}", conn.id);
         let is_conn_expanded = expanded.contains(&conn_node_id);
         let conn_idx = nodes.len() as i32;
         nodes.push(crate::SidebarNode {
             id: conn_node_id.clone().into(),
             label: conn.name.clone().into(),
-            sub_label: db_type_label(&conn.db_type).into(),
+            sub_label: db_type_label_config(&conn.db_type).into(),
             level: 0,
             is_expanded: is_conn_expanded,
             is_active: conn.id == active_id,
@@ -293,11 +296,18 @@ impl UI {
         tx_cmd: mpsc::Sender<Command>,
         rx_event: mpsc::Receiver<Event>,
         enc_key: [u8; 32],
+        initial_connections: Vec<ConnectionConfig>,
     ) -> Result<Self> {
         let window = crate::AppWindow::new()?;
 
-        let sidebar_state: Arc<Mutex<SidebarUiState>> =
-            Arc::new(Mutex::new(SidebarUiState::default()));
+        let sidebar_state: Arc<Mutex<SidebarUiState>> = Arc::new(Mutex::new(SidebarUiState {
+            read_only: initial_connections
+                .iter()
+                .map(|c| (c.id.clone(), c.read_only))
+                .collect(),
+            config_connections: initial_connections,
+            ..Default::default()
+        }));
 
         // Shared storage for the unfiltered query result; written by the event
         // handler on QueryFinished, read by the filter callbacks on the UI thread.
@@ -393,6 +403,30 @@ impl UI {
             ui_global.set_editor_text(query.clone().into());
             tabs_state.borrow_mut().save_current_text(&query);
         }
+        // Populate the connection list and sidebar from all saved connections at startup
+        // so they are visible even when no DB is running.
+        {
+            let sb = sidebar_state.lock().unwrap_or_else(|p| p.into_inner());
+            let entries: Vec<crate::ConnectionEntry> = sb
+                .config_connections
+                .iter()
+                .map(|c| crate::ConnectionEntry {
+                    is_active: false,
+                    db_type: db_type_label_config(&c.db_type).into(),
+                    name: c.name.clone().into(),
+                    id: c.id.clone().into(),
+                })
+                .collect();
+            ui_global.set_connection_list(Rc::new(slint::VecModel::from(entries)).into());
+            let nodes = build_sidebar_tree(
+                &sb.config_connections,
+                "",
+                &sb.metadata,
+                &sb.expanded,
+                &sb.read_only,
+            );
+            ui_global.set_sidebar_tree(Rc::new(slint::VecModel::from(nodes)).into());
+        }
 
         Self::register_result_callbacks(
             &window,
@@ -431,8 +465,16 @@ impl UI {
         tokio::spawn(async move {
             while let Some(event) = rx_event.recv().await {
                 match event {
-                    Event::Connected(id) => Self::handle_connected(
+                    Event::Connected {
                         id,
+                        connections,
+                        safe_dml,
+                        read_only,
+                    } => Self::handle_connected(
+                        id,
+                        connections,
+                        safe_dml,
+                        read_only,
                         window_weak.clone(),
                         state.clone(),
                         Arc::clone(&sidebar_state),
@@ -510,45 +552,25 @@ impl UI {
 
     fn handle_connected(
         id: String,
+        connections: Vec<ConnectionConfig>,
+        safe_dml: bool,
+        read_only: bool,
         ww: slint::Weak<crate::AppWindow>,
         state: SharedState,
         sidebar_state: Arc<Mutex<SidebarUiState>>,
     ) {
         // Build Send data outside invoke_from_event_loop (Rc<VecModel> is not Send).
-        let entries: Vec<crate::ConnectionEntry> = state
-            .conn
-            .all()
-            .into_iter()
+        let entries: Vec<crate::ConnectionEntry> = connections
+            .iter()
             .map(|c| crate::ConnectionEntry {
                 is_active: c.id == id,
-                db_type: db_type_label(&c.db_type).into(),
+                db_type: db_type_label_config(&c.db_type).into(),
                 name: c.name.clone().into(),
                 id: c.id.clone().into(),
             })
             .collect();
-        let config = wf_config::manager::ConfigManager::new().load().ok();
-        let safe_dml = config
-            .as_ref()
-            .and_then(|cfg| {
-                cfg.connections
-                    .iter()
-                    .find(|c| c.id == id)
-                    .map(|c| c.safe_dml)
-            })
-            .unwrap_or(true);
-        let read_only = config
-            .as_ref()
-            .and_then(|cfg| {
-                cfg.connections
-                    .iter()
-                    .find(|c| c.id == id)
-                    .map(|c| c.read_only)
-            })
-            .unwrap_or(false);
-        let base_status = state
-            .conn
-            .all()
-            .into_iter()
+        let base_status = connections
+            .iter()
             .find(|c| c.id == id)
             .map(|c| match c.database.as_deref() {
                 Some(db) if !db.is_empty() => format!("{} / {}", c.name, db),
@@ -563,19 +585,24 @@ impl UI {
         {
             let mut sb = sidebar_state.lock().unwrap_or_else(|p| p.into_inner());
             sb.expanded.insert(format!("conn:{}", id));
-            if let Some(cfg) = &config {
-                sb.read_only = cfg
-                    .connections
-                    .iter()
-                    .map(|c| (c.id.clone(), c.read_only))
-                    .collect();
-            }
+            sb.config_connections = connections.clone();
+            sb.read_only = connections
+                .iter()
+                .map(|c| (c.id.clone(), c.read_only))
+                .collect();
         }
         let sidebar_nodes = {
             let sb = sidebar_state.lock().unwrap_or_else(|p| p.into_inner());
-            let connections = state.conn.all();
-            build_sidebar_tree(&connections, &id, &sb.metadata, &sb.expanded, &sb.read_only)
+            build_sidebar_tree(
+                &sb.config_connections,
+                &id,
+                &sb.metadata,
+                &sb.expanded,
+                &sb.read_only,
+            )
         };
+        // Update AppState active connection if not already tracked (needed for read-only check).
+        let _ = state.conn.active(); // no-op; active is set by controller before event fires
         // clone required: invoke_from_event_loop closure must be 'static
         let _ = slint::invoke_from_event_loop(move || {
             with_ui(&ww, move |ui| {
@@ -610,22 +637,24 @@ impl UI {
         state: SharedState,
         sidebar_state: Arc<Mutex<SidebarUiState>>,
     ) {
-        // Update the cached read_only map and rebuild the sidebar tree outside the
-        // UI thread so we don't hold the mutex inside invoke_from_event_loop.
+        // Update the cached flags and rebuild the sidebar tree outside the UI thread.
         {
             let mut sb = sidebar_state.lock().unwrap_or_else(|p| p.into_inner());
             sb.read_only.insert(id.clone(), read_only);
+            if let Some(cc) = sb.config_connections.iter_mut().find(|c| c.id == id) {
+                cc.safe_dml = safe_dml;
+                cc.read_only = read_only;
+            }
         }
         let sidebar_nodes = {
             let sb = sidebar_state.lock().unwrap_or_else(|p| p.into_inner());
-            let connections = state.conn.all();
             let active_id = state
                 .conn
                 .active()
                 .map(|c| c.id.clone())
                 .unwrap_or_default();
             build_sidebar_tree(
-                &connections,
+                &sb.config_connections,
                 &active_id,
                 &sb.metadata,
                 &sb.expanded,
@@ -640,16 +669,17 @@ impl UI {
             .unwrap_or_default();
         let is_active = active_id == id;
         let new_status = if is_active {
-            let base = state
-                .conn
-                .all()
-                .into_iter()
-                .find(|c| c.id == id)
-                .map(|c| match c.database.as_deref() {
-                    Some(db) if !db.is_empty() => format!("{} / {}", c.name, db),
-                    _ => c.name.clone(),
-                })
-                .unwrap_or_else(|| id.clone());
+            let base = {
+                let sb = sidebar_state.lock().unwrap_or_else(|p| p.into_inner());
+                sb.config_connections
+                    .iter()
+                    .find(|c| c.id == id)
+                    .map(|c| match c.database.as_deref() {
+                        Some(db) if !db.is_empty() => format!("{} / {}", c.name, db),
+                        _ => c.name.clone(),
+                    })
+                    .unwrap_or_else(|| id.clone())
+            };
             if read_only {
                 Some(format!("{} · {}", base, t!("status.read_only")))
             } else {
@@ -815,24 +845,36 @@ impl UI {
     fn handle_connection_removed(
         id: String,
         ww: slint::Weak<crate::AppWindow>,
-        state: SharedState,
+        _state: SharedState,
         sidebar_state: Arc<Mutex<SidebarUiState>>,
     ) {
-        let entries: Vec<crate::ConnectionEntry> = state
-            .conn
-            .all()
-            .into_iter()
-            .map(|c| crate::ConnectionEntry {
-                is_active: false,
-                db_type: db_type_label(&c.db_type).into(),
-                name: c.name.clone().into(),
-                id: c.id.clone().into(),
-            })
-            .collect();
-        let sidebar_nodes = {
+        {
+            let mut sb = sidebar_state.lock().unwrap_or_else(|p| p.into_inner());
+            sb.config_connections.retain(|c| c.id != id);
+            sb.read_only.remove(&id);
+            sb.metadata.remove(&id);
+            sb.expanded.remove(&format!("conn:{}", id));
+        }
+        let (entries, sidebar_nodes) = {
             let sb = sidebar_state.lock().unwrap_or_else(|p| p.into_inner());
-            let connections = state.conn.all();
-            build_sidebar_tree(&connections, "", &sb.metadata, &sb.expanded, &sb.read_only)
+            let e = sb
+                .config_connections
+                .iter()
+                .map(|c| crate::ConnectionEntry {
+                    is_active: false,
+                    db_type: db_type_label_config(&c.db_type).into(),
+                    name: c.name.clone().into(),
+                    id: c.id.clone().into(),
+                })
+                .collect::<Vec<_>>();
+            let nodes = build_sidebar_tree(
+                &sb.config_connections,
+                "",
+                &sb.metadata,
+                &sb.expanded,
+                &sb.read_only,
+            );
+            (e, nodes)
         };
         // clone required: invoke_from_event_loop closure must be 'static
         let _ = slint::invoke_from_event_loop(move || {
@@ -862,14 +904,13 @@ impl UI {
         }
         let nodes = {
             let sb = sidebar_state.lock().unwrap_or_else(|p| p.into_inner());
-            let connections = state.conn.all();
             let active_id = state
                 .conn
                 .active()
                 .map(|c| c.id.clone())
                 .unwrap_or_default();
             build_sidebar_tree(
-                &connections,
+                &sb.config_connections,
                 &active_id,
                 &sb.metadata,
                 &sb.expanded,
@@ -1431,12 +1472,21 @@ impl UI {
         // derived via derive_conn_string / parse_conn_string.
         {
             let window_weak = window.as_weak();
-            let state = state.clone();
+            let sidebar_state = Arc::clone(&sidebar_state);
             ui_state.on_edit_connection(move |id| {
                 let id = id.to_string();
-                let Some(conn) = state.conn.all().into_iter().find(|c| c.id == id) else {
+                // Look up from config_connections — works even when the DB is not running.
+                let conn_cfg = {
+                    let sb = sidebar_state.lock().unwrap_or_else(|p| p.into_inner());
+                    sb.config_connections.iter().find(|c| c.id == id).cloned()
+                };
+                let Some(conn_cfg) = conn_cfg else {
                     return;
                 };
+                let conn = config_to_db_conn(&conn_cfg);
+                let safe_dml = conn_cfg.safe_dml;
+                let read_only = conn_cfg.read_only;
+
                 // Decrypt stored password (only present for individual-field connections).
                 let stored_password = conn
                     .password_encrypted
@@ -1477,27 +1527,6 @@ impl UI {
                         conn.database.clone().unwrap_or_default(),
                     )
                 };
-
-                // Load behaviour flags from config (not present in runtime DbConnection).
-                let config = wf_config::manager::ConfigManager::new().load().ok();
-                let safe_dml = config
-                    .as_ref()
-                    .and_then(|c| {
-                        c.connections
-                            .iter()
-                            .find(|cc| cc.id == id)
-                            .map(|cc| cc.safe_dml)
-                    })
-                    .unwrap_or(true);
-                let read_only = config
-                    .as_ref()
-                    .and_then(|c| {
-                        c.connections
-                            .iter()
-                            .find(|cc| cc.id == id)
-                            .map(|cc| cc.read_only)
-                    })
-                    .unwrap_or(false);
 
                 with_ui(&window_weak, move |ui| {
                     ui.set_form_edit_id(conn.id.clone().into());
@@ -1540,8 +1569,15 @@ impl UI {
                         .map(|c| c.id.clone())
                         .unwrap_or_default();
                     if conn_id != active_id {
-                        let conn = state.conn.all().into_iter().find(|c| c.id == conn_id);
-                        if let Some(conn) = conn {
+                        let conn_cfg = {
+                            let sb = sidebar_state.lock().unwrap_or_else(|p| p.into_inner());
+                            sb.config_connections
+                                .iter()
+                                .find(|c| c.id == conn_id)
+                                .cloned()
+                        };
+                        if let Some(cc) = conn_cfg {
+                            let conn = config_to_db_conn(&cc);
                             let password = conn
                                 .password_encrypted
                                 .as_ref()
@@ -1564,14 +1600,13 @@ impl UI {
                 // Rebuild and push the updated tree (already on UI thread)
                 let nodes = {
                     let sb = sidebar_state.lock().unwrap_or_else(|p| p.into_inner());
-                    let connections = state.conn.all();
                     let active_id = state
                         .conn
                         .active()
                         .map(|c| c.id.clone())
                         .unwrap_or_default();
                     build_sidebar_tree(
-                        &connections,
+                        &sb.config_connections,
                         &active_id,
                         &sb.metadata,
                         &sb.expanded,
@@ -1590,6 +1625,7 @@ impl UI {
             // clone required: callback closure needs owned captures
             let tx_cmd = tx_cmd.clone();
             let state = state.clone();
+            let sidebar_state = Arc::clone(&sidebar_state); // clone required: lookup from config_connections
             ui_state.on_connect_db(move |id| {
                 let id = id.to_string();
                 let active_id = state
@@ -1600,8 +1636,12 @@ impl UI {
                 if id == active_id {
                     return;
                 }
-                let conn = state.conn.all().into_iter().find(|c| c.id == id);
-                if let Some(conn) = conn {
+                let conn_cfg = {
+                    let sb = sidebar_state.lock().unwrap_or_else(|p| p.into_inner());
+                    sb.config_connections.iter().find(|c| c.id == id).cloned()
+                };
+                if let Some(cc) = conn_cfg {
+                    let conn = config_to_db_conn(&cc);
                     let password = conn
                         .password_encrypted
                         .as_ref()
@@ -1644,24 +1684,27 @@ impl UI {
                 }
 
                 // Rebuild tree (no active connection, no expanded node for id).
-                let nodes = {
+                let (nodes, entries) = {
                     let sb = sidebar_state.lock().unwrap_or_else(|p| p.into_inner());
-                    let connections = state.conn.all();
-                    build_sidebar_tree(&connections, "", &sb.metadata, &sb.expanded, &sb.read_only)
+                    let nodes = build_sidebar_tree(
+                        &sb.config_connections,
+                        "",
+                        &sb.metadata,
+                        &sb.expanded,
+                        &sb.read_only,
+                    );
+                    let entries = sb
+                        .config_connections
+                        .iter()
+                        .map(|c| crate::ConnectionEntry {
+                            is_active: false,
+                            db_type: db_type_label_config(&c.db_type).into(),
+                            name: c.name.clone().into(),
+                            id: c.id.clone().into(),
+                        })
+                        .collect::<Vec<_>>();
+                    (nodes, entries)
                 };
-
-                // Connection list with all entries inactive.
-                let entries: Vec<crate::ConnectionEntry> = state
-                    .conn
-                    .all()
-                    .into_iter()
-                    .map(|c| crate::ConnectionEntry {
-                        is_active: false,
-                        db_type: db_type_label(&c.db_type).into(),
-                        name: c.name.clone().into(),
-                        id: c.id.clone().into(),
-                    })
-                    .collect();
 
                 // Already on the UI thread — update directly.
                 with_ui(&window_weak, move |ui| {
@@ -2555,6 +2598,14 @@ fn db_type_label(dt: &DbType) -> &'static str {
         DbType::PostgreSQL => "PostgreSQL",
         DbType::MySQL => "MySQL",
         DbType::SQLite => "SQLite",
+    }
+}
+
+fn db_type_label_config(dt: &DbTypeName) -> &'static str {
+    match dt {
+        DbTypeName::PostgreSQL => "PostgreSQL",
+        DbTypeName::MySQL => "MySQL",
+        DbTypeName::SQLite => "SQLite",
     }
 }
 

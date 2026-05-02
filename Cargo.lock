@@ -6810,9 +6810,12 @@ dependencies = [
  "directories",
  "rand 0.10.0",
  "serde",
+ "sqlx",
  "tempfile",
  "thiserror 2.0.18",
+ "tokio",
  "toml 1.1.2+spec-1.1.0",
+ "tracing",
  "uuid",
 ]
 
