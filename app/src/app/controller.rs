@@ -21,6 +21,7 @@ use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
 use wf_completion::{cache::MetadataCache, service::CompletionService};
+use wf_config::manager::ConfigManager;
 use wf_db::{
     error::DbError,
     models::{DbConnection, DbType},
@@ -291,6 +292,10 @@ impl AppController {
             }
         };
 
+        if self.is_read_only_blocked(&conn_id, &sql).await {
+            return;
+        }
+
         self.state.query.set_last_sql(sql.clone());
 
         let token = CancellationToken::new();
@@ -377,6 +382,10 @@ impl AppController {
                 return;
             }
         };
+
+        if self.is_read_only_blocked(&conn_id, &sql).await {
+            return;
+        }
 
         let stmts: Vec<String> = wf_query::analyzer::extract_all_statements(&sql)
             .into_iter()
@@ -489,6 +498,35 @@ impl AppController {
                     warn!(error = %e, "failed to persist language to config");
                 }
             }
+            ConfigUpdate::ConnectionFlags {
+                id,
+                safe_dml,
+                read_only,
+            } => {
+                let cm = ConfigManager::new();
+                match cm.load() {
+                    Ok(mut config) => {
+                        if let Some(entry) = config.connections.iter_mut().find(|c| c.id == id) {
+                            entry.safe_dml = safe_dml;
+                            entry.read_only = read_only;
+                            if let Err(e) = cm.save(&config) {
+                                warn!(error = %e, "failed to persist connection flags to config");
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        warn!(error = %e, "failed to load config for connection flags update")
+                    }
+                }
+                let _ = self
+                    .tx_event
+                    .send(Event::ConnectionFlagsUpdated {
+                        id,
+                        safe_dml,
+                        read_only,
+                    })
+                    .await;
+            }
             _ => {}
         }
     }
@@ -585,6 +623,32 @@ impl AppController {
         info!("handling CancelQuery command");
         self.state.query.cancel();
         let _ = self.tx_event.send(Event::QueryCancelled).await;
+    }
+
+    /// Returns `true` if the connection is read-only and `sql` contains a write statement.
+    ///
+    /// When `true`, sends `Event::QueryError` with a localized "blocked" message so the
+    /// caller can return early without executing the query.
+    async fn is_read_only_blocked(&self, conn_id: &str, sql: &str) -> bool {
+        let read_only = ConfigManager::new()
+            .load()
+            .ok()
+            .and_then(|cfg| {
+                cfg.connections
+                    .iter()
+                    .find(|c| c.id == conn_id)
+                    .map(|c| c.read_only)
+            })
+            .unwrap_or(false);
+        if read_only && wf_query::analyzer::is_write_statement(sql) {
+            warn!(conn_id = %conn_id, "RunQuery blocked: connection is read-only");
+            let _ = self
+                .tx_event
+                .send(Event::QueryError(t!("error.read_only_blocked").to_string()))
+                .await;
+            return true;
+        }
+        false
     }
 }
 

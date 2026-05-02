@@ -155,6 +155,9 @@ pub struct ConnectionConfig {
     /// When true, UPDATE/DELETE without WHERE shows a confirmation dialog.
     #[serde(default = "default_safe_dml")]
     pub safe_dml: bool,
+    /// When true, write statements (INSERT/UPDATE/DELETE/DDL) are blocked before execution.
+    #[serde(default)]
+    pub read_only: bool,
 }
 
 fn default_safe_dml() -> bool {
@@ -321,6 +324,7 @@ database = "local.db"
                 password_encrypted: Some("AES256GCM:xyz".to_string()),
                 database: Some("testdb".to_string()),
                 safe_dml: false,
+                read_only: true,
             }],
         };
 

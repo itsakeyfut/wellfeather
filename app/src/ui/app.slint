@@ -123,6 +123,8 @@ export global UiState {
     in-out property <string> form-database:    "";
     in-out property <string> form-status:      "";
     in-out property <bool>   form-testing:     false;
+    in-out property <bool>   form-safe-dml:    true;
+    in-out property <bool>   form-read-only:   false;
 
     // ── Connection test / add state ───────────────────────────────────────────
     /// True after a successful Test Connection; reset when form is opened.
@@ -149,6 +151,8 @@ export global UiState {
     in-out property <string> safe-dml-pending-kind:  "query";
     /// Active connection safe_dml setting (set by Rust on connect).
     in-out property <bool>   conn-safe-dml: true;
+    /// Active connection read_only setting (set by Rust on connect).
+    in-out property <bool>   conn-read-only: false;
     /// User confirmed dangerous DML execution.
     callback confirm-safe-dml();
     /// User dismissed the dangerous DML confirm popup.
@@ -858,6 +862,8 @@ export component AppWindow inherits Window {
                 database    <=> UiState.form-database;
                 status      <=> UiState.form-status;
                 testing     <=> UiState.form-testing;
+                safe-dml    <=> UiState.form-safe-dml;
+                read-only   <=> UiState.form-read-only;
 
                 is-edit: UiState.form-edit-id != "";
                 cancel => { UiState.close-connection-form(); }

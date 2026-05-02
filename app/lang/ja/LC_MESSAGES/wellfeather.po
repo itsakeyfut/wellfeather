@@ -332,6 +332,22 @@ msgctxt "TableView"
 msgid "NO"
 msgstr "NO"
 
+msgctxt "ConnectionForm"
+msgid "Safe DML"
+msgstr "安全 DML"
+
+msgctxt "ConnectionForm"
+msgid "(confirm UPDATE/DELETE without WHERE)"
+msgstr "(WHERE なし UPDATE/DELETE を確認)"
+
+msgctxt "ConnectionForm"
+msgid "Read-only"
+msgstr "読み取り専用"
+
+msgctxt "ConnectionForm"
+msgid "(block all write statements)"
+msgstr "(書き込み文をブロック)"
+
 msgctxt "SafeDmlDialog"
 msgid "No WHERE clause detected"
 msgstr "WHERE 句のない操作が検出されました"

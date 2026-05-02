@@ -7,9 +7,11 @@ status:
   not_connected: "未接続"
   connect_failed: "接続に失敗しました: %{msg}"
   metadata_unavailable: "メタデータを取得できませんでした: %{msg}"
+  read_only: "読み取り専用"
 error:
   no_active_connection: "接続がありません"
   db_connect_failed: "接続に失敗しました: %{reason}"
   query_failed: "クエリエラー: %{reason}"
   query_cancelled: "クエリをキャンセルしました"
   db_error: "データベースエラー: %{reason}"
+  read_only_blocked: "読み取り専用接続のため実行できません"

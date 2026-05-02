@@ -126,7 +126,13 @@ fn make_meta(tables: &[&str]) -> DbMetadata {
 #[test]
 fn build_sidebar_tree_should_render_connection_nodes() {
     let conns = vec![make_conn("a", "Alpha"), make_conn("b", "Beta")];
-    let nodes = build_sidebar_tree(&conns, "", &HashMap::new(), &HashSet::new());
+    let nodes = build_sidebar_tree(
+        &conns,
+        "",
+        &HashMap::new(),
+        &HashSet::new(),
+        &HashMap::new(),
+    );
     assert_eq!(nodes.len(), 2);
     assert_eq!(nodes[0].label.as_str(), "Alpha");
     assert_eq!(nodes[0].level, 0);
@@ -141,7 +147,7 @@ fn build_sidebar_tree_should_show_categories_when_connection_expanded() {
     expanded.insert("conn:a".to_string());
     let mut metadata = HashMap::new();
     metadata.insert("a".to_string(), make_meta(&["users"]));
-    let nodes = build_sidebar_tree(&conns, "a", &metadata, &expanded);
+    let nodes = build_sidebar_tree(&conns, "a", &metadata, &expanded, &HashMap::new());
     // conn + Tables + Views + Stored Procedures + Indexes = 5 nodes
     assert_eq!(nodes.len(), 5);
     assert_eq!(nodes[1].label.as_str(), "Tables");
@@ -157,7 +163,7 @@ fn build_sidebar_tree_should_show_items_when_category_expanded() {
     expanded.insert("cat:a:Tables".to_string());
     let mut metadata = HashMap::new();
     metadata.insert("a".to_string(), make_meta(&["users", "orders"]));
-    let nodes = build_sidebar_tree(&conns, "a", &metadata, &expanded);
+    let nodes = build_sidebar_tree(&conns, "a", &metadata, &expanded, &HashMap::new());
     // conn + Tables + users + orders + Views + Stored Procedures + Indexes = 7
     assert_eq!(nodes.len(), 7);
     assert_eq!(nodes[2].label.as_str(), "users");
@@ -169,7 +175,13 @@ fn build_sidebar_tree_should_show_items_when_category_expanded() {
 #[test]
 fn build_sidebar_tree_should_hide_children_when_collapsed() {
     let conns = vec![make_conn("a", "Alpha")];
-    let nodes = build_sidebar_tree(&conns, "a", &HashMap::new(), &HashSet::new());
+    let nodes = build_sidebar_tree(
+        &conns,
+        "a",
+        &HashMap::new(),
+        &HashSet::new(),
+        &HashMap::new(),
+    );
     assert_eq!(nodes.len(), 1);
     assert_eq!(nodes[0].level, 0);
 }
@@ -177,7 +189,13 @@ fn build_sidebar_tree_should_hide_children_when_collapsed() {
 #[test]
 fn build_sidebar_tree_should_mark_active_connection() {
     let conns = vec![make_conn("a", "Alpha"), make_conn("b", "Beta")];
-    let nodes = build_sidebar_tree(&conns, "b", &HashMap::new(), &HashSet::new());
+    let nodes = build_sidebar_tree(
+        &conns,
+        "b",
+        &HashMap::new(),
+        &HashSet::new(),
+        &HashMap::new(),
+    );
     assert!(!nodes[0].is_active);
     assert!(nodes[1].is_active);
 }

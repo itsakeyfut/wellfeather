@@ -190,6 +190,14 @@ export component Sidebar inherits Rectangle {
                             horizontal-stretch: 1;
                         }
 
+                        // Lock icon for read-only connection nodes
+                        if node.level == 0 && node.is-read-only : Image {
+                            width: Layout.icon-md;
+                            source: Icons.lock;
+                            colorize: Colors.yellow;
+                            image-fit: contain;
+                        }
+
                         // Sub-label badge (db-type for connection nodes)
                         if node.sub-label != "" : Text {
                             text: node.sub-label;

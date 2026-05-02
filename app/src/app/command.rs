@@ -19,6 +19,12 @@ pub enum ConfigUpdate {
     FontSize(u32),
     Language(String),
     Connection(ConnectionConfig),
+    /// Update only safe_dml / read_only flags for an existing connection entry.
+    ConnectionFlags {
+        id: String,
+        safe_dml: bool,
+        read_only: bool,
+    },
 }
 
 /// UI → Controller channel messages.
