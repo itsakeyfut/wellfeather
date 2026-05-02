@@ -132,6 +132,64 @@ component DbTypeButton inherits Rectangle {
     TouchArea { clicked => { root.clicked(); } }
 }
 
+// ── Helper: labelled checkbox row ────────────────────────────────────────────
+
+component CheckRow inherits Rectangle {
+    in property <string> label-text;
+    in property <string> hint-text: "";
+    in-out property <bool> checked: false;
+
+    height: 22px;
+    horizontal-stretch: 1;
+
+    // TouchArea declared first so it is below the HorizontalLayout in z-order
+    // (Slint paints last child on top; layout content should be on top of the area
+    //  for text rendering, but the area still captures mouse events below).
+    ta := TouchArea {
+        width: parent.width;
+        height: parent.height;
+        clicked => { root.checked = !root.checked; }
+    }
+
+    HorizontalLayout {
+        spacing: Layout.spacing-md;
+        alignment: start;
+
+        // Checkbox square
+        Rectangle {
+            width: 16px;
+            height: 16px;
+            border-radius: Layout.radius-sm;
+            background: root.checked ? Colors.blue : Colors.base;
+            border-width: 1px;
+            border-color: root.checked ? Colors.blue : Colors.surface2;
+            Text {
+                width: parent.width;
+                height: parent.height;
+                text: root.checked ? "\u{2713}" : "";
+                color: Colors.base;
+                font-size: Typography.size-md;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+        }
+
+        Text {
+            text: root.label-text;
+            color: ta.has-hover ? Colors.text : Colors.subtext0;
+            font-size: Typography.size-base;
+            vertical-alignment: center;
+        }
+
+        if root.hint-text != "" : Text {
+            text: root.hint-text;
+            color: Colors.surface2;
+            font-size: Typography.size-sm;
+            vertical-alignment: center;
+        }
+    }
+}
+
 // ── Connection form ───────────────────────────────────────────────────────────
 
 export component ConnectionForm inherits Rectangle {
@@ -148,6 +206,8 @@ export component ConnectionForm inherits Rectangle {
     in-out property <string> database:    "";
     in-out property <string> status:      "";
     in-out property <bool>   testing:     false;
+    in-out property <bool>   safe-dml:    true;
+    in-out property <bool>   read-only:   false;
     /// Set to true after a successful Test Connection; resets to false when the
     /// form is opened or a new test is started.  Used to decide whether Add
     /// shows a confirmation dialog.
@@ -172,7 +232,7 @@ export component ConnectionForm inherits Rectangle {
     drop-shadow-blur: 24px;
     drop-shadow-color: Colors.shadow-light;
     width: 660px;
-    height: 520px;
+    height: 560px;
     clip: true;
 
     VerticalLayout {
@@ -344,6 +404,21 @@ export component ConnectionForm inherits Rectangle {
                         if (d < 0) { pass-field.grab-focus(); }
                     }
                 }
+            }
+        }
+
+        // Connection behaviour flags
+        HorizontalLayout {
+            spacing: Layout.spacing-2xl;
+            CheckRow {
+                label-text: @tr("Safe DML");
+                hint-text: @tr("(confirm UPDATE/DELETE without WHERE)");
+                checked <=> root.safe-dml;
+            }
+            CheckRow {
+                label-text: @tr("Read-only");
+                hint-text: @tr("(block all write statements)");
+                checked <=> root.read-only;
             }
         }
 

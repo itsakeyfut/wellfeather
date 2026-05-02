@@ -78,6 +78,7 @@ impl SessionManager {
         match config.connections.iter_mut().find(|c| c.id == conn.id) {
             Some(existing) => {
                 cc.safe_dml = existing.safe_dml; // preserve per-connection safe_dml setting
+                cc.read_only = existing.read_only; // preserve per-connection read_only setting
                 *existing = cc;
             }
             None => config.connections.push(cc),
@@ -331,6 +332,7 @@ fn db_to_config_conn(conn: &DbConnection) -> ConnectionConfig {
         password_encrypted: conn.password_encrypted.clone(),
         database: conn.database.clone(),
         safe_dml: true, // default; overwritten by save_connection when updating existing entry
+        read_only: false, // default; overwritten by save_connection when updating existing entry
     }
 }
 

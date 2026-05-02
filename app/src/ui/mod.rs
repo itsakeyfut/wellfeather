@@ -100,6 +100,7 @@ use crate::{
 struct SidebarUiState {
     metadata: HashMap<String, DbMetadata>,
     expanded: HashSet<String>,
+    read_only: HashMap<String, bool>,
 }
 
 fn build_sidebar_tree(
@@ -107,6 +108,7 @@ fn build_sidebar_tree(
     active_id: &str,
     metadata: &HashMap<String, DbMetadata>,
     expanded: &HashSet<String>,
+    read_only: &HashMap<String, bool>,
 ) -> Vec<crate::SidebarNode> {
     let mut nodes = vec![];
     for conn in connections {
@@ -120,6 +122,7 @@ fn build_sidebar_tree(
             level: 0,
             is_expanded: is_conn_expanded,
             is_active: conn.id == active_id,
+            is_read_only: *read_only.get(&conn.id).unwrap_or(&false),
             node_kind: "connection".into(),
             parent_index: -1,
         });
@@ -188,6 +191,7 @@ fn push_tableinfo_category(
         level: 1,
         is_expanded: is_exp,
         is_active: false,
+        is_read_only: false,
         node_kind: "category".into(),
         parent_index: conn_idx,
     });
@@ -200,6 +204,7 @@ fn push_tableinfo_category(
                 level: 2,
                 is_expanded: false,
                 is_active: false,
+                is_read_only: false,
                 node_kind: kind.into(),
                 parent_index: cat_idx,
             });
@@ -226,6 +231,7 @@ fn push_string_category(
         level: 1,
         is_expanded: is_exp,
         is_active: false,
+        is_read_only: false,
         node_kind: "category".into(),
         parent_index: conn_idx,
     });
@@ -238,6 +244,7 @@ fn push_string_category(
                 level: 2,
                 is_expanded: false,
                 is_active: false,
+                is_read_only: false,
                 node_kind: kind.into(),
                 parent_index: cat_idx,
             });
@@ -481,6 +488,18 @@ impl UI {
                     Event::TableDataFailed { tab_id, msg } => {
                         Self::handle_table_data_failed(tab_id, msg, window_weak.clone())
                     }
+                    Event::ConnectionFlagsUpdated {
+                        id,
+                        safe_dml,
+                        read_only,
+                    } => Self::handle_connection_flags_updated(
+                        id,
+                        safe_dml,
+                        read_only,
+                        window_weak.clone(),
+                        state.clone(),
+                        Arc::clone(&sidebar_state),
+                    ),
                     _ => {}
                 }
             }
@@ -507,7 +526,26 @@ impl UI {
                 id: c.id.clone().into(),
             })
             .collect();
-        let status_conn = state
+        let config = wf_config::manager::ConfigManager::new().load().ok();
+        let safe_dml = config
+            .as_ref()
+            .and_then(|cfg| {
+                cfg.connections
+                    .iter()
+                    .find(|c| c.id == id)
+                    .map(|c| c.safe_dml)
+            })
+            .unwrap_or(true);
+        let read_only = config
+            .as_ref()
+            .and_then(|cfg| {
+                cfg.connections
+                    .iter()
+                    .find(|c| c.id == id)
+                    .map(|c| c.read_only)
+            })
+            .unwrap_or(false);
+        let base_status = state
             .conn
             .all()
             .into_iter()
@@ -517,25 +555,27 @@ impl UI {
                 _ => c.name.clone(),
             })
             .unwrap_or_else(|| id.clone());
+        let status_conn = if read_only {
+            format!("{} · {}", base_status, t!("status.read_only"))
+        } else {
+            base_status
+        };
         {
             let mut sb = sidebar_state.lock().unwrap_or_else(|p| p.into_inner());
             sb.expanded.insert(format!("conn:{}", id));
+            if let Some(cfg) = &config {
+                sb.read_only = cfg
+                    .connections
+                    .iter()
+                    .map(|c| (c.id.clone(), c.read_only))
+                    .collect();
+            }
         }
         let sidebar_nodes = {
             let sb = sidebar_state.lock().unwrap_or_else(|p| p.into_inner());
             let connections = state.conn.all();
-            build_sidebar_tree(&connections, &id, &sb.metadata, &sb.expanded)
+            build_sidebar_tree(&connections, &id, &sb.metadata, &sb.expanded, &sb.read_only)
         };
-        let safe_dml = wf_config::manager::ConfigManager::new()
-            .load()
-            .ok()
-            .and_then(|cfg| {
-                cfg.connections
-                    .iter()
-                    .find(|c| c.id == id)
-                    .map(|c| c.safe_dml)
-            })
-            .unwrap_or(true);
         // clone required: invoke_from_event_loop closure must be 'static
         let _ = slint::invoke_from_event_loop(move || {
             with_ui(&ww, move |ui| {
@@ -543,6 +583,7 @@ impl UI {
                 ui.set_connection_list(model.into());
                 ui.set_active_connection_id(id.into());
                 ui.set_conn_safe_dml(safe_dml);
+                ui.set_conn_read_only(read_only);
                 ui.set_show_connection_form(false);
                 // Reopen the DB manager if the form was launched from within it.
                 if ui.get_reopen_db_manager_on_form_close() {
@@ -557,6 +598,77 @@ impl UI {
                 ui.set_status_connection(status_conn.into());
                 ui.set_sidebar_tree(Rc::new(slint::VecModel::from(sidebar_nodes)).into());
                 ui.set_sidebar_loading(true);
+            });
+        });
+    }
+
+    fn handle_connection_flags_updated(
+        id: String,
+        safe_dml: bool,
+        read_only: bool,
+        ww: slint::Weak<crate::AppWindow>,
+        state: SharedState,
+        sidebar_state: Arc<Mutex<SidebarUiState>>,
+    ) {
+        // Update the cached read_only map and rebuild the sidebar tree outside the
+        // UI thread so we don't hold the mutex inside invoke_from_event_loop.
+        {
+            let mut sb = sidebar_state.lock().unwrap_or_else(|p| p.into_inner());
+            sb.read_only.insert(id.clone(), read_only);
+        }
+        let sidebar_nodes = {
+            let sb = sidebar_state.lock().unwrap_or_else(|p| p.into_inner());
+            let connections = state.conn.all();
+            let active_id = state
+                .conn
+                .active()
+                .map(|c| c.id.clone())
+                .unwrap_or_default();
+            build_sidebar_tree(
+                &connections,
+                &active_id,
+                &sb.metadata,
+                &sb.expanded,
+                &sb.read_only,
+            )
+        };
+        // Recompute the status bar label only when this is the active connection.
+        let active_id = state
+            .conn
+            .active()
+            .map(|c| c.id.clone())
+            .unwrap_or_default();
+        let is_active = active_id == id;
+        let new_status = if is_active {
+            let base = state
+                .conn
+                .all()
+                .into_iter()
+                .find(|c| c.id == id)
+                .map(|c| match c.database.as_deref() {
+                    Some(db) if !db.is_empty() => format!("{} / {}", c.name, db),
+                    _ => c.name.clone(),
+                })
+                .unwrap_or_else(|| id.clone());
+            if read_only {
+                Some(format!("{} · {}", base, t!("status.read_only")))
+            } else {
+                Some(base)
+            }
+        } else {
+            None
+        };
+        // clone required: invoke_from_event_loop closure must be 'static
+        let _ = slint::invoke_from_event_loop(move || {
+            with_ui(&ww, move |ui| {
+                ui.set_sidebar_tree(Rc::new(slint::VecModel::from(sidebar_nodes)).into());
+                if is_active {
+                    ui.set_conn_safe_dml(safe_dml);
+                    ui.set_conn_read_only(read_only);
+                    if let Some(s) = new_status {
+                        ui.set_status_connection(s.into());
+                    }
+                }
             });
         });
     }
@@ -720,7 +832,7 @@ impl UI {
         let sidebar_nodes = {
             let sb = sidebar_state.lock().unwrap_or_else(|p| p.into_inner());
             let connections = state.conn.all();
-            build_sidebar_tree(&connections, "", &sb.metadata, &sb.expanded)
+            build_sidebar_tree(&connections, "", &sb.metadata, &sb.expanded, &sb.read_only)
         };
         // clone required: invoke_from_event_loop closure must be 'static
         let _ = slint::invoke_from_event_loop(move || {
@@ -728,6 +840,7 @@ impl UI {
                 let model = Rc::new(slint::VecModel::from(entries));
                 ui.set_connection_list(model.into());
                 ui.set_active_connection_id("".into());
+                ui.set_conn_read_only(false);
                 ui.set_status_connection(t!("status.not_connected").to_string().into());
                 ui.set_status_message(t!("status.disconnected", id = id).to_string().into());
                 ui.set_sidebar_tree(Rc::new(slint::VecModel::from(sidebar_nodes)).into());
@@ -755,7 +868,13 @@ impl UI {
                 .active()
                 .map(|c| c.id.clone())
                 .unwrap_or_default();
-            build_sidebar_tree(&connections, &active_id, &sb.metadata, &sb.expanded)
+            build_sidebar_tree(
+                &connections,
+                &active_id,
+                &sb.metadata,
+                &sb.expanded,
+                &sb.read_only,
+            )
         };
         // clone required: invoke_from_event_loop closure must be 'static
         let _ = slint::invoke_from_event_loop(move || {
@@ -1300,6 +1419,8 @@ impl UI {
                     ui.set_show_test_result_popup(false);
                     ui.set_show_add_confirm_popup(false);
                     ui.set_form_edit_id("".into());
+                    ui.set_form_safe_dml(true);
+                    ui.set_form_read_only(false);
                     ui.set_show_connection_form(true);
                 });
             });
@@ -1357,6 +1478,27 @@ impl UI {
                     )
                 };
 
+                // Load behaviour flags from config (not present in runtime DbConnection).
+                let config = wf_config::manager::ConfigManager::new().load().ok();
+                let safe_dml = config
+                    .as_ref()
+                    .and_then(|c| {
+                        c.connections
+                            .iter()
+                            .find(|cc| cc.id == id)
+                            .map(|cc| cc.safe_dml)
+                    })
+                    .unwrap_or(true);
+                let read_only = config
+                    .as_ref()
+                    .and_then(|c| {
+                        c.connections
+                            .iter()
+                            .find(|cc| cc.id == id)
+                            .map(|cc| cc.read_only)
+                    })
+                    .unwrap_or(false);
+
                 with_ui(&window_weak, move |ui| {
                     ui.set_form_edit_id(conn.id.clone().into());
                     ui.set_form_name(conn.name.clone().into());
@@ -1371,6 +1513,8 @@ impl UI {
                     ui.set_form_status("".into());
                     ui.set_form_testing(false);
                     ui.set_form_test_ok(false);
+                    ui.set_form_safe_dml(safe_dml);
+                    ui.set_form_read_only(read_only);
                     ui.set_show_test_result_popup(false);
                     ui.set_show_add_confirm_popup(false);
                     ui.set_show_connection_form(true);
@@ -1426,7 +1570,13 @@ impl UI {
                         .active()
                         .map(|c| c.id.clone())
                         .unwrap_or_default();
-                    build_sidebar_tree(&connections, &active_id, &sb.metadata, &sb.expanded)
+                    build_sidebar_tree(
+                        &connections,
+                        &active_id,
+                        &sb.metadata,
+                        &sb.expanded,
+                        &sb.read_only,
+                    )
                 };
                 with_ui(&window_weak, |ui| {
                     ui.set_sidebar_tree(Rc::new(slint::VecModel::from(nodes)).into());
@@ -1497,7 +1647,7 @@ impl UI {
                 let nodes = {
                     let sb = sidebar_state.lock().unwrap_or_else(|p| p.into_inner());
                     let connections = state.conn.all();
-                    build_sidebar_tree(&connections, "", &sb.metadata, &sb.expanded)
+                    build_sidebar_tree(&connections, "", &sb.metadata, &sb.expanded, &sb.read_only)
                 };
 
                 // Connection list with all entries inactive.
@@ -1651,7 +1801,18 @@ impl UI {
                     if ui.get_form_test_ok() {
                         ui.set_form_testing(true);
                         let (conn, password) = build_conn_from_form(ui, &enc_key);
+                        let conn_id = conn.id.clone();
+                        let safe_dml = ui.get_form_safe_dml();
+                        let read_only = ui.get_form_read_only();
                         send_cmd(&tx_cmd, Command::Connect(conn, password));
+                        send_cmd(
+                            &tx_cmd,
+                            Command::UpdateConfig(ConfigUpdate::ConnectionFlags {
+                                id: conn_id,
+                                safe_dml,
+                                read_only,
+                            }),
+                        );
                     } else {
                         ui.set_show_add_confirm_popup(true);
                     }
@@ -1669,7 +1830,18 @@ impl UI {
                     ui.set_show_add_confirm_popup(false);
                     ui.set_form_testing(true);
                     let (conn, password) = build_conn_from_form(ui, &enc_key);
+                    let conn_id = conn.id.clone();
+                    let safe_dml = ui.get_form_safe_dml();
+                    let read_only = ui.get_form_read_only();
                     send_cmd(&tx_cmd, Command::Connect(conn, password));
+                    send_cmd(
+                        &tx_cmd,
+                        Command::UpdateConfig(ConfigUpdate::ConnectionFlags {
+                            id: conn_id,
+                            safe_dml,
+                            read_only,
+                        }),
+                    );
                 });
             });
         }

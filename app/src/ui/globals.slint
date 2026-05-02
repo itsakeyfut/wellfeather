@@ -26,6 +26,7 @@ export struct SidebarNode {
     level: int,           // 0=connection, 1=category, 2=item
     is-expanded: bool,
     is-active: bool,      // true for the active connection (level 0 only)
+    is-read-only: bool,   // true for connections with read_only=true
     node-kind: string,    // "connection" | "category" | "table" | "view" | "proc" | "index"
     parent-index: int,    // flat-list index of parent node; -1 for root connection nodes
 }

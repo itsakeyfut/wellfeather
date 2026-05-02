@@ -35,6 +35,14 @@ pub enum Event {
     /// Insert text into the SQL editor (append after existing content).
     InsertText(String),
     ConfigUpdated,
+    /// Fired after `ConfigUpdate::ConnectionFlags` is persisted.
+    /// Carries the connection id and the new `read_only` value so the sidebar
+    /// can update the lock icon without a full reconnect.
+    ConnectionFlagsUpdated {
+        id: String,
+        read_only: bool,
+        safe_dml: bool,
+    },
     StateChanged(StateEvent),
     DdlLoaded {
         tab_id: String,

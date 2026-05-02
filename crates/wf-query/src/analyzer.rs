@@ -57,6 +57,24 @@ pub fn has_dangerous_dml(sql: &str) -> bool {
     })
 }
 
+/// Returns `true` if `sql` contains any write statement (INSERT, UPDATE, DELETE, or DDL).
+///
+/// Checks all semicolon-separated statements. Intended to guard read-only connections
+/// against accidental modifications.
+pub fn is_write_statement(sql: &str) -> bool {
+    const WRITE_KEYWORDS: &[&str] = &[
+        "INSERT", "UPDATE", "DELETE", "CREATE", "DROP", "ALTER", "TRUNCATE",
+    ];
+    extract_all_statements(sql).iter().any(|stmt| {
+        let upper = stmt.to_uppercase();
+        WRITE_KEYWORDS.iter().any(|kw| {
+            upper.starts_with(kw)
+                && upper[kw.len()..].starts_with(|c: char| !c.is_ascii_alphanumeric() && c != '_')
+                || upper == *kw
+        })
+    })
+}
+
 /// Returns the substring of `sql` for the byte range `start..end`.
 ///
 /// The range is clamped to valid string boundaries.  If `start > end`
@@ -204,6 +222,67 @@ mod tests {
      {
         // "NOWHERE" or similar embedded strings must not be treated as WHERE
         assert!(has_dangerous_dml("DELETE FROM nowhere_table"));
+    }
+
+    // ── is_write_statement ───────────────────────────────────────────────────
+
+    #[test]
+    fn is_write_statement_should_return_true_for_insert() {
+        assert!(is_write_statement("INSERT INTO users VALUES (1)"));
+    }
+
+    #[test]
+    fn is_write_statement_should_return_true_for_update() {
+        assert!(is_write_statement(
+            "UPDATE users SET name = 'x' WHERE id = 1"
+        ));
+    }
+
+    #[test]
+    fn is_write_statement_should_return_true_for_delete() {
+        assert!(is_write_statement("DELETE FROM users WHERE id = 1"));
+    }
+
+    #[test]
+    fn is_write_statement_should_return_true_for_create() {
+        assert!(is_write_statement("CREATE TABLE t (id INT)"));
+    }
+
+    #[test]
+    fn is_write_statement_should_return_true_for_drop() {
+        assert!(is_write_statement("DROP TABLE t"));
+    }
+
+    #[test]
+    fn is_write_statement_should_return_true_for_alter() {
+        assert!(is_write_statement("ALTER TABLE t ADD COLUMN x INT"));
+    }
+
+    #[test]
+    fn is_write_statement_should_return_true_for_truncate() {
+        assert!(is_write_statement("TRUNCATE users"));
+    }
+
+    #[test]
+    fn is_write_statement_should_be_case_insensitive() {
+        assert!(is_write_statement("insert into users values (1)"));
+        assert!(is_write_statement("drop table t"));
+    }
+
+    #[test]
+    fn is_write_statement_should_return_false_for_select() {
+        assert!(!is_write_statement("SELECT * FROM users"));
+    }
+
+    #[test]
+    fn is_write_statement_should_return_true_when_any_stmt_in_batch_is_write() {
+        assert!(is_write_statement("SELECT 1; INSERT INTO users VALUES (1)"));
+    }
+
+    #[test]
+    fn is_write_statement_should_not_match_keyword_as_prefix_of_identifier() {
+        // "INSERTS" is not INSERT; "DROPS" is not DROP
+        assert!(!is_write_statement("SELECT inserts FROM t"));
     }
 
     // ── extract_selection ───────────────────────────────────────────────────
