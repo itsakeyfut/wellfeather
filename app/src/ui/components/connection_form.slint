@@ -163,14 +163,17 @@ component CheckRow inherits Rectangle {
             background: root.checked ? Colors.blue : Colors.base;
             border-width: 1px;
             border-color: root.checked ? Colors.blue : Colors.surface2;
-            Text {
-                width: parent.width;
-                height: parent.height;
-                text: root.checked ? "\u{2713}" : "";
-                color: Colors.base;
-                font-size: Typography.size-md;
-                horizontal-alignment: center;
-                vertical-alignment: center;
+            animate background { duration: 150ms; easing: ease-in-out; }
+            animate border-color { duration: 150ms; easing: ease-in-out; }
+            Image {
+                width: 18px;
+                height: 18px;
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2;
+                source: Icons.check;
+                colorize: Colors.base;
+                opacity: root.checked ? 1.0 : 0.0;
+                animate opacity { duration: 120ms; easing: ease-in-out; }
             }
         }
 
