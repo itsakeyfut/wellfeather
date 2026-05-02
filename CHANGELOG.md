@@ -6,6 +6,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-05-02
+
+### v0.8.0 - Multi-tab Interface
+
+- Multi-tab UI: SQL Editor tabs and Table View tabs (open, switch, close, Ctrl+T / Ctrl+W)
+- Table View tab: data grid, DDL viewer, column list, and per-tab page-size selector
+- DDL viewer: sidebar single-click shows CREATE statement in bottom pane with copy button
+- Safe DML mode: WHERE-less UPDATE/DELETE triggers a confirmation dialog before execution
+- Read-only connection mode: write statements blocked at controller level; lock icon in sidebar and status bar
+- SVG icon set applied across the full UI (sidebar, buttons, status bar)
+- Delete connection from the DB manager modal
+- Platform system font applied at startup (Segoe UI on Windows, Helvetica Neue on macOS) to fix fontique rendering
+- Layout / Typography / Icons design tokens centralised in theme.slint
+- Connection storage migrated from config.toml to SQLite-backed ConnectionRepository
+- All saved connections visible in sidebar and DB manager even when no DB is running
+- Auto-connect on startup driven by last_used_at (most recently connected) instead of last_connection_id
+- Tab session persistence: open tabs and active tab index saved and restored across restarts
+
 ## [0.7.0] - 2026-04-29
 
 First public release. Covers milestones v0.1.0 through v0.7.0.
