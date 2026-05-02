@@ -117,7 +117,7 @@ impl Default for ConfigManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::{AppearanceConfig, ConnectionConfig, DbTypeName, Theme};
+    use crate::models::{AppearanceConfig, Theme};
 
     #[test]
     fn config_manager_should_return_default_when_file_absent() {
@@ -133,25 +133,13 @@ mod tests {
         let dir = tempfile::tempdir().expect("failed to create temp dir");
         let mgr = ConfigManager::with_path(dir.path().join("config.toml"));
 
+        // connections is skip_serializing (migration-only), so it is excluded here.
         let original = Config {
             appearance: AppearanceConfig {
                 theme: Theme::Light,
                 font_family: "Cascadia Code".to_string(),
                 font_size: 16,
             },
-            connections: vec![ConnectionConfig {
-                id: "test-id".to_string(),
-                name: "local".to_string(),
-                db_type: DbTypeName::SQLite,
-                connection_string: None,
-                host: None,
-                port: None,
-                user: None,
-                password_encrypted: None,
-                database: Some("local.db".to_string()),
-                safe_dml: true,
-                read_only: false,
-            }],
             ..Config::default()
         };
 

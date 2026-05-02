@@ -106,6 +106,8 @@ pub struct EditorConfig {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[serde(default)]
 pub struct SessionConfig {
+    /// Preserved for migration only — read from old config.toml but never written back.
+    #[serde(default, skip_serializing)]
     pub last_connection_id: Option<String>,
     pub last_query: Option<String>,
 }
@@ -175,6 +177,8 @@ pub struct Config {
     pub editor: EditorConfig,
     pub session: SessionConfig,
     pub ui: UiConfig,
+    /// Preserved for migration only — read from old config.toml but never written back.
+    #[serde(default, skip_serializing)]
     pub connections: Vec<ConnectionConfig>,
 }
 
@@ -297,6 +301,8 @@ database = "local.db"
 
     #[test]
     fn config_should_roundtrip_serialize_deserialize() {
+        // connections and session.last_connection_id are skip_serializing (migration-only
+        // fields), so they are intentionally excluded from the roundtrip assertion.
         let original = Config {
             appearance: AppearanceConfig {
                 theme: Theme::Light,
@@ -307,25 +313,13 @@ database = "local.db"
                 page_size: PageSize::Rows100,
             },
             session: SessionConfig {
-                last_connection_id: Some("conn-1".to_string()),
+                last_connection_id: None,
                 last_query: Some("SELECT 1".to_string()),
             },
             ui: UiConfig {
                 language: "ja".to_string(),
             },
-            connections: vec![ConnectionConfig {
-                id: "conn-1".to_string(),
-                name: "test".to_string(),
-                db_type: DbTypeName::MySQL,
-                connection_string: None,
-                host: Some("127.0.0.1".to_string()),
-                port: Some(3306),
-                user: Some("root".to_string()),
-                password_encrypted: Some("AES256GCM:xyz".to_string()),
-                database: Some("testdb".to_string()),
-                safe_dml: false,
-                read_only: true,
-            }],
+            connections: vec![],
         };
 
         let serialized = toml::to_string(&original).expect("failed to serialize");

@@ -24,10 +24,13 @@ mod ui;
 
 use std::sync::Arc;
 
-use app::{controller::AppController, session::SessionManager};
+use app::{
+    controller::AppController,
+    session::{SessionManager, config_to_db_conn},
+};
 use state::AppState;
 use ui::UI;
-use wf_config::{crypto, manager::ConfigManager};
+use wf_config::{ConnectionRepository, crypto, manager::ConfigManager};
 use wf_db::service::DbService;
 
 /// Entry point. Runs on the main OS thread; the Slint event loop must stay here.
@@ -60,23 +63,31 @@ fn main() -> anyhow::Result<()> {
         state.ui.set_theme(config.appearance.theme);
     }
 
+    // Open the connection repository, migrating from config.toml if it is the first launch.
+    let repo: Arc<ConnectionRepository> =
+        Arc::new(runtime.block_on(ConnectionRepository::open_with_migration(
+            &ConfigManager::app_dir().join("connections.db"),
+            &ConfigManager::new(),
+        ))?);
+
+    // Load all saved connections for the initial sidebar/DB-manager list.
+    let initial_connections = runtime.block_on(repo.all()).unwrap_or_default();
+
+    // Find the most-recently-used connection for auto-connect.
+    let restore_conn = runtime
+        .block_on(repo.last_used())
+        .ok()
+        .flatten()
+        .map(|cc| config_to_db_conn(&cc));
+
     let db = DbService::new();
-
     let session = SessionManager::new();
-
-    // Attempt to restore the last session before the event loop starts.
-    let restore_conn = match session.restore() {
-        Ok(c) => c,
-        Err(e) => {
-            tracing::warn!("session restore failed: {e}");
-            None
-        }
-    };
 
     let (controller, tx_cmd, rx_event) = AppController::new(
         state.clone(),
         db,
         session,
+        repo,
         ConfigManager::app_dir().join("history.db"),
         ConfigManager::app_dir().join("metadata.db"),
     );
@@ -98,6 +109,6 @@ fn main() -> anyhow::Result<()> {
         });
     }
 
-    let ui = UI::new(state, tx_cmd, rx_event, enc_key)?;
+    let ui = UI::new(state, tx_cmd, rx_event, enc_key, initial_connections)?;
     ui.run()
 }
