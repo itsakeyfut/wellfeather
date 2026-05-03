@@ -90,6 +90,27 @@ export component Editor inherits Rectangle {
     callback focus-sidebar();
     callback focus-result();
 
+    // ── Find bar integration ──────────────────────────────────────────────────
+    /// True when the find bar is open; allows Esc to close it from the editor.
+    in property <bool> find-bar-open: false;
+    /// Fired when Esc is pressed while the find bar is open and editor has focus.
+    callback close-find-bar();
+
+    /// Byte offsets of the current find-bar match highlight (-1 = clear selection).
+    in-out property <int> find-sel-start: -1;
+    in-out property <int> find-sel-end:   -1;
+
+    changed find-sel-start => {
+        if (root.find-sel-start < 0) {
+            inner-input.set-selection-offsets(
+                inner-input.cursor-position-byte-offset,
+                inner-input.cursor-position-byte-offset
+            );
+        } else if (root.find-sel-end >= root.find-sel-start) {
+            inner-input.set-selection-offsets(root.find-sel-start, root.find-sel-end);
+        }
+    }
+
     // ── Out properties consumed by the external gutter in app.slint ──────────
     out property <length> gutter-scroll-y:  editor-scroll.viewport-y;
     out property <length> gutter-line-h:    root.line-h;
@@ -525,6 +546,11 @@ export component Editor inherits Rectangle {
                     if (event.text == Key.LeftArrow) { root.focus-sidebar(); EventResult.accept }
                     else if (event.text == Key.DownArrow) { root.focus-result(); EventResult.accept }
                     else { EventResult.reject }
+                } else if (event.text == Key.Escape
+                        && root.find-bar-open
+                        && !root.completion-visible) {
+                    root.close-find-bar();
+                    EventResult.accept
                 } else {
                     EventResult.reject
                 }

@@ -408,3 +408,45 @@ fn append_editor_text_should_not_double_newline_when_content_ends_with_newline()
         "SELECT 1\nSELECT * FROM t"
     );
 }
+
+// ── compute_matches tests ─────────────────────────────────────────────────────
+
+#[test]
+fn compute_matches_should_return_empty_for_empty_query() {
+    assert!(compute_matches("hello world", "", false, false).is_empty());
+}
+
+#[test]
+fn compute_matches_should_find_all_occurrences() {
+    let m = compute_matches("abcabc", "abc", true, false);
+    assert_eq!(m, vec![(0, 3), (3, 6)]);
+}
+
+#[test]
+fn compute_matches_should_be_case_insensitive_by_default() {
+    let m = compute_matches("Hello HELLO hello", "hello", false, false);
+    assert_eq!(m.len(), 3);
+}
+
+#[test]
+fn compute_matches_should_respect_case_sensitive_flag() {
+    let m = compute_matches("Hello HELLO hello", "hello", true, false);
+    assert_eq!(m.len(), 1);
+    assert_eq!(m[0], (12, 17));
+}
+
+#[test]
+fn compute_matches_should_support_regex_pattern() {
+    let m = compute_matches("foo123bar456", r"\d+", false, true);
+    assert_eq!(m, vec![(3, 6), (9, 12)]);
+}
+
+#[test]
+fn compute_matches_should_return_empty_for_invalid_regex() {
+    assert!(compute_matches("hello", "[invalid", false, true).is_empty());
+}
+
+#[test]
+fn compute_matches_should_return_empty_for_no_match() {
+    assert!(compute_matches("hello", "xyz", false, false).is_empty());
+}

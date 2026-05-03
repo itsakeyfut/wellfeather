@@ -1,0 +1,324 @@
+import { Colors, Typography, Layout, Icons, Animation } from "../theme.slint";
+
+export component FindReplaceBar inherits Rectangle {
+    in-out property <string> query:          "";
+    in-out property <string> replace-text:   "";
+    in-out property <bool>   with-replace:   false;
+    in-out property <bool>   case-sensitive: false;
+    in-out property <bool>   use-regex:      false;
+    in property    <int>     current-match:  0;
+    in property    <int>     total-matches:  0;
+    callback load-history();
+    callback find-search();
+    callback find-next();
+    callback find-prev();
+    callback find-history-prev();
+    callback find-history-next();
+    callback replace-history-prev();
+    callback replace-history-next();
+    callback commit-search();
+    callback commit-replace();
+    callback replace-one();
+    callback replace-all();
+    callback close-bar();
+
+    background:    Colors.surface0;
+    border-radius: Layout.radius-md;
+    border-width:  1px;
+    border-color:  Colors.surface1;
+    drop-shadow-blur:  8px;
+    drop-shadow-color: Colors.shadow;
+
+    height: root.with-replace ? 68px : 34px;
+
+    init => {
+        query-input.focus();
+        root.load-history();
+    }
+
+    query-fs := FocusScope {
+        focus-on-click: false;
+
+        capture-key-pressed(event) => {
+            if (event.text == Key.Escape) {
+                root.close-bar();
+                EventResult.accept
+            } else if (event.text == Key.Return && event.modifiers.shift) {
+                root.find-prev();
+                EventResult.accept
+            } else if (event.text == Key.Return && !event.modifiers.shift) {
+                if (query-input.has-focus) {
+                    root.commit-search();
+                    root.find-next();
+                } else {
+                    root.commit-replace();
+                    root.replace-one();
+                }
+                EventResult.accept
+            } else if (event.text == Key.DownArrow) {
+                if (query-input.has-focus) {
+                    root.find-history-next();
+                } else {
+                    root.replace-history-next();
+                }
+                EventResult.accept
+            } else if (event.text == Key.UpArrow) {
+                if (query-input.has-focus) {
+                    root.find-history-prev();
+                } else {
+                    root.replace-history-prev();
+                }
+                EventResult.accept
+            } else {
+                EventResult.reject
+            }
+        }
+
+        VerticalLayout {
+            spacing: 0;
+
+            // ── Find row ──────────────────────────────────────────────────────
+            HorizontalLayout {
+                height: 34px;
+                padding-left:   Layout.padding-xs;
+                padding-right:  Layout.padding-xs;
+                padding-top:    6px;
+                padding-bottom: 6px;
+                spacing: Layout.spacing-xs;
+
+                // Replace-row toggle (▶ / ▼) — VSCode style
+                Rectangle {
+                    width: 20px; height: 22px;
+                    border-radius: Layout.radius-sm;
+                    background: toggle-ta.has-hover ? Colors.surface1 : transparent;
+                    Image {
+                        width:  Layout.icon-sm;
+                        height: Layout.icon-sm;
+                        source: root.with-replace ? Icons.chevron-down : Icons.chevron-right;
+                        image-fit: contain;
+                        colorize: Colors.subtext0;
+                    }
+                    toggle-ta := TouchArea {
+                        clicked => { root.with-replace = !root.with-replace; }
+                    }
+                }
+
+                // Find input
+                Rectangle {
+                    horizontal-stretch: 1;
+                    height: 22px;
+                    border-radius: Layout.radius-sm;
+                    border-width:  1px;
+                    border-color:  query-input.has-focus ? Colors.blue : Colors.surface1;
+                    background:    Colors.base;
+
+                    if root.query == "": Text {
+                        x: Layout.padding-xs;
+                        width:  parent.width - 2 * Layout.padding-xs;
+                        height: parent.height;
+                        text: query-input.has-focus
+                            ? @tr("Find (↑↓ for history)")
+                            : @tr("Find");
+                        color: Colors.overlay0;
+                        font-size: Typography.size-base;
+                        vertical-alignment: center;
+                    }
+
+                    query-input := TextInput {
+                        x: Layout.padding-xs;
+                        width:  parent.width - 2 * Layout.padding-xs;
+                        height: parent.height;
+                        single-line: true;
+                        text:   root.query;
+                        color:  Colors.text;
+                        font-size: Typography.size-base;
+                        vertical-alignment: center;
+                        edited => {
+                            root.query = self.text;
+                            root.find-search();
+                        }
+                    }
+                }
+
+                // Aa (case-sensitive) toggle
+                Rectangle {
+                    width: 22px; height: 22px;
+                    border-radius: Layout.radius-sm;
+                    border-width:  1px;
+                    border-color:  root.case-sensitive ? Colors.blue : Colors.surface1;
+                    background:    root.case-sensitive ? Colors.blue : transparent;
+                    Text {
+                        text: "Aa";
+                        color: root.case-sensitive ? Colors.base : Colors.subtext0;
+                        font-size: Typography.size-xs;
+                        horizontal-alignment: center;
+                        vertical-alignment:   center;
+                    }
+                    TouchArea {
+                        clicked => {
+                            root.case-sensitive = !root.case-sensitive;
+                            root.find-search();
+                        }
+                    }
+                }
+
+                // .* (regex) toggle
+                Rectangle {
+                    width: 22px; height: 22px;
+                    border-radius: Layout.radius-sm;
+                    border-width:  1px;
+                    border-color:  root.use-regex ? Colors.blue : Colors.surface1;
+                    background:    root.use-regex ? Colors.blue : transparent;
+                    Text {
+                        text: ".*";
+                        color: root.use-regex ? Colors.base : Colors.subtext0;
+                        font-size: Typography.size-xs;
+                        horizontal-alignment: center;
+                        vertical-alignment:   center;
+                    }
+                    TouchArea {
+                        clicked => {
+                            root.use-regex = !root.use-regex;
+                            root.find-search();
+                        }
+                    }
+                }
+
+                // Match count "N / M"
+                Text {
+                    text: root.total-matches == 0
+                        ? @tr("No results")
+                        : "\{root.current-match} / \{root.total-matches}";
+                    color: root.total-matches == 0 ? Colors.overlay0 : Colors.subtext0;
+                    font-size: Typography.size-sm;
+                    vertical-alignment: center;
+                    width: 52px;
+                    horizontal-alignment: right;
+                }
+
+                // ▲ prev
+                Rectangle {
+                    width: 22px; height: 22px;
+                    border-radius: Layout.radius-sm;
+                    background: prev-ta.has-hover ? Colors.surface1 : transparent;
+                    Image {
+                        width:  Layout.icon-sm;
+                        height: Layout.icon-sm;
+                        source: Icons.chevron-down;
+                        image-fit: contain;
+                        colorize: Colors.subtext0;
+                        transform-rotation: 180deg;
+                    }
+                    prev-ta := TouchArea { clicked => { root.find-prev(); } }
+                }
+
+                // ▼ next
+                Rectangle {
+                    width: 22px; height: 22px;
+                    border-radius: Layout.radius-sm;
+                    background: next-ta.has-hover ? Colors.surface1 : transparent;
+                    Image {
+                        width:  Layout.icon-sm;
+                        height: Layout.icon-sm;
+                        source: Icons.chevron-down;
+                        image-fit: contain;
+                        colorize: Colors.subtext0;
+                    }
+                    next-ta := TouchArea { clicked => { root.find-next(); } }
+                }
+
+                // ✕ close
+                Rectangle {
+                    width: 22px; height: 22px;
+                    border-radius: Layout.radius-sm;
+                    background: close-ta.has-hover ? Colors.surface1 : transparent;
+                    Image {
+                        width:  Layout.icon-sm;
+                        height: Layout.icon-sm;
+                        source: Icons.close;
+                        image-fit: contain;
+                        colorize: Colors.subtext0;
+                    }
+                    close-ta := TouchArea { clicked => { root.close-bar(); } }
+                }
+            }
+
+            // ── Replace row (shown when toggle is open) ───────────────────────
+            if root.with-replace: HorizontalLayout {
+                height: 34px;
+                padding-left:   Layout.padding-xs;
+                padding-right:  Layout.padding-xs;
+                padding-top:    6px;
+                padding-bottom: 6px;
+                spacing: Layout.spacing-xs;
+
+                // Spacer aligns replace input with find input
+                Rectangle { width: 20px; }
+
+                // Replace input
+                Rectangle {
+                    horizontal-stretch: 1;
+                    height: 22px;
+                    border-radius: Layout.radius-sm;
+                    border-width:  1px;
+                    border-color:  replace-input.has-focus ? Colors.blue : Colors.surface1;
+                    background:    Colors.base;
+
+                    if root.replace-text == "": Text {
+                        x: Layout.padding-xs;
+                        width:  parent.width - 2 * Layout.padding-xs;
+                        height: parent.height;
+                        text: replace-input.has-focus
+                            ? @tr("Replace (↑↓ for history)")
+                            : @tr("Replace");
+                        color: Colors.overlay0;
+                        font-size: Typography.size-base;
+                        vertical-alignment: center;
+                    }
+
+                    replace-input := TextInput {
+                        x: Layout.padding-xs;
+                        width:  parent.width - 2 * Layout.padding-xs;
+                        height: parent.height;
+                        single-line: true;
+                        text:   root.replace-text;
+                        color:  Colors.text;
+                        font-size: Typography.size-base;
+                        vertical-alignment: center;
+                        edited => { root.replace-text = self.text; }
+                    }
+                }
+
+                // Replace button
+                Rectangle {
+                    width: 64px; height: 22px;
+                    border-radius: Layout.radius-sm;
+                    background: rep-one-ta.has-hover ? Colors.surface2 : Colors.surface1;
+                    Text {
+                        text: @tr("Replace");
+                        color: Colors.text;
+                        font-size: Typography.size-sm;
+                        horizontal-alignment: center;
+                        vertical-alignment:   center;
+                    }
+                    rep-one-ta := TouchArea { clicked => { root.replace-one(); } }
+                }
+
+                // Replace All button
+                Rectangle {
+                    width: 80px; height: 22px;
+                    border-radius: Layout.radius-sm;
+                    background: rep-all-ta.has-hover ? Colors.surface2 : Colors.surface1;
+                    Text {
+                        text: @tr("Replace All");
+                        color: Colors.text;
+                        font-size: Typography.size-sm;
+                        horizontal-alignment: center;
+                        vertical-alignment:   center;
+                    }
+                    rep-all-ta := TouchArea { clicked => { root.replace-all(); } }
+                }
+            }
+        }
+    }
+}

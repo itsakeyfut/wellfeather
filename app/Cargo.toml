@@ -23,6 +23,7 @@ uuid               = { workspace = true }
 serde              = { workspace = true, features = ["derive"] }
 toml               = "1"
 rust-i18n          = "4.0.0"
+regex              = "1.12.3"
 
 [dev-dependencies]
 tempfile = "3.27.0"

@@ -32,6 +32,8 @@ These shortcuts work from any pane (no modal must be open).
 | `Ctrl+J` | Toggle result panel open / closed |
 | `↑` / `↓` | Move cursor up / down one line (timer-based, no key-repeat lag) |
 | `Shift+↑` / `Shift+↓` | Extend selection up / down one line |
+| `Ctrl+F` | Open find bar |
+| `Esc` (editor focused, find bar open) | Close find bar |
 
 ### Standard text-editing shortcuts (via OS / TextInput)
 
@@ -47,6 +49,21 @@ These shortcuts work from any pane (no modal must be open).
 | `Ctrl+←` / `Ctrl+→` | Move by word |
 | `Home` / `End` | Move to line start / end |
 | `Ctrl+Home` / `Ctrl+End` | Move to document start / end |
+
+---
+
+## Find / Replace Bar
+
+Appears in the top-right corner of the SQL editor when `Ctrl+F` is pressed.
+Click the **▶** toggle on the left of the find row to expand the replace row (VSCode style).
+
+| Key | Action |
+|-----|--------|
+| `Enter` | Navigate to next match (commits term to history) |
+| `Shift+Enter` | Navigate to previous match |
+| `↑` | Scroll back through search history |
+| `↓` | Scroll forward through search history |
+| `Esc` | Close find bar |
 
 ---
 
