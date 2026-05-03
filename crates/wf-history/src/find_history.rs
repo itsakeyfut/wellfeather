@@ -1,10 +1,7 @@
-use std::path::Path;
-
 use anyhow::Result;
 use sqlx::SqlitePool;
-use sqlx::sqlite::SqliteConnectOptions;
 
-/// Persists find/replace bar search terms to a SQLite table in `history.db`.
+/// Persists find/replace bar search terms to a SQLite table.
 ///
 /// Cheap to clone — all clones share the same underlying connection pool.
 #[derive(Clone)]
@@ -21,14 +18,8 @@ const CREATE_TABLE: &str = "
     )";
 
 impl FindHistoryService {
-    /// Open (or create) the history database at `db_path` and run schema migrations.
-    ///
-    /// Shares the same file as [`crate::service::HistoryService`].
-    pub async fn open(db_path: &Path) -> Result<Self> {
-        let opts = SqliteConnectOptions::new()
-            .filename(db_path)
-            .create_if_missing(true);
-        let pool = SqlitePool::connect_with(opts).await?;
+    /// Accept an already-open [`SqlitePool`] and ensure the schema exists.
+    pub async fn new(pool: SqlitePool) -> Result<Self> {
         Self::migrate(&pool).await?;
         Ok(Self { pool })
     }
@@ -64,8 +55,7 @@ impl FindHistoryService {
     #[cfg(test)]
     async fn open_memory() -> Result<Self> {
         let pool = SqlitePool::connect("sqlite::memory:").await?;
-        Self::migrate(&pool).await?;
-        Ok(Self { pool })
+        Self::new(pool).await
     }
 }
 

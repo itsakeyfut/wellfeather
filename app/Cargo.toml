@@ -13,6 +13,7 @@ wf-completion      = { path = "../crates/wf-completion" }
 wf-history         = { path = "../crates/wf-history" }
 tokio              = { workspace = true }
 tokio-util         = { workspace = true }
+sqlx               = { workspace = true }
 chrono             = { workspace = true }
 anyhow             = { workspace = true }
 tracing            = { workspace = true }

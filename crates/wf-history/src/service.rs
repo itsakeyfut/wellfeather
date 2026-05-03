@@ -1,15 +1,12 @@
-use std::path::Path;
-
 use anyhow::Result;
 use sqlx::SqlitePool;
-use sqlx::sqlite::SqliteConnectOptions;
 use wf_db::models::QueryExecution;
 
 // ---------------------------------------------------------------------------
 // HistoryService
 // ---------------------------------------------------------------------------
 
-/// Persists [`QueryExecution`] records to a SQLite `history.db` file.
+/// Persists [`QueryExecution`] records to SQLite.
 ///
 /// Cheap to clone — all clones share the same underlying connection pool.
 #[derive(Clone)]
@@ -29,15 +26,8 @@ const CREATE_TABLE: &str = "
     )";
 
 impl HistoryService {
-    /// Open (or create) the history database at `db_path` and run schema migrations.
-    ///
-    /// Creates the file if it does not exist.  Returns an error if the path is
-    /// not writable or if the migration query fails.
-    pub async fn open(db_path: &Path) -> Result<Self> {
-        let opts = SqliteConnectOptions::new()
-            .filename(db_path)
-            .create_if_missing(true);
-        let pool = SqlitePool::connect_with(opts).await?;
+    /// Accept an already-open [`SqlitePool`] and ensure the schema exists.
+    pub async fn new(pool: SqlitePool) -> Result<Self> {
         Self::migrate(&pool).await?;
         Ok(Self { pool })
     }
@@ -96,12 +86,10 @@ impl HistoryService {
         Ok(executions)
     }
 
-    /// In-memory database variant for unit tests only.
     #[cfg(test)]
     async fn open_memory() -> Result<Self> {
         let pool = SqlitePool::connect("sqlite::memory:").await?;
-        Self::migrate(&pool).await?;
-        Ok(Self { pool })
+        Self::new(pool).await
     }
 }
 

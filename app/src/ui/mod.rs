@@ -16,6 +16,7 @@ use wf_completion::CompletionItem;
 use wf_config::crypto;
 use wf_db::models::{DbConnection, DbMetadata, DbType, QueryResult, TableInfo};
 use wf_history::find_history::FindHistoryService;
+use wf_history::session::SessionService;
 use wf_query::analyzer::{extract_statement_at, has_dangerous_dml};
 
 const COMPLETION_DEBOUNCE_MS: u64 = 300;
@@ -112,24 +113,6 @@ struct FindState {
     replace_draft: String,
 }
 
-/// Open the find history service lazily, caching it for reuse across calls.
-async fn get_find_history_svc(
-    svc_arc: &Arc<tokio::sync::Mutex<Option<FindHistoryService>>>,
-    db_path: &std::path::Path,
-) -> Option<FindHistoryService> {
-    let mut guard = svc_arc.lock().await;
-    if guard.is_none() {
-        match FindHistoryService::open(db_path).await {
-            Ok(s) => *guard = Some(s),
-            Err(e) => {
-                tracing::warn!("find history db open failed: {e}");
-                return None;
-            }
-        }
-    }
-    guard.as_ref().cloned()
-}
-
 impl FindState {
     /// Re-compute matches when any parameter changed; clamps `current`.
     fn update(&mut self, text: &str, query: &str, case_sensitive: bool, use_regex: bool) {
@@ -195,7 +178,7 @@ use crate::{
     app::{
         command::{Command, ConfigUpdate},
         event::{Event, StateEvent},
-        session::{SessionManager, config_to_db_conn},
+        session::config_to_db_conn,
     },
     state::SharedState,
 };
@@ -419,6 +402,8 @@ impl UI {
         rx_event: mpsc::Receiver<Event>,
         enc_key: [u8; 32],
         initial_connections: Vec<ConnectionConfig>,
+        find_history_svc: FindHistoryService,
+        session_svc: SessionService,
     ) -> Result<Self> {
         let window = crate::AppWindow::new()?;
 
@@ -435,12 +420,12 @@ impl UI {
         // handler on QueryFinished, read by the filter callbacks on the UI thread.
         let original_data: SharedOriginalData = Arc::new(Mutex::new(None));
 
-        // Restore or create tab state. Track whether tabs were loaded from file
-        // so we can fall back to last_query.sql on first launch.
+        // Restore or create tab state. Track whether tabs were loaded from DB
+        // so we can fall back to last_query on first launch.
+        let handle = tokio::runtime::Handle::current();
         let tabs_from_session;
         let tabs_state: Rc<RefCell<tabs_state::TabsState>> = {
-            let session = SessionManager::new();
-            match session.restore_tabs() {
+            match handle.block_on(session_svc.restore_tabs()) {
                 Ok(Some((active_index, entries))) => {
                     tabs_from_session = true;
                     Rc::new(RefCell::new(tabs_state::TabsState::from_session(
@@ -472,7 +457,7 @@ impl UI {
         Self::register_theme_callback(&window, state.clone(), tx_cmd.clone());
         Self::register_reduce_motion_callback(&window, tx_cmd.clone());
         Self::register_menu_callbacks(&window, tx_cmd.clone());
-        Self::register_close_handler(&window, Rc::clone(&tabs_state));
+        Self::register_close_handler(&window, Rc::clone(&tabs_state), session_svc.clone());
         Self::register_tab_callbacks(
             &window,
             tx_cmd.clone(),
@@ -522,8 +507,10 @@ impl UI {
                 None => {}
             }
         }
-        // Fall back to last_query.sql on first launch (no tabs.toml yet).
-        if !tabs_from_session && let Ok(Some(query)) = SessionManager::new().restore_query_file() {
+        // Fall back to last_query on first launch (no session tabs saved yet).
+        if !tabs_from_session
+            && let Ok(Some(query)) = handle.block_on(session_svc.restore_last_query())
+        {
             ui_global.set_editor_text(query.clone().into());
             tabs_state.borrow_mut().save_current_text(&query);
         }
@@ -559,7 +546,7 @@ impl UI {
             tx_cmd.clone(),
         );
         Self::register_language_callback(&window, tx_cmd.clone());
-        Self::register_find_replace_callbacks(&window);
+        Self::register_find_replace_callbacks(&window, find_history_svc);
         Self::register_status_callbacks(&window, state.clone());
         Self::spawn_event_handler(
             &window,
@@ -1213,8 +1200,10 @@ impl UI {
     fn register_close_handler(
         window: &crate::AppWindow,
         tabs_state: Rc<RefCell<tabs_state::TabsState>>,
+        session_svc: SessionService,
     ) {
         let window_weak = window.as_weak(); // clone required: on_close_requested closure
+        let handle = tokio::runtime::Handle::current();
         window.window().on_close_requested(move || {
             let text = window_weak
                 .upgrade()
@@ -1222,18 +1211,15 @@ impl UI {
                 .unwrap_or_default();
             // Flush the active editor text into the tab before persisting.
             tabs_state.borrow_mut().save_current_text(&text);
-            let sm = SessionManager::new();
-            {
-                let ts = tabs_state.borrow();
-                let (active_sql_idx, entries) = ts.session_entries();
-                if let Err(e) = sm.save_tabs(active_sql_idx, &entries) {
-                    tracing::warn!(error = %e, "failed to save tabs.toml on close");
+            let (active_sql_idx, entries) = tabs_state.borrow().session_entries();
+            handle.block_on(async {
+                if let Err(e) = session_svc.save_tabs(active_sql_idx, &entries).await {
+                    tracing::warn!(error = %e, "failed to save session tabs on close");
                 }
-            }
-            // Keep last_query.sql in sync for backwards compatibility.
-            if let Err(e) = sm.save_query_file(&text) {
-                tracing::warn!(error = %e, "failed to save last_query.sql on close");
-            }
+                if let Err(e) = session_svc.save_last_query(&text).await {
+                    tracing::warn!(error = %e, "failed to save last_query on close");
+                }
+            });
             slint::CloseRequestResponse::HideWindow
         });
     }
@@ -2732,21 +2718,20 @@ impl UI {
 
     // ── Find / replace callbacks ──────────────────────────────────────────────
 
-    fn register_find_replace_callbacks(window: &crate::AppWindow) {
+    fn register_find_replace_callbacks(
+        window: &crate::AppWindow,
+        find_history_svc: FindHistoryService,
+    ) {
         let ui_state = window.global::<crate::UiState>();
         let find_state: Rc<RefCell<FindState>> = Rc::new(RefCell::new(FindState::default()));
         let history: SharedHistorySnapshot =
             Arc::new(std::sync::Mutex::new(HistorySnapshot::default()));
-        let svc: Arc<tokio::sync::Mutex<Option<FindHistoryService>>> =
-            Arc::new(tokio::sync::Mutex::new(None));
-        let db_path = wf_config::manager::ConfigManager::app_dir().join("history.db");
 
         // ── load-find-history: reset nav state and load from SQLite on bar open
         {
             let find_state = find_state.clone(); // clone required: captured by on_load_find_history
-            let svc = svc.clone(); // clone required: moved into tokio::spawn
+            let svc = find_history_svc.clone(); // clone required: moved into tokio::spawn
             let history = history.clone(); // clone required: moved into tokio::spawn
-            let db_path = db_path.clone(); // clone required: moved into tokio::spawn
             ui_state.on_load_find_history(move || {
                 {
                     let mut state = find_state.borrow_mut();
@@ -2755,13 +2740,9 @@ impl UI {
                 }
                 let svc = svc.clone(); // clone required: moved into tokio::spawn
                 let history = history.clone(); // clone required: moved into tokio::spawn
-                let db_path = db_path.clone(); // clone required: moved into tokio::spawn
                 tokio::spawn(async move {
-                    let Some(service) = get_find_history_svc(&svc, &db_path).await else {
-                        return;
-                    };
-                    let find_items = service.get("find", 30).await.unwrap_or_default();
-                    let replace_items = service.get("replace", 30).await.unwrap_or_default();
+                    let find_items = svc.get("find", 30).await.unwrap_or_default();
+                    let replace_items = svc.get("replace", 30).await.unwrap_or_default();
                     let mut snap = history.lock().unwrap_or_else(|p| p.into_inner());
                     snap.find = find_items;
                     snap.replace = replace_items;
@@ -2807,6 +2788,8 @@ impl UI {
         // ── find-next ────────────────────────────────────────────────────────
         {
             let find_state = find_state.clone(); // clone required: captured by on_find_next
+            let history = history.clone(); // clone required: captured by on_find_next
+            let svc = find_history_svc.clone(); // clone required: captured by on_find_next
             let window_weak = window.as_weak();
             ui_state.on_find_next(move || {
                 let Some(w) = window_weak.upgrade() else {
@@ -2836,12 +2819,31 @@ impl UI {
                 ui.set_find_total_matches(state.matches.len() as i32);
                 ui.set_find_sel_start(start as i32);
                 ui.set_find_sel_end(end as i32);
+                drop(state);
+                // Persist the query whenever the user navigates to a result.
+                if !query.is_empty() {
+                    {
+                        let mut snap = history.lock().unwrap_or_else(|p| p.into_inner());
+                        if !snap.find.contains(&query) {
+                            snap.find.insert(0, query.clone());
+                            snap.find.truncate(30);
+                        }
+                    }
+                    let svc = svc.clone(); // clone required: moved into tokio::spawn
+                    tokio::spawn(async move {
+                        if let Err(e) = svc.save("find", &query).await {
+                            tracing::warn!(error = %e, %query, "failed to save find history");
+                        }
+                    });
+                }
             });
         }
 
         // ── find-prev ────────────────────────────────────────────────────────
         {
             let find_state = find_state.clone(); // clone required: captured by on_find_prev
+            let history = history.clone(); // clone required: captured by on_find_prev
+            let svc = find_history_svc.clone(); // clone required: captured by on_find_prev
             let window_weak = window.as_weak();
             ui_state.on_find_prev(move || {
                 let Some(w) = window_weak.upgrade() else {
@@ -2872,6 +2874,23 @@ impl UI {
                 ui.set_find_total_matches(state.matches.len() as i32);
                 ui.set_find_sel_start(start as i32);
                 ui.set_find_sel_end(end as i32);
+                drop(state);
+                // Persist the query whenever the user navigates to a result.
+                if !query.is_empty() {
+                    {
+                        let mut snap = history.lock().unwrap_or_else(|p| p.into_inner());
+                        if !snap.find.contains(&query) {
+                            snap.find.insert(0, query.clone());
+                            snap.find.truncate(30);
+                        }
+                    }
+                    let svc = svc.clone(); // clone required: moved into tokio::spawn
+                    tokio::spawn(async move {
+                        if let Err(e) = svc.save("find", &query).await {
+                            tracing::warn!(error = %e, %query, "failed to save find history");
+                        }
+                    });
+                }
             });
         }
 
@@ -3063,8 +3082,7 @@ impl UI {
         {
             let find_state = find_state.clone(); // clone required: captured by on_commit_search
             let history = history.clone(); // clone required: captured by on_commit_search
-            let svc = svc.clone(); // clone required: captured by on_commit_search
-            let db_path = db_path.clone(); // clone required: captured by on_commit_search
+            let svc = find_history_svc.clone(); // clone required: captured by on_commit_search
             let window_weak = window.as_weak();
             ui_state.on_commit_search(move || {
                 let Some(w) = window_weak.upgrade() else {
@@ -3088,12 +3106,10 @@ impl UI {
                     }
                 }
                 let svc = svc.clone(); // clone required: moved into tokio::spawn
-                let db_path = db_path.clone(); // clone required: moved into tokio::spawn
                 tokio::spawn(async move {
-                    let Some(service) = get_find_history_svc(&svc, &db_path).await else {
-                        return;
-                    };
-                    let _ = service.save("find", &query).await;
+                    if let Err(e) = svc.save("find", &query).await {
+                        tracing::warn!(error = %e, %query, "failed to save find history");
+                    }
                 });
             });
         }
@@ -3102,8 +3118,7 @@ impl UI {
         {
             let find_state = find_state.clone(); // clone required: captured by on_commit_replace
             let history = history.clone(); // clone required: captured by on_commit_replace
-            let svc = svc.clone(); // clone required: captured by on_commit_replace
-            let db_path = db_path.clone(); // clone required: captured by on_commit_replace
+            let svc = find_history_svc.clone(); // clone required: captured by on_commit_replace
             let window_weak = window.as_weak();
             ui_state.on_commit_replace(move || {
                 let Some(w) = window_weak.upgrade() else {
@@ -3127,12 +3142,10 @@ impl UI {
                     }
                 }
                 let svc = svc.clone(); // clone required: moved into tokio::spawn
-                let db_path = db_path.clone(); // clone required: moved into tokio::spawn
                 tokio::spawn(async move {
-                    let Some(service) = get_find_history_svc(&svc, &db_path).await else {
-                        return;
-                    };
-                    let _ = service.save("replace", &text).await;
+                    if let Err(e) = svc.save("replace", &text).await {
+                        tracing::warn!(error = %e, %text, "failed to save replace history");
+                    }
                 });
             });
         }

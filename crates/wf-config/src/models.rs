@@ -109,9 +109,6 @@ pub struct EditorConfig {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[serde(default)]
 pub struct SessionConfig {
-    /// Preserved for migration only — read from old config.toml but never written back.
-    #[serde(default, skip_serializing)]
-    pub last_connection_id: Option<String>,
     pub last_query: Option<String>,
 }
 
@@ -180,9 +177,6 @@ pub struct Config {
     pub editor: EditorConfig,
     pub session: SessionConfig,
     pub ui: UiConfig,
-    /// Preserved for migration only — read from old config.toml but never written back.
-    #[serde(default, skip_serializing)]
-    pub connections: Vec<ConnectionConfig>,
 }
 
 // ---------------------------------------------------------------------------
@@ -201,10 +195,8 @@ mod tests {
         assert_eq!(cfg.appearance.font_size, 14);
         assert!(!cfg.appearance.reduce_motion);
         assert_eq!(cfg.editor.page_size, PageSize::Rows500);
-        assert_eq!(cfg.session.last_connection_id, None);
         assert_eq!(cfg.session.last_query, None);
         assert_eq!(cfg.ui.language, "en");
-        assert!(cfg.connections.is_empty());
     }
 
     #[test]
@@ -220,27 +212,10 @@ reduce_motion = true
 page_size = 1000
 
 [session]
-last_connection_id = "uuid-abc"
 last_query = "SELECT * FROM users"
 
 [ui]
 language = "ja"
-
-[[connections]]
-id = "uuid-abc"
-name = "my_postgres"
-db_type = "postgresql"
-host = "localhost"
-port = 5432
-user = "admin"
-password_encrypted = "AES256GCM:abc123"
-database = "mydb"
-
-[[connections]]
-id = "uuid-def"
-name = "local_sqlite"
-db_type = "sqlite"
-database = "local.db"
 "#;
         let cfg: Config = toml::from_str(toml).expect("failed to deserialize");
 
@@ -248,29 +223,12 @@ database = "local.db"
         assert_eq!(cfg.appearance.font_family, "Fira Code");
         assert_eq!(cfg.appearance.font_size, 16);
         assert_eq!(cfg.editor.page_size, PageSize::Rows1000);
-        assert_eq!(cfg.session.last_connection_id, Some("uuid-abc".to_string()));
         assert_eq!(
             cfg.session.last_query,
             Some("SELECT * FROM users".to_string())
         );
         assert_eq!(cfg.ui.language, "ja");
         assert!(cfg.appearance.reduce_motion);
-
-        assert_eq!(cfg.connections.len(), 2);
-        let pg = &cfg.connections[0];
-        assert_eq!(pg.id, "uuid-abc");
-        assert_eq!(pg.name, "my_postgres");
-        assert_eq!(pg.db_type, DbTypeName::PostgreSQL);
-        assert_eq!(pg.host, Some("localhost".to_string()));
-        assert_eq!(pg.port, Some(5432));
-        assert_eq!(pg.user, Some("admin".to_string()));
-        assert_eq!(pg.password_encrypted, Some("AES256GCM:abc123".to_string()));
-        assert_eq!(pg.database, Some("mydb".to_string()));
-
-        let sq = &cfg.connections[1];
-        assert_eq!(sq.db_type, DbTypeName::SQLite);
-        assert_eq!(sq.host, None);
-        assert_eq!(sq.port, None);
     }
 
     #[test]
@@ -280,7 +238,6 @@ database = "local.db"
         assert_eq!(cfg.appearance.theme, Theme::Dark);
         assert_eq!(cfg.editor.page_size, PageSize::Rows500);
         assert_eq!(cfg.ui.language, "en");
-        assert!(cfg.connections.is_empty());
     }
 
     #[test]
@@ -307,8 +264,6 @@ database = "local.db"
 
     #[test]
     fn config_should_roundtrip_serialize_deserialize() {
-        // connections and session.last_connection_id are skip_serializing (migration-only
-        // fields), so they are intentionally excluded from the roundtrip assertion.
         let original = Config {
             appearance: AppearanceConfig {
                 theme: Theme::Light,
@@ -320,13 +275,11 @@ database = "local.db"
                 page_size: PageSize::Rows100,
             },
             session: SessionConfig {
-                last_connection_id: None,
                 last_query: Some("SELECT 1".to_string()),
             },
             ui: UiConfig {
                 language: "ja".to_string(),
             },
-            connections: vec![],
         };
 
         let serialized = toml::to_string(&original).expect("failed to serialize");

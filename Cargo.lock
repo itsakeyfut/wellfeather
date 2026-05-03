@@ -6771,6 +6771,7 @@ dependencies = [
  "serde",
  "slint",
  "slint-build",
+ "sqlx",
  "tempfile",
  "tokio",
  "tokio-util",
