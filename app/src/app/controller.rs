@@ -13,7 +13,7 @@
 //! Both channels are bounded (`capacity = CMD_CHANNEL_CAPACITY`). The controller task exits cleanly
 //! when all `Sender<Command>` clones are dropped (i.e. when the UI window closes).
 
-use std::{path::PathBuf, sync::Arc};
+use std::sync::Arc;
 
 use chrono::Utc;
 use rust_i18n::t;
@@ -51,16 +51,9 @@ pub struct AppController {
     db: DbService,
     session: SessionManager,
     repo: Arc<ConnectionRepository>,
-    /// Path to `history.db`; opened asynchronously at the start of `run()`.
-    history_path: PathBuf,
-    /// `None` until `run()` opens the database; failures are non-fatal (logged).
-    history: Option<HistoryService>,
-    /// Path to `metadata.db`; opened asynchronously at the start of `run()`.
-    metadata_cache_path: PathBuf,
-    /// `None` until `run()` initialises the cache.
-    metadata_cache: Option<MetadataCache>,
-    /// `None` until `run()` initialises the cache (same `MetadataCache` clone).
-    completion: Option<CompletionService>,
+    history: HistoryService,
+    metadata_cache: MetadataCache,
+    completion: CompletionService,
     rx_cmd: mpsc::Receiver<Command>,
     tx_event: mpsc::Sender<Event>,
 }
@@ -69,30 +62,29 @@ impl AppController {
     /// Create the controller and return it together with the two channel endpoints
     /// that `main.rs` distributes: `Sender<Command>` → UI, `Receiver<Event>` → UI.
     ///
-    /// `history_path` is the filesystem path for `history.db`; the database is
-    /// opened (and the schema migrated) asynchronously at the start of [`Self::run`].
-    /// `metadata_cache_path` is the filesystem path for `metadata.db`.
+    /// All services are expected to be fully initialised (schema migrations run)
+    /// before being passed in. The shared `SqlitePool` backing them is managed by
+    /// the caller (`main.rs`).
     pub fn new(
         state: SharedState,
         db: DbService,
         session: SessionManager,
         repo: Arc<ConnectionRepository>,
-        history_path: PathBuf,
-        metadata_cache_path: PathBuf,
+        history: HistoryService,
+        metadata_cache: MetadataCache,
     ) -> (Self, mpsc::Sender<Command>, mpsc::Receiver<Event>) {
         let (tx_cmd, rx_cmd) = mpsc::channel(CMD_CHANNEL_CAPACITY);
         let (tx_event, rx_event) = mpsc::channel(CMD_CHANNEL_CAPACITY);
+        let completion = CompletionService::new(metadata_cache.clone());
         (
             Self {
                 state,
                 db,
                 session,
                 repo,
-                history_path,
-                history: None,
-                metadata_cache_path,
-                metadata_cache: None,
-                completion: None,
+                history,
+                metadata_cache,
+                completion,
                 rx_cmd,
                 tx_event,
             },
@@ -103,55 +95,40 @@ impl AppController {
 
     /// Run the command loop as a tokio task (spawn with `tokio::spawn(controller.run())`).
     /// Exits when all `Sender<Command>` clones are dropped.
-    pub async fn run(mut self) {
-        // Open history.db at startup — failure is non-fatal (queries still work).
-        self.history = match HistoryService::open(&self.history_path).await {
-            Ok(h) => {
-                info!("history.db opened at {:?}", self.history_path);
-                Some(h)
-            }
-            Err(e) => {
-                warn!("failed to open history.db: {e}");
-                None
-            }
-        };
-
-        // Open metadata cache at startup — failure is non-fatal.
-        let cache = MetadataCache::new(self.metadata_cache_path.clone());
-        if let Err(e) = cache.preload_from_disk().await {
+    pub async fn run(self) {
+        if let Err(e) = self.metadata_cache.preload_from_disk().await {
             warn!("failed to preload metadata cache: {e}");
         }
-        self.completion = Some(CompletionService::new(cache.clone()));
-        self.metadata_cache = Some(cache);
 
-        while let Some(cmd) = self.rx_cmd.recv().await {
+        let mut this = self;
+        while let Some(cmd) = this.rx_cmd.recv().await {
             debug!("received command: {:?}", cmd);
             match cmd {
-                Command::Connect(conn, pw) => self.handle_connect(conn, pw).await,
-                Command::TestConnection(conn, pw) => self.handle_test_connection(conn, pw).await,
-                Command::Disconnect(id) => self.handle_disconnect(id).await,
-                Command::RemoveConnection(id) => self.handle_remove_connection(id).await,
-                Command::RunQuery(sql) => self.handle_run_query(sql).await,
-                Command::RunAll(sql) => self.handle_run_all(sql).await,
-                Command::RunSelection(sql) => self.handle_run_query(sql).await,
-                Command::CancelQuery => self.handle_cancel_query().await,
-                Command::UpdateConfig(update) => self.handle_update_config(update).await,
+                Command::Connect(conn, pw) => this.handle_connect(conn, pw).await,
+                Command::TestConnection(conn, pw) => this.handle_test_connection(conn, pw).await,
+                Command::Disconnect(id) => this.handle_disconnect(id).await,
+                Command::RemoveConnection(id) => this.handle_remove_connection(id).await,
+                Command::RunQuery(sql) => this.handle_run_query(sql).await,
+                Command::RunAll(sql) => this.handle_run_all(sql).await,
+                Command::RunSelection(sql) => this.handle_run_query(sql).await,
+                Command::CancelQuery => this.handle_cancel_query().await,
+                Command::UpdateConfig(update) => this.handle_update_config(update).await,
                 Command::FetchCompletion(sql, cursor_pos) => {
-                    self.handle_fetch_completion(sql, cursor_pos).await;
+                    this.handle_fetch_completion(sql, cursor_pos).await;
                 }
                 Command::FetchDdl {
                     tab_id,
                     conn_id,
                     name,
                     kind,
-                } => self.handle_fetch_ddl(tab_id, conn_id, name, kind).await,
+                } => this.handle_fetch_ddl(tab_id, conn_id, name, kind).await,
                 Command::FetchTableData {
                     tab_id,
                     conn_id,
                     table_name,
                     page_size,
                 } => {
-                    self.handle_fetch_table_data(tab_id, conn_id, table_name, page_size)
+                    this.handle_fetch_table_data(tab_id, conn_id, table_name, page_size)
                         .await
                 }
                 Command::ExportResult(_, _) => {} // handled client-side in UI layer
@@ -214,9 +191,7 @@ impl AppController {
                 tokio::spawn(async move {
                     match db.fetch_metadata(&fetch_id).await {
                         Ok(meta) => {
-                            if let Some(ref c) = cache
-                                && let Err(e) = c.store(&fetch_id, meta.clone()).await
-                            {
+                            if let Err(e) = cache.store(&fetch_id, meta.clone()).await {
                                 warn!(conn_id = %fetch_id, error = %e, "failed to store metadata");
                             }
                             let _ = tx.send(Event::MetadataLoaded(fetch_id.clone(), meta)).await;
@@ -337,19 +312,17 @@ impl AppController {
             let now = Utc::now().timestamp();
             match db.execute_with_cancel(&conn_id, &sql_to_run, token).await {
                 Ok(result) => {
-                    if let Some(ref h) = history {
-                        let exec = wf_db::models::QueryExecution {
-                            id: 0,
-                            sql: sql_hist,
-                            duration_ms: result.execution_time_ms,
-                            success: true,
-                            error_message: None,
-                            timestamp: now,
-                            connection_id: conn_id_hist,
-                        };
-                        if let Err(e) = h.insert(&exec).await {
-                            warn!("failed to save history: {e}");
-                        }
+                    let exec = wf_db::models::QueryExecution {
+                        id: 0,
+                        sql: sql_hist,
+                        duration_ms: result.execution_time_ms,
+                        success: true,
+                        error_message: None,
+                        timestamp: now,
+                        connection_id: conn_id_hist,
+                    };
+                    if let Err(e) = history.insert(&exec).await {
+                        warn!("failed to save history: {e}");
                     }
                     debug!("sending event: QueryFinished");
                     let _ = tx.send(Event::QueryFinished(result)).await;
@@ -360,19 +333,17 @@ impl AppController {
                 }
                 Err(e) => {
                     error!(error = %e, "query execution failed");
-                    if let Some(ref h) = history {
-                        let exec = wf_db::models::QueryExecution {
-                            id: 0,
-                            sql: sql_hist,
-                            duration_ms: 0,
-                            success: false,
-                            error_message: Some(e.to_string()),
-                            timestamp: now,
-                            connection_id: conn_id_hist,
-                        };
-                        if let Err(he) = h.insert(&exec).await {
-                            warn!("failed to save history: {he}");
-                        }
+                    let exec = wf_db::models::QueryExecution {
+                        id: 0,
+                        sql: sql_hist,
+                        duration_ms: 0,
+                        success: false,
+                        error_message: Some(e.to_string()),
+                        timestamp: now,
+                        connection_id: conn_id_hist,
+                    };
+                    if let Err(he) = history.insert(&exec).await {
+                        warn!("failed to save history: {he}");
                     }
                     debug!("sending event: QueryError");
                     let _ = tx.send(Event::QueryError(e.localized_message())).await;
@@ -443,19 +414,17 @@ impl AppController {
                 {
                     Ok(result) => {
                         if is_last {
-                            if let Some(ref h) = history {
-                                let exec = wf_db::models::QueryExecution {
-                                    id: 0,
-                                    sql: stmt.clone(),
-                                    duration_ms: result.execution_time_ms,
-                                    success: true,
-                                    error_message: None,
-                                    timestamp: now,
-                                    connection_id: conn_id_hist.clone(),
-                                };
-                                if let Err(e) = h.insert(&exec).await {
-                                    warn!("failed to save history: {e}");
-                                }
+                            let exec = wf_db::models::QueryExecution {
+                                id: 0,
+                                sql: stmt.clone(),
+                                duration_ms: result.execution_time_ms,
+                                success: true,
+                                error_message: None,
+                                timestamp: now,
+                                connection_id: conn_id_hist.clone(),
+                            };
+                            if let Err(e) = history.insert(&exec).await {
+                                warn!("failed to save history: {e}");
                             }
                             debug!("sending event: QueryFinished (run-all last stmt)");
                             let _ = tx.send(Event::QueryFinished(result)).await;
@@ -468,19 +437,17 @@ impl AppController {
                     }
                     Err(e) => {
                         error!(error = %e, "run-all statement failed");
-                        if let Some(ref h) = history {
-                            let exec = wf_db::models::QueryExecution {
-                                id: 0,
-                                sql: stmt.clone(),
-                                duration_ms: 0,
-                                success: false,
-                                error_message: Some(e.to_string()),
-                                timestamp: now,
-                                connection_id: conn_id_hist.clone(),
-                            };
-                            if let Err(he) = h.insert(&exec).await {
-                                warn!("failed to save history: {he}");
-                            }
+                        let exec = wf_db::models::QueryExecution {
+                            id: 0,
+                            sql: stmt.clone(),
+                            duration_ms: 0,
+                            success: false,
+                            error_message: Some(e.to_string()),
+                            timestamp: now,
+                            connection_id: conn_id_hist.clone(),
+                        };
+                        if let Err(he) = history.insert(&exec).await {
+                            warn!("failed to save history: {he}");
                         }
                         debug!("sending event: QueryError");
                         let _ = tx.send(Event::QueryError(e.localized_message())).await;
@@ -550,16 +517,14 @@ impl AppController {
     ///
     /// Looks up the active connection, calls [`CompletionService::complete`], and
     /// sends [`Event::CompletionReady`] with the (possibly empty) candidate list.
-    /// Silently no-ops when there is no active connection or no completion service.
+    /// Silently no-ops when there is no active connection.
     async fn handle_fetch_completion(&self, sql: String, cursor_pos: usize) {
         let conn_id = match self.state.conn.active() {
             Some(c) => c.id.clone(),
             None => return,
         };
-        if let Some(ref completion) = self.completion {
-            let items = completion.complete(&conn_id, &sql, cursor_pos).await;
-            let _ = self.tx_event.send(Event::CompletionReady(items)).await;
-        }
+        let items = self.completion.complete(&conn_id, &sql, cursor_pos).await;
+        let _ = self.tx_event.send(Event::CompletionReady(items)).await;
     }
 
     /// Handle a `FetchDdl` command.
@@ -693,14 +658,17 @@ fn apply_limit(sql: &str, limit: usize) -> String {
 
 #[cfg(test)]
 mod tests {
-    use std::{path::PathBuf, sync::Arc};
+    use std::sync::Arc;
 
+    use sqlx::SqlitePool;
     use tempfile::tempdir;
+    use wf_completion::cache::MetadataCache;
     use wf_config::{ConnectionRepository, manager::ConfigManager};
     use wf_db::{
         models::{DbConnection, DbType},
         service::DbService,
     };
+    use wf_history::service::HistoryService;
 
     use crate::{
         app::{command::Command, event::Event, session::SessionManager},
@@ -721,16 +689,14 @@ mod tests {
         Arc::new(ConnectionRepository::open_memory().await.unwrap())
     }
 
-    /// Return a path to a temporary `history.db` (file created lazily by the controller).
-    fn test_history_path() -> PathBuf {
-        let dir = tempdir().unwrap();
-        dir.keep().join("history.db")
+    async fn test_history() -> HistoryService {
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        HistoryService::new(pool).await.unwrap()
     }
 
-    /// Return a path to a temporary `metadata.db` (file created lazily by the controller).
-    fn test_metadata_path() -> PathBuf {
-        let dir = tempdir().unwrap();
-        dir.keep().join("metadata.db")
+    async fn test_metadata_cache() -> MetadataCache {
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        MetadataCache::new(pool).await.unwrap()
     }
 
     fn sqlite_conn(id: &str) -> DbConnection {
@@ -747,7 +713,7 @@ mod tests {
         }
     }
 
-    // ── apply_limit ───────────────────────────────────────────────────────────
+    // ── apply_limit ────────────────────────────���────────────────────────��─────
 
     #[test]
     fn apply_limit_should_append_limit_to_select() {
@@ -802,7 +768,7 @@ mod tests {
         assert_eq!(apply_limit(sql, 500), sql);
     }
 
-    // ── TestConnection ────────────────────────────────────────────────────────
+    // ── TestConnection ──────────────────────────────────���─────────────────────
 
     #[tokio::test]
     async fn test_connection_should_send_ok_and_not_add_to_state() {
@@ -813,8 +779,8 @@ mod tests {
             db,
             test_session(),
             test_repo().await,
-            test_history_path(),
-            test_metadata_path(),
+            test_history().await,
+            test_metadata_cache().await,
         );
 
         tx_cmd
@@ -839,8 +805,8 @@ mod tests {
             db,
             test_session(),
             test_repo().await,
-            test_history_path(),
-            test_metadata_path(),
+            test_history().await,
+            test_metadata_cache().await,
         );
 
         let bad = DbConnection {
@@ -879,8 +845,8 @@ mod tests {
             db,
             test_session(),
             test_repo().await,
-            test_history_path(),
-            test_metadata_path(),
+            test_history().await,
+            test_metadata_cache().await,
         );
 
         tx_cmd
@@ -905,8 +871,8 @@ mod tests {
             db,
             test_session(),
             test_repo().await,
-            test_history_path(),
-            test_metadata_path(),
+            test_history().await,
+            test_metadata_cache().await,
         );
 
         let bad = DbConnection {
@@ -938,8 +904,8 @@ mod tests {
             db,
             test_session(),
             test_repo().await,
-            test_history_path(),
-            test_metadata_path(),
+            test_history().await,
+            test_metadata_cache().await,
         );
 
         tx_cmd
@@ -966,7 +932,7 @@ mod tests {
         assert!(matches!(e2, Event::Disconnected(ref id) if id == "c2"));
     }
 
-    // ── RunQuery ──────────────────────────────────────────────────────────────
+    // ── RunQuery ──────────────────────────────────────────────────────────���───
 
     #[tokio::test]
     async fn run_query_should_send_query_started_then_finished() {
@@ -977,8 +943,8 @@ mod tests {
             db,
             test_session(),
             test_repo().await,
-            test_history_path(),
-            test_metadata_path(),
+            test_history().await,
+            test_metadata_cache().await,
         );
 
         tx_cmd
@@ -1020,8 +986,8 @@ mod tests {
             db,
             test_session(),
             test_repo().await,
-            test_history_path(),
-            test_metadata_path(),
+            test_history().await,
+            test_metadata_cache().await,
         );
 
         tx_cmd
@@ -1045,8 +1011,8 @@ mod tests {
             db,
             test_session(),
             test_repo().await,
-            test_history_path(),
-            test_metadata_path(),
+            test_history().await,
+            test_metadata_cache().await,
         );
 
         tx_cmd.send(Command::CancelQuery).await.unwrap();
@@ -1067,8 +1033,8 @@ mod tests {
             db,
             test_session(),
             test_repo().await,
-            test_history_path(),
-            test_metadata_path(),
+            test_history().await,
+            test_metadata_cache().await,
         );
 
         tx_cmd
@@ -1100,8 +1066,8 @@ mod tests {
             db,
             test_session(),
             test_repo().await,
-            test_history_path(),
-            test_metadata_path(),
+            test_history().await,
+            test_metadata_cache().await,
         );
 
         tx_cmd

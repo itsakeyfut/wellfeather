@@ -133,7 +133,6 @@ mod tests {
         let dir = tempfile::tempdir().expect("failed to create temp dir");
         let mgr = ConfigManager::with_path(dir.path().join("config.toml"));
 
-        // connections is skip_serializing (migration-only), so it is excluded here.
         let original = Config {
             appearance: AppearanceConfig {
                 theme: Theme::Light,

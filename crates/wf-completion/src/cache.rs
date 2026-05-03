@@ -1,10 +1,8 @@
 use std::collections::HashMap;
-use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
 use anyhow::Result;
 use sqlx::SqlitePool;
-use sqlx::sqlite::SqliteConnectOptions;
 use wf_db::models::DbMetadata;
 
 // ---------------------------------------------------------------------------
@@ -14,21 +12,27 @@ use wf_db::models::DbMetadata;
 /// In-memory metadata cache with SQLite persistence.
 ///
 /// Memory is the primary store; SQLite is used for across-session durability.
-/// `new()` is synchronous — the SQLite file is opened lazily on first use.
+/// Cheap to clone — all clones share the same pool and in-memory map.
 #[derive(Clone)]
 pub struct MetadataCache {
     memory: Arc<RwLock<HashMap<String, DbMetadata>>>,
-    db_path: PathBuf,
+    pool: SqlitePool,
 }
 
+const CREATE_TABLE: &str = "
+    CREATE TABLE IF NOT EXISTS metadata_cache (
+        conn_id TEXT PRIMARY KEY,
+        data    BLOB NOT NULL
+    )";
+
 impl MetadataCache {
-    /// Create a cache backed by the SQLite file at `db_path`.
-    /// The file is created on first write if it does not exist.
-    pub fn new(db_path: PathBuf) -> Self {
-        Self {
+    /// Accept an already-open [`SqlitePool`] and ensure the schema exists.
+    pub async fn new(pool: SqlitePool) -> Result<Self> {
+        sqlx::query(CREATE_TABLE).execute(&pool).await?;
+        Ok(Self {
             memory: Arc::new(RwLock::new(HashMap::new())),
-            db_path,
-        }
+            pool,
+        })
     }
 
     /// Persist `meta` for `conn_id`: write to memory then flush to SQLite.
@@ -38,12 +42,11 @@ impl MetadataCache {
             .unwrap_or_else(|p| p.into_inner())
             .insert(conn_id.to_string(), meta.clone());
 
-        let pool = self.open_pool().await?;
         let json = serde_json::to_vec(&meta)?;
         sqlx::query("INSERT OR REPLACE INTO metadata_cache (conn_id, data) VALUES (?, ?)")
             .bind(conn_id)
             .bind(json.as_slice())
-            .execute(&pool)
+            .execute(&self.pool)
             .await?;
         Ok(())
     }
@@ -63,11 +66,10 @@ impl MetadataCache {
             return Some(m);
         }
 
-        let pool = self.open_pool().await.ok()?;
         use sqlx::Row as _;
         let row = sqlx::query("SELECT data FROM metadata_cache WHERE conn_id = ?")
             .bind(conn_id)
-            .fetch_optional(&pool)
+            .fetch_optional(&self.pool)
             .await
             .ok()??;
 
@@ -81,21 +83,10 @@ impl MetadataCache {
     }
 
     /// Populate the in-memory cache from SQLite.  Call once at startup.
-    ///
-    /// Non-fatal: if the database file cannot be opened (e.g. first run), a
-    /// warning is logged and `Ok(())` is returned.
     pub async fn preload_from_disk(&self) -> Result<()> {
-        let pool = match self.open_pool().await {
-            Ok(p) => p,
-            Err(e) => {
-                tracing::warn!("metadata cache not available: {e}");
-                return Ok(());
-            }
-        };
-
         use sqlx::Row as _;
         let rows = sqlx::query("SELECT conn_id, data FROM metadata_cache")
-            .fetch_all(&pool)
+            .fetch_all(&self.pool)
             .await?;
 
         let mut guard = self.memory.write().unwrap_or_else(|p| p.into_inner());
@@ -107,24 +98,6 @@ impl MetadataCache {
             }
         }
         Ok(())
-    }
-
-    // ── private ───────────────────────────────────────────────────────────────
-
-    async fn open_pool(&self) -> Result<SqlitePool> {
-        let opts = SqliteConnectOptions::new()
-            .filename(&self.db_path)
-            .create_if_missing(true);
-        let pool = SqlitePool::connect_with(opts).await?;
-        sqlx::query(
-            "CREATE TABLE IF NOT EXISTS metadata_cache (
-                 conn_id TEXT PRIMARY KEY,
-                 data    BLOB NOT NULL
-             )",
-        )
-        .execute(&pool)
-        .await?;
-        Ok(pool)
     }
 }
 
@@ -160,10 +133,27 @@ mod tests {
         }
     }
 
+    async fn open_memory() -> MetadataCache {
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        MetadataCache::new(pool).await.unwrap()
+    }
+
+    async fn open_at(path: &std::path::Path) -> MetadataCache {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .connect_with(
+                sqlx::sqlite::SqliteConnectOptions::new()
+                    .filename(path)
+                    .create_if_missing(true),
+            )
+            .await
+            .unwrap();
+        MetadataCache::new(pool).await.unwrap()
+    }
+
     #[tokio::test]
     async fn store_and_load_should_roundtrip_via_file() {
         let dir = tempfile::tempdir().unwrap();
-        let cache = MetadataCache::new(dir.path().join("metadata.db"));
+        let cache = open_at(&dir.path().join("wellfeather.db")).await;
         let meta = make_meta("users");
 
         cache.store("conn-1", meta.clone()).await.unwrap();
@@ -178,14 +168,15 @@ mod tests {
     #[tokio::test]
     async fn load_should_fall_back_to_sqlite_after_restart() {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("metadata.db");
+        let path = dir.path().join("wellfeather.db");
 
         // Instance A — store
-        let cache_a = MetadataCache::new(path.clone());
+        let cache_a = open_at(&path).await;
         cache_a.store("conn-1", make_meta("orders")).await.unwrap();
+        drop(cache_a);
 
         // Instance B — fresh memory, same file
-        let cache_b = MetadataCache::new(path);
+        let cache_b = open_at(&path).await;
         let loaded = cache_b.load("conn-1").await.unwrap();
 
         assert_eq!(loaded.tables[0].name, "orders");
@@ -194,27 +185,25 @@ mod tests {
     #[tokio::test]
     async fn preload_from_disk_should_populate_memory() {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("metadata.db");
+        let path = dir.path().join("wellfeather.db");
 
-        let cache_a = MetadataCache::new(path.clone());
+        let cache_a = open_at(&path).await;
         cache_a
             .store("conn-1", make_meta("products"))
             .await
             .unwrap();
+        drop(cache_a);
 
-        let cache_b = MetadataCache::new(path);
+        let cache_b = open_at(&path).await;
         cache_b.preload_from_disk().await.unwrap();
 
-        // After preload, memory should have the entry — verify by checking
-        // that a subsequent load returns without hitting SQLite (same result).
         let loaded = cache_b.load("conn-1").await.unwrap();
         assert_eq!(loaded.tables[0].name, "products");
     }
 
     #[tokio::test]
     async fn load_should_return_none_for_unknown_conn_id() {
-        let dir = tempfile::tempdir().unwrap();
-        let cache = MetadataCache::new(dir.path().join("metadata.db"));
+        let cache = open_memory().await;
         let result = cache.load("does-not-exist").await;
         assert!(result.is_none());
     }

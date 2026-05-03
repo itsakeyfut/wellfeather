@@ -1,13 +1,7 @@
-use std::path::PathBuf;
-
 use anyhow::Context as _;
-use sqlx::{Row as _, SqlitePool, sqlite::SqliteConnectOptions};
-use tracing::info;
+use sqlx::{Row as _, SqlitePool};
 
-use crate::{
-    manager::ConfigManager,
-    models::{ConnectionConfig, DbTypeName},
-};
+use crate::models::{ConnectionConfig, DbTypeName};
 
 const CREATE_TABLE: &str = "
     CREATE TABLE IF NOT EXISTS connections (
@@ -28,7 +22,7 @@ const CREATE_TABLE: &str = "
     )
 ";
 
-/// Persists [`ConnectionConfig`] records to a SQLite `connections.db` file.
+/// Persists [`ConnectionConfig`] records to SQLite.
 ///
 /// Cheap to clone — all clones share the same underlying connection pool.
 #[derive(Clone)]
@@ -37,54 +31,19 @@ pub struct ConnectionRepository {
 }
 
 impl ConnectionRepository {
-    /// Open (or create) the connections database at `path` and run schema migrations.
-    pub async fn open(path: &PathBuf) -> anyhow::Result<Self> {
-        let opts = SqliteConnectOptions::new()
-            .filename(path)
-            .create_if_missing(true);
-        let pool = SqlitePool::connect_with(opts)
-            .await
-            .context("failed to open connections.db")?;
+    /// Accept an already-open [`SqlitePool`] and ensure the schema exists.
+    pub async fn new(pool: SqlitePool) -> anyhow::Result<Self> {
         sqlx::query(CREATE_TABLE)
             .execute(&pool)
             .await
-            .context("failed to migrate connections.db")?;
+            .context("failed to migrate connections table")?;
         Ok(Self { pool })
     }
 
-    /// Open the database and, if it is empty, import connections from `config.toml`.
-    ///
-    /// After import the original TOML connections are left in place (read-only migration —
-    /// `skip_serializing` on those fields means they are no longer written back).
-    pub async fn open_with_migration(path: &PathBuf, cm: &ConfigManager) -> anyhow::Result<Self> {
-        let repo = Self::open(path).await?;
-        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM connections")
-            .fetch_one(&repo.pool)
-            .await?;
-        if count == 0 {
-            let config = cm.load().context("failed to load config for migration")?;
-            if !config.connections.is_empty() {
-                let last_id = config.session.last_connection_id.clone();
-                for (i, cc) in config.connections.iter().enumerate() {
-                    repo.upsert_with_order(cc, i as i64).await?;
-                }
-                if let Some(ref last) = last_id {
-                    repo.touch_last_used(last).await.ok();
-                }
-                info!(
-                    count = config.connections.len(),
-                    "migrated connections from config.toml to connections.db"
-                );
-            }
-        }
-        Ok(repo)
-    }
-
-    /// Open an in-memory database (for tests only).
+    /// In-memory database (for tests only).
     pub async fn open_memory() -> anyhow::Result<Self> {
         let pool = SqlitePool::connect("sqlite::memory:").await?;
-        sqlx::query(CREATE_TABLE).execute(&pool).await?;
-        Ok(Self { pool })
+        Self::new(pool).await
     }
 
     /// Return all saved connections ordered by `sort_order`, then `created_at`.
@@ -320,7 +279,6 @@ mod tests {
         let repo = ConnectionRepository::open_memory().await.unwrap();
         repo.upsert(&make_conn("c1")).await.unwrap();
         repo.upsert(&make_conn("c2")).await.unwrap();
-        // c2 touched most recently
         repo.touch_last_used("c1").await.unwrap();
         // small delay so the unixepoch() values differ
         tokio::time::sleep(std::time::Duration::from_millis(1100)).await;
@@ -343,40 +301,5 @@ mod tests {
         let found = repo.find("c1").await.unwrap().unwrap();
         assert!(!found.safe_dml);
         assert!(found.read_only);
-    }
-
-    #[tokio::test]
-    async fn repository_should_migrate_from_config_toml() {
-        let dir = tempfile::tempdir().unwrap();
-        let config_path = dir.path().join("config.toml");
-        let db_path = dir.path().join("connections.db");
-
-        // Write a config.toml directly — ConfigManager::save skips `connections`
-        // (skip_serializing), so we write raw TOML to simulate a pre-migration file.
-        let toml_content = r#"
-[session]
-last_connection_id = "c-toml"
-
-[[connections]]
-id = "c-toml"
-name = "Test"
-db_type = "sqlite"
-"#;
-        std::fs::write(&config_path, toml_content).unwrap();
-
-        let repo = ConnectionRepository::open_with_migration(
-            &db_path,
-            &ConfigManager::with_path(config_path),
-        )
-        .await
-        .unwrap();
-
-        let all = repo.all().await.unwrap();
-        assert_eq!(all.len(), 1);
-        assert_eq!(all[0].id, "c-toml");
-
-        // last_used_at should have been set.
-        let last = repo.last_used().await.unwrap();
-        assert_eq!(last.unwrap().id, "c-toml");
     }
 }

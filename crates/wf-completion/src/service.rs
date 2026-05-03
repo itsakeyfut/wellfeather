@@ -205,7 +205,13 @@ pub(crate) fn extract_prefix(sql: &str, cursor_pos: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sqlx::SqlitePool;
     use wf_db::models::{ColumnInfo, TableInfo};
+
+    async fn open_memory_cache() -> MetadataCache {
+        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        MetadataCache::new(pool).await.unwrap()
+    }
 
     fn make_meta() -> DbMetadata {
         DbMetadata {
@@ -232,9 +238,7 @@ mod tests {
 
     #[tokio::test]
     async fn complete_should_return_keyword_candidates_without_metadata() {
-        let dir = tempfile::tempdir().unwrap();
-        let cache = MetadataCache::new(dir.path().join("m.db"));
-        let svc = CompletionService::new(cache);
+        let svc = CompletionService::new(open_memory_cache().await);
         let items = svc.complete("conn-1", "SEL", 3).await;
         let labels: Vec<_> = items.iter().map(|i| i.label.as_str()).collect();
         assert!(labels.contains(&"SELECT"), "expected SELECT in {labels:?}");
@@ -242,8 +246,7 @@ mod tests {
 
     #[tokio::test]
     async fn complete_should_return_table_candidates_from_cached_metadata() {
-        let dir = tempfile::tempdir().unwrap();
-        let cache = MetadataCache::new(dir.path().join("m.db"));
+        let cache = open_memory_cache().await;
         cache.store("conn-1", make_meta()).await.unwrap();
         let svc = CompletionService::new(cache);
         // TableName context: "SELECT * FROM "
@@ -255,9 +258,7 @@ mod tests {
 
     #[tokio::test]
     async fn complete_should_return_empty_column_candidates_when_no_metadata() {
-        let dir = tempfile::tempdir().unwrap();
-        let cache = MetadataCache::new(dir.path().join("m.db"));
-        let svc = CompletionService::new(cache);
+        let svc = CompletionService::new(open_memory_cache().await);
         // No metadata stored — ColumnName { Some("users") } → no columns
         let sql = "SELECT id FROM users WHERE ";
         let items = svc.complete("conn-x", sql, sql.len()).await;
@@ -288,8 +289,7 @@ mod tests {
 
     #[tokio::test]
     async fn complete_should_return_next_clause_when_exact_table_name_at_cursor_end() {
-        let dir = tempfile::tempdir().unwrap();
-        let cache = MetadataCache::new(dir.path().join("m.db"));
+        let cache = open_memory_cache().await;
         cache.store("conn-1", make_meta()).await.unwrap();
         let svc = CompletionService::new(cache);
         // Cursor at end of "users" — exact table match → NextClause candidates
@@ -306,8 +306,7 @@ mod tests {
 
     #[tokio::test]
     async fn complete_should_return_operator_when_exact_column_name_at_cursor_end() {
-        let dir = tempfile::tempdir().unwrap();
-        let cache = MetadataCache::new(dir.path().join("m.db"));
+        let cache = open_memory_cache().await;
         cache.store("conn-1", make_meta()).await.unwrap();
         let svc = CompletionService::new(cache);
         // Cursor at end of "id" — exact column match → Operator candidates
@@ -322,8 +321,7 @@ mod tests {
 
     #[tokio::test]
     async fn complete_should_not_promote_partial_table_name_to_next_clause() {
-        let dir = tempfile::tempdir().unwrap();
-        let cache = MetadataCache::new(dir.path().join("m.db"));
+        let cache = open_memory_cache().await;
         cache.store("conn-1", make_meta()).await.unwrap();
         let svc = CompletionService::new(cache);
         // "use" is a prefix of "users" but not an exact match — must stay TableName

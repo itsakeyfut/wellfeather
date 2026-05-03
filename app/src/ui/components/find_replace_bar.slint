@@ -129,13 +129,14 @@ export component FindReplaceBar inherits Rectangle {
                         width:  parent.width - 2 * Layout.padding-xs;
                         height: parent.height;
                         single-line: true;
-                        text:   root.query;
+                        text <=> root.query;
                         color:  Colors.text;
                         font-size: Typography.size-base;
                         vertical-alignment: center;
-                        edited => {
-                            root.query = self.text;
-                            root.find-search();
+                        edited => { root.find-search(); }
+                        accepted => {
+                            root.commit-search();
+                            root.find-next();
                         }
                     }
                 }
@@ -281,11 +282,15 @@ export component FindReplaceBar inherits Rectangle {
                         width:  parent.width - 2 * Layout.padding-xs;
                         height: parent.height;
                         single-line: true;
-                        text:   root.replace-text;
+                        text <=> root.replace-text;
                         color:  Colors.text;
                         font-size: Typography.size-base;
                         vertical-alignment: center;
-                        edited => { root.replace-text = self.text; }
+                        edited => {}
+                        accepted => {
+                            root.commit-replace();
+                            root.replace-one();
+                        }
                     }
                 }
 

@@ -30,8 +30,12 @@ use app::{
 };
 use state::AppState;
 use ui::UI;
+use wf_completion::cache::MetadataCache;
 use wf_config::{ConnectionRepository, crypto, manager::ConfigManager};
 use wf_db::service::DbService;
+use wf_history::{
+    find_history::FindHistoryService, service::HistoryService, session::SessionService,
+};
 
 /// Entry point. Runs on the main OS thread; the Slint event loop must stay here.
 fn main() -> anyhow::Result<()> {
@@ -63,12 +67,25 @@ fn main() -> anyhow::Result<()> {
         state.ui.set_theme(config.appearance.theme);
     }
 
-    // Open the connection repository, migrating from config.toml if it is the first launch.
+    // Open the single shared SQLite database for all persistence needs.
+    let pool = runtime.block_on(async {
+        sqlx::sqlite::SqlitePoolOptions::new()
+            .connect_with(
+                sqlx::sqlite::SqliteConnectOptions::new()
+                    .filename(ConfigManager::app_dir().join("wellfeather.db"))
+                    .create_if_missing(true)
+                    .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal),
+            )
+            .await
+    })?;
+
+    // Initialise all services from the shared pool (Composition Root).
     let repo: Arc<ConnectionRepository> =
-        Arc::new(runtime.block_on(ConnectionRepository::open_with_migration(
-            &ConfigManager::app_dir().join("connections.db"),
-            &ConfigManager::new(),
-        ))?);
+        Arc::new(runtime.block_on(ConnectionRepository::new(pool.clone()))?);
+    let history_svc = runtime.block_on(HistoryService::new(pool.clone()))?;
+    let find_history_svc = runtime.block_on(FindHistoryService::new(pool.clone()))?;
+    let session_svc = runtime.block_on(SessionService::new(pool.clone()))?;
+    let metadata_cache = runtime.block_on(MetadataCache::new(pool.clone()))?;
 
     // Load all saved connections for the initial sidebar/DB-manager list.
     let initial_connections = runtime.block_on(repo.all()).unwrap_or_default();
@@ -88,8 +105,8 @@ fn main() -> anyhow::Result<()> {
         db,
         session,
         repo,
-        ConfigManager::app_dir().join("history.db"),
-        ConfigManager::app_dir().join("metadata.db"),
+        history_svc,
+        metadata_cache,
     );
     tokio::spawn(controller.run());
 
@@ -109,6 +126,14 @@ fn main() -> anyhow::Result<()> {
         });
     }
 
-    let ui = UI::new(state, tx_cmd, rx_event, enc_key, initial_connections)?;
+    let ui = UI::new(
+        state,
+        tx_cmd,
+        rx_event,
+        enc_key,
+        initial_connections,
+        find_history_svc,
+        session_svc,
+    )?;
     ui.run()
 }
