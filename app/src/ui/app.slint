@@ -23,6 +23,7 @@ import { AddConnectionDialog } from "components/dialogs/add_connection_dialog.sl
 import { AllRowsDialog }       from "components/dialogs/all_rows_dialog.slint";
 import { SafeDmlDialog }       from "components/dialogs/safe_dml_dialog.slint";
 import { DbManagerDialog }     from "components/dialogs/db_manager_dialog.slint";
+import { FindReplaceBar }     from "components/find_replace_bar.slint";
 
 // UiState is defined here (root file) so that Slint generates Rust bindings for it.
 // Sub-components that need global state receive properties bound from UiState below.
@@ -153,6 +154,31 @@ export global UiState {
     in-out property <bool>   conn-safe-dml: true;
     /// Active connection read_only setting (set by Rust on connect).
     in-out property <bool>   conn-read-only: false;
+
+    // ── Find / replace bar ────────────────────────────────────────────────────
+    in-out property <bool>   show-find-bar:         false;
+    in-out property <bool>   find-bar-with-replace: false;
+    in-out property <string> find-query:            "";
+    in-out property <string> find-replace-text:     "";
+    in-out property <bool>   find-case-sensitive:   false;
+    in-out property <bool>   find-use-regex:        false;
+    in-out property <int>    find-current-match:    0;
+    in-out property <int>    find-total-matches:    0;
+    in-out property <int>    find-sel-start:        -1;
+    in-out property <int>    find-sel-end:          -1;
+    callback load-find-history();
+    callback find-search();
+    callback find-next();
+    callback find-prev();
+    callback find-history-prev();
+    callback find-history-next();
+    callback replace-history-prev();
+    callback replace-history-next();
+    callback commit-search();
+    callback commit-replace();
+    callback replace-one();
+    callback replace-all();
+
     /// User confirmed dangerous DML execution.
     callback confirm-safe-dml();
     /// User dismissed the dangerous DML confirm popup.
@@ -416,6 +442,13 @@ export component AppWindow inherits Window {
                 EventResult.accept
             } else if (event.modifiers.control
                     && !event.modifiers.shift
+                    && !event.modifiers.alt
+                    && UiState.active-tab-kind-sql
+                    && event.text == "f") {
+                UiState.show-find-bar = true;
+                EventResult.accept
+            } else if (event.modifiers.control
+                    && !event.modifiers.shift
                     && !event.modifiers.alt) {
                 if (event.text == "1" && UiState.tabs.length > 0) {
                     UiState.switch-tab(0);
@@ -595,12 +628,52 @@ export component AppWindow inherits Window {
                 completion-selected  <=> UiState.completion-selected;
                 editor-cursor-target <=> UiState.editor-cursor-target;
                 accept-completion(text, pos, offset, tname) => { UiState.accept-completion(text, pos, offset, tname); }
+                find-sel-start <=> UiState.find-sel-start;
+                find-sel-end   <=> UiState.find-sel-end;
+                find-bar-open:     UiState.show-find-bar;
+                close-find-bar => {
+                    UiState.show-find-bar = false;
+                    UiState.find-sel-start = -1;
+                    UiState.find-sel-end = -1;
+                }
                 focus-sidebar => { root.focused-pane = 0; sidebar-inst.grab-focus(); }
                 focus-result  => {
                     if (UiState.result-panel-open) {
                         root.focused-pane = 2;
                         result-table-inst.grab-focus();
                     }
+                }
+            }
+
+            // ── Find / replace bar overlay ────────────────────────────────────
+            if UiState.show-find-bar && UiState.active-tab-kind-sql: FindReplaceBar {
+                x: parent.width - 388px;
+                y: 4px;
+                width: 380px;
+                with-replace:   UiState.find-bar-with-replace;
+                query          <=> UiState.find-query;
+                replace-text   <=> UiState.find-replace-text;
+                case-sensitive <=> UiState.find-case-sensitive;
+                use-regex      <=> UiState.find-use-regex;
+                current-match:     UiState.find-current-match;
+                total-matches:     UiState.find-total-matches;
+                load-history         => { UiState.load-find-history(); }
+                find-search          => { UiState.find-search(); }
+                find-next            => { UiState.find-next(); }
+                find-prev            => { UiState.find-prev(); }
+                find-history-prev    => { UiState.find-history-prev(); }
+                find-history-next    => { UiState.find-history-next(); }
+                replace-history-prev => { UiState.replace-history-prev(); }
+                replace-history-next => { UiState.replace-history-next(); }
+                commit-search        => { UiState.commit-search(); }
+                commit-replace       => { UiState.commit-replace(); }
+                replace-one          => { UiState.replace-one(); }
+                replace-all          => { UiState.replace-all(); }
+                close-bar => {
+                    UiState.show-find-bar = false;
+                    UiState.find-sel-start = -1;
+                    UiState.find-sel-end = -1;
+                    editor-inst.grab-focus();
                 }
             }
 

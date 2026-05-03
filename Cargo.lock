@@ -6765,6 +6765,7 @@ dependencies = [
  "anyhow",
  "arboard",
  "chrono",
+ "regex",
  "rfd",
  "rust-i18n",
  "serde",

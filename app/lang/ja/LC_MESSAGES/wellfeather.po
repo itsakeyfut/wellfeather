@@ -368,3 +368,27 @@ msgstr "実行"
 msgctxt "MenuBar"
 msgid "Reduce Motion"
 msgstr "モーション軽減"
+
+msgctxt "FindReplaceBar"
+msgid "No results"
+msgstr "一致なし"
+
+msgctxt "FindReplaceBar"
+msgid "Replace"
+msgstr "置換"
+
+msgctxt "FindReplaceBar"
+msgid "Replace All"
+msgstr "すべて置換"
+
+msgctxt "FindReplaceBar"
+msgid "Find"
+msgstr "検索"
+
+msgctxt "FindReplaceBar"
+msgid "Find (↑↓ for history)"
+msgstr "検索（↑↓で履歴）"
+
+msgctxt "FindReplaceBar"
+msgid "Replace (↑↓ for history)"
+msgstr "置換（↑↓で履歴）"

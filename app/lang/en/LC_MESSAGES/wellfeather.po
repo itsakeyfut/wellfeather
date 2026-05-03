@@ -368,3 +368,27 @@ msgstr "Execute"
 msgctxt "MenuBar"
 msgid "Reduce Motion"
 msgstr "Reduce Motion"
+
+msgctxt "FindReplaceBar"
+msgid "No results"
+msgstr "No results"
+
+msgctxt "FindReplaceBar"
+msgid "Replace"
+msgstr "Replace"
+
+msgctxt "FindReplaceBar"
+msgid "Replace All"
+msgstr "Replace All"
+
+msgctxt "FindReplaceBar"
+msgid "Find"
+msgstr "Find"
+
+msgctxt "FindReplaceBar"
+msgid "Find (↑↓ for history)"
+msgstr "Find (↑↓ for history)"
+
+msgctxt "FindReplaceBar"
+msgid "Replace (↑↓ for history)"
+msgstr "Replace (↑↓ for history)"
