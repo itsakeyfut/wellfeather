@@ -13,6 +13,7 @@ export component MenuBar inherits Rectangle {
     callback export-json();
     callback quit();
     callback toggle-theme();
+    callback toggle-reduce-motion();
     callback open-db-manager();
     callback disconnect();
     callback run-query(string);
@@ -22,6 +23,7 @@ export component MenuBar inherits Rectangle {
     in property <string> editor-text;
     in property <string> language: "en";
     in property <bool>   has-active-connection: false;
+    in property <bool>   reduce-motion: false;
 
     // Bottom border separating menu bar from content area
     Rectangle {
@@ -255,12 +257,12 @@ export component MenuBar inherits Rectangle {
                 x: 0;
                 y: root.height;
                 width:  220px;
-                height: 3 * Layout.height-menu-item + 1px;
+                height: 5 * Layout.height-menu-item + 2px;
                 close-policy: PopupClosePolicy.close-on-click;
 
                 Rectangle {
                     width:  220px;
-                    height: 3 * Layout.height-menu-item + 1px;
+                    height: 5 * Layout.height-menu-item + 2px;
                     background:    Colors.surface0;
                     border-radius: Layout.radius-md;
                     border-width:  1px;
@@ -272,6 +274,12 @@ export component MenuBar inherits Rectangle {
                     VerticalLayout {
                         spacing: 0;
                         MenuItem { text: @tr("Font Settings (coming soon)"); }
+                        Rectangle { height: 1px; background: Colors.surface1; }
+                        MenuItem {
+                            text: @tr("Reduce Motion");
+                            selected: root.reduce-motion;
+                            clicked => { root.toggle-reduce-motion(); }
+                        }
                         Rectangle { height: 1px; background: Colors.surface1; }
                         MenuItem {
                             text: @tr("English");

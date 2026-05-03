@@ -1,5 +1,5 @@
 import { SidebarNode } from "../globals.slint";
-import { Colors, Typography, Layout, Icons } from "../theme.slint";
+import { Colors, Typography, Layout, Icons, Animation } from "../theme.slint";
 
 export component Sidebar inherits Rectangle {
     background: Colors.base;
@@ -110,7 +110,7 @@ export component Sidebar inherits Rectangle {
             sidebar-content := VerticalLayout {
                 // ── Schema tree ───────────────────────────────────────────────────────
                 for node[i] in root.tree : Rectangle {
-                    height: Layout.height-sidebar-row;
+                    height: node.visible ? Layout.height-sidebar-row : 0px;
                     clip: true;
 
                     background: i == root.kb-focus

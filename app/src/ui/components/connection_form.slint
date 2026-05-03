@@ -3,7 +3,7 @@
 // Does not import UiState directly to avoid circular imports
 // (app.slint imports this file; UiState is defined in app.slint).
 
-import { Colors, Typography, Layout, Icons } from "../theme.slint";
+import { Colors, Typography, Layout, Icons, Animation } from "../theme.slint";
 import { ActionButton } from "common.slint";
 
 // ── Helper: labelled text field row ──────────────────────────────────────────
@@ -163,8 +163,8 @@ component CheckRow inherits Rectangle {
             background: root.checked ? Colors.blue : Colors.base;
             border-width: 1px;
             border-color: root.checked ? Colors.blue : Colors.surface2;
-            animate background { duration: 150ms; easing: ease-in-out; }
-            animate border-color { duration: 150ms; easing: ease-in-out; }
+            animate background { duration: Animation.feedback; easing: Animation.value-ease; }
+            animate border-color { duration: Animation.feedback; easing: Animation.value-ease; }
             Image {
                 width: 18px;
                 height: 18px;
@@ -173,7 +173,7 @@ component CheckRow inherits Rectangle {
                 source: Icons.check;
                 colorize: Colors.base;
                 opacity: root.checked ? 1.0 : 0.0;
-                animate opacity { duration: 120ms; easing: ease-in-out; }
+                animate opacity { duration: Animation.fast; easing: Animation.value-ease; }
             }
         }
 

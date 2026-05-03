@@ -1,5 +1,5 @@
 import { TabEntry } from "../globals.slint";
-import { Colors, Typography, Layout, Icons } from "../theme.slint";
+import { Colors, Typography, Layout, Icons, Animation } from "../theme.slint";
 
 export component TabBar inherits Rectangle {
     in property <[TabEntry]> tabs;
@@ -26,6 +26,7 @@ export component TabBar inherits Rectangle {
                     width: min(max(tab-text.preferred-width + 64px, 80px), 240px);
                     height: Layout.height-tab-bar;
                     background: i == root.active-index ? Colors.base : transparent;
+                    animate background { duration: Animation.standard; easing: Animation.enter-ease; }
 
                     ta-tab := TouchArea {
                         clicked => { root.switch-tab(i); }
@@ -83,12 +84,14 @@ export component TabBar inherits Rectangle {
                         }
                     }
 
-                    if i == root.active-index : Rectangle {
+                    Rectangle {
                         x: 0;
                         y: parent.height - 2px;
                         width: parent.width;
                         height: 2px;
                         background: Colors.blue;
+                        opacity: i == root.active-index ? 1.0 : 0.0;
+                        animate opacity { duration: Animation.standard; easing: Animation.enter-ease; }
                     }
                 }
             }

@@ -29,6 +29,8 @@ export struct SidebarNode {
     is-read-only: bool,   // true for connections with read_only=true
     node-kind: string,    // "connection" | "category" | "table" | "view" | "proc" | "index"
     parent-index: int,    // flat-list index of parent node; -1 for root connection nodes
+    visible: bool,        // animation: false = collapsed (height 0), true = expanded
+    stagger-delay: int,   // animation: ms delay for enter stagger (0 for non-item nodes)
 }
 
 export struct CompletionRow {

@@ -40,6 +40,7 @@ export global Colors {
     out property <color> shadow:         #00000088;
     out property <color> modal-overlay:  #00000099;
     out property <color> hover-subtle:   is-dark ? #ffffff0d : #0000000d;
+    out property <color> hover-btn:      is-dark ? #ffffff1a : #00000014;
 }
 
 export global Typography {
@@ -107,6 +108,26 @@ export global Layout {
 
     // ── Sidebar-specific ──────────────────────────────────────────────────────
     out property <length> sidebar-indent: 14px;  // per-level indentation in tree
+}
+
+export global Animation {
+    in-out property <bool> reduce-motion: false;
+
+    // ── Duration tokens ───────────────────────────────────────────────────────
+    out property <duration> instant:      reduce-motion ? 0ms :  80ms;  // button press scale
+    out property <duration> fast:         reduce-motion ? 0ms : 120ms;  // exit / dismiss
+    out property <duration> feedback:     reduce-motion ? 0ms : 150ms;  // hover, checkbox, status
+    out property <duration> standard:     reduce-motion ? 0ms : 200ms;  // tab slide, value change
+    out property <duration> enter:        reduce-motion ? 0ms : 160ms;  // modal enter
+    out property <duration> stagger-step: reduce-motion ? 0ms :  30ms;  // per-item list stagger
+
+    // ── Easing tokens ─────────────────────────────────────────────────────────
+    // Intended spring: cubic-bezier(0.34, 1.56, 0.64, 1) — overshoot then settle.
+    // Using ease-out as placeholder until Slint cubic-bezier syntax is stable.
+    out property <easing> enter-ease:  ease-out;
+    out property <easing> exit-ease:   ease-in;
+    out property <easing> value-ease:  ease-in-out;
+    out property <easing> linear-ease: linear;
 }
 
 export global Icons {

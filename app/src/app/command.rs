@@ -24,6 +24,7 @@ pub enum ConfigUpdate {
         safe_dml: bool,
         read_only: bool,
     },
+    ReduceMotion(bool),
 }
 
 /// UI → Controller channel messages.

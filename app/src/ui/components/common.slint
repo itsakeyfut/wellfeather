@@ -1,7 +1,7 @@
 // Shared UI primitives used across multiple components.
 // All components here depend only on theme.slint — no circular imports.
 
-import { Colors, Typography, Layout, Icons } from "../theme.slint";
+import { Colors, Typography, Layout, Icons, Animation } from "../theme.slint";
 
 // ── ToolbarButton ─────────────────────────────────────────────────────────────
 // Small toggle button used in the result-table toolbar (page-size selector,
@@ -20,6 +20,7 @@ export component ToolbarButton inherits Rectangle {
     border-radius: Layout.radius-sm;
     background: ta.has-hover ? Colors.surface1
         : root.active ? Colors.blue : Colors.surface0;
+    animate background { duration: Animation.feedback; easing: Animation.enter-ease; }
 
     ta := TouchArea {
         clicked => { root.clicked(); }
@@ -67,6 +68,7 @@ export component ActionButton inherits Rectangle {
     height: Layout.height-btn-lg;
     border-radius: Layout.radius-md;
     background: root.bg;
+    clip: true;
 
     HorizontalLayout {
         alignment: center;
@@ -83,9 +85,16 @@ export component ActionButton inherits Rectangle {
             vertical-alignment: center;
         }
     }
-    TouchArea {
+
+    ta := TouchArea {
         enabled: root.enabled;
         clicked => { root.clicked(); }
+    }
+    Rectangle {
+        border-radius: parent.border-radius;
+        background: Colors.hover-btn;
+        opacity: ta.has-hover && root.enabled ? 1.0 : 0.0;
+        animate opacity { duration: Animation.feedback; easing: Animation.enter-ease; }
     }
 }
 
@@ -99,6 +108,13 @@ export component ActionButton inherits Rectangle {
 
 export component ModalOverlay inherits Rectangle {
     background: Colors.modal-overlay;
+
+    in property <bool> show: true;
+    callback exited();
+
+    changed show => {
+        if (!show) { root.exited(); }
+    }
 
     VerticalLayout {
         alignment: center;

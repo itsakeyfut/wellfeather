@@ -1,5 +1,6 @@
 import { RowData } from "../globals.slint";
-import { Colors, Typography, Layout, Icons } from "../theme.slint";
+import { Colors, Typography, Layout, Icons, Animation } from "../theme.slint";
+import { ProgressIndicator } from "std-widgets.slint";
 import { ResultTableToolbar } from "result_table_toolbar.slint";
 import { ResultTableHeader } from "result_table_header.slint";
 import { ResultTableBody }   from "result_table_body.slint";
@@ -120,12 +121,16 @@ export component ResultTable inherits Rectangle {
         x: 0; y: 0; width: root.width; height: root.height;
         background: Colors.base;
         TouchArea {}
-        Text {
-            x: (parent.width  - self.width)  / 2;
-            y: (parent.height - self.height) / 2;
-            text: @tr("Running\u{2026}");
-            color: Colors.text;
-            font-size: Typography.size-lg;
+        VerticalLayout {
+            alignment: center;
+            HorizontalLayout {
+                alignment: center;
+                spacing: Layout.spacing-lg;
+                ProgressIndicator {
+                    indeterminate: true;
+                    width: 120px;
+                }
+            }
         }
     }
 

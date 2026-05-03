@@ -77,6 +77,8 @@ pub struct AppearanceConfig {
     pub theme: Theme,
     pub font_family: String,
     pub font_size: u32,
+    /// When true, all UI animation durations collapse to 0ms.
+    pub reduce_motion: bool,
 }
 
 impl Default for AppearanceConfig {
@@ -85,6 +87,7 @@ impl Default for AppearanceConfig {
             theme: Theme::Dark,
             font_family: "JetBrains Mono".to_string(),
             font_size: 14,
+            reduce_motion: false,
         }
     }
 }
@@ -196,6 +199,7 @@ mod tests {
         assert_eq!(cfg.appearance.theme, Theme::Dark);
         assert_eq!(cfg.appearance.font_family, "JetBrains Mono");
         assert_eq!(cfg.appearance.font_size, 14);
+        assert!(!cfg.appearance.reduce_motion);
         assert_eq!(cfg.editor.page_size, PageSize::Rows500);
         assert_eq!(cfg.session.last_connection_id, None);
         assert_eq!(cfg.session.last_query, None);
@@ -210,6 +214,7 @@ mod tests {
 theme = "light"
 font_family = "Fira Code"
 font_size = 16
+reduce_motion = true
 
 [editor]
 page_size = 1000
@@ -249,6 +254,7 @@ database = "local.db"
             Some("SELECT * FROM users".to_string())
         );
         assert_eq!(cfg.ui.language, "ja");
+        assert!(cfg.appearance.reduce_motion);
 
         assert_eq!(cfg.connections.len(), 2);
         let pg = &cfg.connections[0];
@@ -308,6 +314,7 @@ database = "local.db"
                 theme: Theme::Light,
                 font_family: "Cascadia Code".to_string(),
                 font_size: 13,
+                reduce_motion: false,
             },
             editor: EditorConfig {
                 page_size: PageSize::Rows100,
