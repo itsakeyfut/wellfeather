@@ -1,7 +1,8 @@
 import { ConnectionEntry } from "../../globals.slint";
-import { Colors, Typography, Layout, Icons } from "../../theme.slint";
+import { Colors, Typography, Layout, Icons, Animation } from "../../theme.slint";
 
 export component DbManagerDialog inherits Rectangle {
+    in property <bool> show: false;
     in property <[ConnectionEntry]> connections: [];
     in property <string>            active-id:   "";
 
@@ -13,15 +14,19 @@ export component DbManagerDialog inherits Rectangle {
 
     property <int> kb-focus: 0;
 
-    init => {
-        dialog-fs.focus();
-        if (root.connections.length > 0) {
-            root.kb-focus = 0;
-        }
+    callback exited();
+
+    init => { root.kb-focus = 0; }
+
+    changed show => {
+        if (show) { root.kb-focus = 0; }
+        else      { root.exited(); }
     }
 
+    // Focus: grab on next frame after show.
+    Timer { interval: 16ms; running: show && !dialog-fs.has-focus; triggered => { dialog-fs.focus(); } }
+
     // Auto-scroll: keep the kb-focused row visible.
-    // viewport-y is 0 at top and negative as content scrolls down.
     changed kb-focus => {
         if (root.kb-focus >= 0) {
             let row-top = root.kb-focus * Layout.height-dialog-row;

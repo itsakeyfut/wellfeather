@@ -8,7 +8,7 @@ import "../../assets/fonts/JetBrainsMono-Regular.ttf";
 import "../../assets/fonts/JetBrainsMono-Bold.ttf";
 
 import { ConnectionEntry, RowData, SidebarNode, CompletionRow, TabEntry, ColumnData } from "globals.slint";
-import { Colors, Typography, Layout, Icons } from "theme.slint";
+import { Colors, Typography, Layout, Icons, Animation } from "theme.slint";
 import { CompletionPopup } from "components/completion_popup.slint";
 import { ConnectionForm }  from "components/connection_form.slint";
 import { MenuBar }         from "components/menu_bar.slint";
@@ -176,6 +176,12 @@ export global UiState {
     /// Fired when user accepts a candidate (Enter key in popup).
     callback accept-completion(string, int, int, string);
 
+    // ── Accessibility ─────────────────────────────────────────────────────────
+    /// When true, all Animation durations collapse to 0ms.  Persisted in config.toml.
+    in-out property <bool> reduce-motion: false;
+    /// Toggle reduce-motion; Rust flips the value, persists, and updates Animation global.
+    callback toggle-reduce-motion();
+
     // ── Theme ─────────────────────────────────────────────────────────────────
     /// true = dark (Catppuccin Mocha), false = light (Catppuccin Latte).
     in-out property <bool> is-dark: true;
@@ -269,6 +275,10 @@ export component AppWindow inherits Window {
     property <bool> _theme-sync: UiState.is-dark;
     changed _theme-sync => { Colors.is-dark = UiState.is-dark; }
 
+    // Mirror UiState.reduce-motion into Animation.reduce-motion.
+    property <bool> _reduce-motion-sync: UiState.reduce-motion;
+    changed _reduce-motion-sync => { Animation.reduce-motion = UiState.reduce-motion; }
+
     // ── Layout geometry helpers ───────────────────────────────────────────────
     property <length> menu-bar-height:   Layout.height-bar;
     property <length> tab-bar-height:    Layout.height-tab-bar;
@@ -333,6 +343,30 @@ export component AppWindow inherits Window {
     changed _tv-active => {
         if (root._tv-active) { root.focused-pane = 1; }
     }
+
+    // ── Dialog lifecycle helpers ──────────────────────────────────────────────
+    // AppWindow is always visible, so changed callbacks on these mirrors fire
+    // reliably even when the dialog itself is not yet in the tree.
+    // _X-alive controls the if condition; set true on open, false after exit.
+    private property <bool> _test-result-alive: false;
+    private property <bool> _test-result-open:  UiState.show-test-result-popup;
+    changed _test-result-open => { if (_test-result-open) { _test-result-alive = true; } }
+
+    private property <bool> _add-conn-alive: false;
+    private property <bool> _add-conn-open:  UiState.show-add-confirm-popup;
+    changed _add-conn-open => { if (_add-conn-open) { _add-conn-alive = true; } }
+
+    private property <bool> _all-rows-alive: false;
+    private property <bool> _all-rows-open:  UiState.show-all-rows-confirm;
+    changed _all-rows-open => { if (_all-rows-open) { _all-rows-alive = true; } }
+
+    private property <bool> _safe-dml-alive: false;
+    private property <bool> _safe-dml-open:  UiState.show-safe-dml-confirm;
+    changed _safe-dml-open => { if (_safe-dml-open) { _safe-dml-alive = true; } }
+
+    private property <bool> _db-mgr-alive: false;
+    private property <bool> _db-mgr-open:  UiState.show-db-manager;
+    changed _db-mgr-open => { if (_db-mgr-open) { _db-mgr-alive = true; } }
 
     // ── Root key-intercept FocusScope ─────────────────────────────────────────
     // Global shortcuts live in key-pressed (bubble phase) so they fire regardless
@@ -456,10 +490,12 @@ export component AppWindow inherits Window {
             editor-text:  UiState.editor-text;
             language:     UiState.language;
             has-active-connection: UiState.active-connection-id != "";
+            reduce-motion: UiState.reduce-motion;
             export-csv   => { UiState.export-csv(); }
             export-json  => { UiState.export-json(); }
             quit         => { UiState.quit(); }
-            toggle-theme => { UiState.toggle-theme(); }
+            toggle-theme          => { UiState.toggle-theme(); }
+            toggle-reduce-motion  => { UiState.toggle-reduce-motion(); }
             open-db-manager  => { UiState.open-db-manager(); }
             disconnect       => { UiState.disconnect(UiState.active-connection-id); }
             run-query(sql) => { UiState.run-query(sql); }
@@ -875,42 +911,51 @@ export component AppWindow inherits Window {
         }
 
         // ── Test-result popup ─────────────────────────────────────────────────
-        if UiState.show-test-result-popup: TestResultDialog {
+        if _test-result-alive: TestResultDialog {
             x: 0; y: 0;
             width: root.width; height: root.height;
+            show:           UiState.show-test-result-popup;
             result-ok:      UiState.test-result-ok;
             result-message: UiState.test-result-message;
             ok-clicked => { UiState.dismiss-test-popup(); }
+            exited     => { _test-result-alive = false; }
         }
 
         // ── Add-without-test confirmation popup ───────────────────────────────
-        if UiState.show-add-confirm-popup: AddConnectionDialog {
+        if _add-conn-alive: AddConnectionDialog {
             x: 0; y: 0;
             width: root.width; height: root.height;
+            show:       UiState.show-add-confirm-popup;
             no-clicked  => { UiState.dismiss-add-confirm(); }
             yes-clicked => { UiState.confirm-add-connection(); }
+            exited      => { _add-conn-alive = false; }
         }
 
         // ── Fetch-all-rows confirmation popup ─────────────────────────────────
-        if UiState.show-all-rows-confirm: AllRowsDialog {
+        if _all-rows-alive: AllRowsDialog {
             x: 0; y: 0;
             width: root.width; height: root.height;
+            show:          UiState.show-all-rows-confirm;
             cancel-clicked => { UiState.dismiss-all-rows-confirm(); }
             fetch-clicked  => { UiState.confirm-all-rows(); }
+            exited         => { _all-rows-alive = false; }
         }
 
         // ── Safe-DML confirmation popup ───────────────────────────────────────
-        if UiState.show-safe-dml-confirm: SafeDmlDialog {
+        if _safe-dml-alive: SafeDmlDialog {
             x: 0; y: 0;
             width: root.width; height: root.height;
+            show:            UiState.show-safe-dml-confirm;
             cancel-clicked  => { UiState.dismiss-safe-dml-confirm(); }
             execute-clicked => { UiState.confirm-safe-dml(); }
+            exited          => { _safe-dml-alive = false; }
         }
 
         // ── DB manager dialog ─────────────────────────────────────────────────
-        if UiState.show-db-manager: DbManagerDialog {
+        if _db-mgr-alive: DbManagerDialog {
             x: 0; y: 0;
             width: root.width; height: root.height;
+            show:        UiState.show-db-manager;
             connections: UiState.connection-list;
             active-id:   UiState.active-connection-id;
             close          => { UiState.show-db-manager = false; }
@@ -926,6 +971,7 @@ export component AppWindow inherits Window {
                 UiState.reopen-db-manager-on-form-close = true;
                 UiState.open-connection-form();
             }
+            exited => { _db-mgr-alive = false; }
         }
 
     }

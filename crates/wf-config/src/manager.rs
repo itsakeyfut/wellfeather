@@ -139,6 +139,7 @@ mod tests {
                 theme: Theme::Light,
                 font_family: "Cascadia Code".to_string(),
                 font_size: 16,
+                reduce_motion: false,
             },
             ..Config::default()
         };

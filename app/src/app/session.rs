@@ -121,6 +121,19 @@ impl SessionManager {
         Ok(())
     }
 
+    /// Persist `reduce_motion` as `[appearance].reduce_motion` in `config.toml`.
+    pub fn save_reduce_motion(&self, value: bool) -> anyhow::Result<()> {
+        let mut config = self
+            .config_manager
+            .load()
+            .context("failed to load config for reduce_motion save")?;
+        config.appearance.reduce_motion = value;
+        self.config_manager
+            .save(&config)
+            .context("failed to save reduce_motion")?;
+        Ok(())
+    }
+
     /// Write the current editor query to `last_query.sql` in the app config directory.
     ///
     /// An empty query writes an empty file (not an error); `restore_query_file`

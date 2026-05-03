@@ -363,3 +363,8 @@ msgstr "キャンセル"
 msgctxt "SafeDmlDialog"
 msgid "Execute"
 msgstr "実行"
+
+
+msgctxt "MenuBar"
+msgid "Reduce Motion"
+msgstr "モーション軽減"

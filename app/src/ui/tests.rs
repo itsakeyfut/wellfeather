@@ -151,11 +151,15 @@ fn build_sidebar_tree_should_show_categories_when_connection_expanded() {
     let mut metadata = HashMap::new();
     metadata.insert("a".to_string(), make_meta(&["users"]));
     let nodes = build_sidebar_tree(&conns, "a", &metadata, &expanded, &HashMap::new());
-    // conn + Tables + Views + Stored Procedures + Indexes = 5 nodes
-    assert_eq!(nodes.len(), 5);
+    // conn + Tables + users(visible=false) + Views + Stored Procedures + Indexes = 6 nodes
+    // Children are always emitted; visible flag drives animation.
+    assert_eq!(nodes.len(), 6);
     assert_eq!(nodes[1].label.as_str(), "Tables");
     assert_eq!(nodes[1].level, 1);
     assert_eq!(nodes[1].node_kind.as_str(), "category");
+    // "users" is emitted but invisible (Tables category not expanded)
+    assert_eq!(nodes[2].label.as_str(), "users");
+    assert!(!nodes[2].visible);
 }
 
 #[test]
@@ -185,8 +189,26 @@ fn build_sidebar_tree_should_hide_children_when_collapsed() {
         &HashSet::new(),
         &HashMap::new(),
     );
+    // No metadata → no child nodes emitted at all.
     assert_eq!(nodes.len(), 1);
     assert_eq!(nodes[0].level, 0);
+}
+
+#[test]
+fn build_sidebar_tree_should_emit_invisible_children_for_animation() {
+    let conns = vec![make_conn("a", "Alpha")];
+    let mut metadata = HashMap::new();
+    metadata.insert("a".to_string(), make_meta(&["users"]));
+    // Connection collapsed (not in expanded)
+    let nodes = build_sidebar_tree(&conns, "a", &metadata, &HashSet::new(), &HashMap::new());
+    // Categories are emitted but invisible
+    assert!(nodes.len() > 1);
+    for node in nodes.iter().skip(1) {
+        assert!(
+            !node.visible,
+            "category should be invisible when conn collapsed"
+        );
+    }
 }
 
 #[test]

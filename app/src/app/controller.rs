@@ -537,6 +537,11 @@ impl AppController {
                     })
                     .await;
             }
+            ConfigUpdate::ReduceMotion(value) => {
+                if let Err(e) = self.session.save_reduce_motion(value) {
+                    warn!(error = %e, "failed to persist reduce_motion to config");
+                }
+            }
             _ => {}
         }
     }

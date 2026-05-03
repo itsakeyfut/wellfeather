@@ -128,10 +128,10 @@ fn build_sidebar_tree(
             is_read_only: *read_only.get(&conn.id).unwrap_or(&false),
             node_kind: "connection".into(),
             parent_index: -1,
+            visible: true,
+            stagger_delay: 0,
         });
-        if !is_conn_expanded {
-            continue;
-        }
+        // Always push all children (with visible flag) so Slint can animate height/opacity.
         let Some(meta) = metadata.get(&conn.id) else {
             continue;
         };
@@ -143,6 +143,7 @@ fn build_sidebar_tree(
             &meta.tables,
             "table",
             expanded,
+            is_conn_expanded,
         );
         push_tableinfo_category(
             &mut nodes,
@@ -152,6 +153,7 @@ fn build_sidebar_tree(
             &meta.views,
             "view",
             expanded,
+            is_conn_expanded,
         );
         push_string_category(
             &mut nodes,
@@ -161,6 +163,7 @@ fn build_sidebar_tree(
             &meta.stored_procs,
             "proc",
             expanded,
+            is_conn_expanded,
         );
         push_string_category(
             &mut nodes,
@@ -170,11 +173,13 @@ fn build_sidebar_tree(
             &meta.indexes,
             "index",
             expanded,
+            is_conn_expanded,
         );
     }
     nodes
 }
 
+#[allow(clippy::too_many_arguments)]
 fn push_tableinfo_category(
     nodes: &mut Vec<crate::SidebarNode>,
     conn_idx: i32,
@@ -183,6 +188,7 @@ fn push_tableinfo_category(
     items: &[TableInfo],
     kind: &str,
     expanded: &HashSet<String>,
+    parent_visible: bool,
 ) {
     let cat_id = format!("cat:{}:{}", conn_id, name);
     let is_exp = expanded.contains(&cat_id);
@@ -197,24 +203,28 @@ fn push_tableinfo_category(
         is_read_only: false,
         node_kind: "category".into(),
         parent_index: conn_idx,
+        visible: parent_visible,
+        stagger_delay: 0,
     });
-    if is_exp {
-        for item in items {
-            nodes.push(crate::SidebarNode {
-                id: format!("item:{}:{}:{}", conn_id, kind, item.name).into(),
-                label: item.name.clone().into(),
-                sub_label: "".into(),
-                level: 2,
-                is_expanded: false,
-                is_active: false,
-                is_read_only: false,
-                node_kind: kind.into(),
-                parent_index: cat_idx,
-            });
-        }
+    // Always emit children; visible flag drives Slint height/opacity animation.
+    for (child_idx, item) in items.iter().enumerate() {
+        nodes.push(crate::SidebarNode {
+            id: format!("item:{}:{}:{}", conn_id, kind, item.name).into(),
+            label: item.name.clone().into(),
+            sub_label: "".into(),
+            level: 2,
+            is_expanded: false,
+            is_active: false,
+            is_read_only: false,
+            node_kind: kind.into(),
+            parent_index: cat_idx,
+            visible: parent_visible && is_exp,
+            stagger_delay: (child_idx.min(9) as i32) * 30,
+        });
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn push_string_category(
     nodes: &mut Vec<crate::SidebarNode>,
     conn_idx: i32,
@@ -223,6 +233,7 @@ fn push_string_category(
     items: &[String],
     kind: &str,
     expanded: &HashSet<String>,
+    parent_visible: bool,
 ) {
     let cat_id = format!("cat:{}:{}", conn_id, name);
     let is_exp = expanded.contains(&cat_id);
@@ -237,21 +248,24 @@ fn push_string_category(
         is_read_only: false,
         node_kind: "category".into(),
         parent_index: conn_idx,
+        visible: parent_visible,
+        stagger_delay: 0,
     });
-    if is_exp {
-        for item in items {
-            nodes.push(crate::SidebarNode {
-                id: format!("item:{}:{}:{}", conn_id, kind, item).into(),
-                label: item.clone().into(),
-                sub_label: "".into(),
-                level: 2,
-                is_expanded: false,
-                is_active: false,
-                is_read_only: false,
-                node_kind: kind.into(),
-                parent_index: cat_idx,
-            });
-        }
+    // Always emit children; visible flag drives Slint height/opacity animation.
+    for (child_idx, item) in items.iter().enumerate() {
+        nodes.push(crate::SidebarNode {
+            id: format!("item:{}:{}:{}", conn_id, kind, item).into(),
+            label: item.clone().into(),
+            sub_label: "".into(),
+            level: 2,
+            is_expanded: false,
+            is_active: false,
+            is_read_only: false,
+            node_kind: kind.into(),
+            parent_index: cat_idx,
+            visible: parent_visible && is_exp,
+            stagger_delay: (child_idx.min(9) as i32) * 30,
+        });
     }
 }
 
@@ -348,6 +362,7 @@ impl UI {
         Self::register_formatter_callback(&window);
         Self::register_export_callbacks(&window, Arc::clone(&original_data));
         Self::register_theme_callback(&window, state.clone(), tx_cmd.clone());
+        Self::register_reduce_motion_callback(&window, tx_cmd.clone());
         Self::register_menu_callbacks(&window, tx_cmd.clone());
         Self::register_close_handler(&window, Rc::clone(&tabs_state));
         Self::register_tab_callbacks(
@@ -365,6 +380,7 @@ impl UI {
             .unwrap_or_default();
         ui_global.set_font_family(config.appearance.font_family.into());
         ui_global.set_font_size(config.appearance.font_size as i32);
+        ui_global.set_reduce_motion(config.appearance.reduce_motion);
         // Apply locale after the Slint component exists — select_bundled_translation
         // requires a live component and is a no-op if called before one is created.
         let lang = &config.ui.language;
@@ -1068,6 +1084,21 @@ impl UI {
         });
     }
 
+    fn register_reduce_motion_callback(window: &crate::AppWindow, tx_cmd: mpsc::Sender<Command>) {
+        let ui = window.global::<crate::UiState>();
+        let window_weak = window.as_weak(); // clone required: on_toggle_reduce_motion closure
+        ui.on_toggle_reduce_motion(move || {
+            with_ui(&window_weak, |ui| {
+                let new_val = !ui.get_reduce_motion();
+                ui.set_reduce_motion(new_val);
+                send_cmd(
+                    &tx_cmd,
+                    Command::UpdateConfig(ConfigUpdate::ReduceMotion(new_val)),
+                );
+            });
+        });
+    }
+
     // ── Window lifecycle ──────────────────────────────────────────────────────
 
     fn register_close_handler(
@@ -1614,7 +1645,14 @@ impl UI {
                     )
                 };
                 with_ui(&window_weak, |ui| {
-                    ui.set_sidebar_tree(Rc::new(slint::VecModel::from(nodes)).into());
+                    let model = ui.get_sidebar_tree();
+                    if model.row_count() == nodes.len() {
+                        for (i, node) in nodes.into_iter().enumerate() {
+                            model.set_row_data(i, node);
+                        }
+                    } else {
+                        ui.set_sidebar_tree(Rc::new(slint::VecModel::from(nodes)).into());
+                    }
                 });
             });
         }
