@@ -45,6 +45,10 @@ msgid "Export JSON"
 msgstr "JSON エクスポート"
 
 msgctxt "MenuBar"
+msgid "Export Insert SQL"
+msgstr "INSERT SQL エクスポート"
+
+msgctxt "MenuBar"
 msgid "Quit"
 msgstr "終了"
 
@@ -223,6 +227,10 @@ msgstr "CSV エクスポート"
 msgctxt "ResultTableToolbar"
 msgid "Export JSON"
 msgstr "JSON エクスポート"
+
+msgctxt "ResultTableToolbar"
+msgid "Export Insert SQL"
+msgstr "INSERT SQL エクスポート"
 
 msgctxt "ResultTableToolbar"
 msgid "{0} rows"
