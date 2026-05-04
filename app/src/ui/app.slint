@@ -7,7 +7,7 @@ import "../../assets/fonts/NotoSansJP-Bold.ttf";
 import "../../assets/fonts/JetBrainsMono-Regular.ttf";
 import "../../assets/fonts/JetBrainsMono-Bold.ttf";
 
-import { ConnectionEntry, RowData, SidebarNode, CompletionRow, TabEntry, ColumnData, SnippetEntry, MetadataSearchResult } from "globals.slint";
+import { ConnectionEntry, RowData, SidebarNode, CompletionRow, TabEntry, ColumnData, SnippetEntry, MetadataSearchResult, HighlightSpan } from "globals.slint";
 import { Colors, Typography, Layout, Icons, Animation } from "theme.slint";
 import { CompletionPopup } from "components/completion_popup.slint";
 import { ConnectionForm }  from "components/connection_form.slint";
@@ -54,6 +54,12 @@ export global UiState {
     pure callback cursor-line(string, int) -> int;
     /// Moves cursor by delta lines (-1=up, +1=down) from byte offset, returns new offset.
     pure callback move-cursor-line(string, int, int) -> int;
+
+    // ── Syntax highlighting ───────────────────────────────────────────────────
+    /// Highlight spans for the current editor text; updated by Rust on text change.
+    in-out property <[HighlightSpan]> highlight-spans: [];
+    /// Fired on each text edit; Rust tokenizes and updates highlight-spans.
+    callback update-highlight(string);
 
     // ── Query result state ────────────────────────────────────────────────────
     in-out property <[string]>  result-columns:   [];
@@ -712,7 +718,10 @@ export component AppWindow inherits Window {
                         UiState.result-panel-open = !UiState.result-panel-open;
                     }
                 }
-                text-edited(sql, pos) => { UiState.fetch-completion(sql, pos); }
+                text-edited(sql, pos) => {
+                    UiState.fetch-completion(sql, pos);
+                    UiState.update-highlight(sql);
+                }
                 trigger-completion(sql, pos) => { UiState.trigger-completion(sql, pos); }
                 format-sql => { UiState.format-sql(); }
                 completion-visible   <=> UiState.completion-visible;
@@ -720,6 +729,7 @@ export component AppWindow inherits Window {
                 completion-selected  <=> UiState.completion-selected;
                 editor-cursor-target <=> UiState.editor-cursor-target;
                 accept-completion(text, pos, offset, tname) => { UiState.accept-completion(text, pos, offset, tname); }
+                highlight-spans:   UiState.highlight-spans;
                 find-sel-start <=> UiState.find-sel-start;
                 find-sel-end   <=> UiState.find-sel-end;
                 find-bar-open:     UiState.show-find-bar;

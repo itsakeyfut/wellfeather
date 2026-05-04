@@ -67,3 +67,12 @@ export struct MetadataSearchResult {
     detail: string,     // "" or "VARCHAR(255)"
     table-name: string, // parent table name (= label for tables/views)
 }
+
+/// One syntax-highlight span rendered as a colored Text element over the editor text.
+/// kind: 0=keyword, 1=string-literal, 2=comment, 3=number, 4=identifier (gap fill)
+export struct HighlightSpan {
+    line: int,
+    col:  int,
+    text: string,
+    kind: int,
+}

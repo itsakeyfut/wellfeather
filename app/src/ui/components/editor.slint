@@ -1,4 +1,4 @@
-import { CompletionRow } from "../globals.slint";
+import { CompletionRow, HighlightSpan } from "../globals.slint";
 import { Colors } from "../theme.slint";
 
 // SQL editor component — multi-line TextInput with synchronised line numbers.
@@ -110,6 +110,9 @@ export component Editor inherits Rectangle {
     /// Byte offsets of the current find-bar match highlight (-1 = clear selection).
     in-out property <int> find-sel-start: -1;
     in-out property <int> find-sel-end:   -1;
+
+    /// Syntax highlight spans; updated by Rust on every text edit.
+    in property <[HighlightSpan]> highlight-spans: [];
 
     changed find-sel-start => {
         if (root.find-sel-start < 0) {
@@ -354,6 +357,19 @@ export component Editor inherits Rectangle {
         root.line-count - root.vis-first,
         floor(root.eff-height / root.line-h) + 3
     );
+
+    // ── Character width measurement ──────────────────────────────────────────
+    // 30-character ruler: averaging over many chars reduces edge-bearing error
+    // to ~1/30 of its single-character value, giving accurate monospace advance.
+    char-ruler := Text {
+        visible: false;
+        text: "MMMMMMMMMMMMMMMMMMMMMMMMMMMMMM";
+        font-family: root.font-family;
+        font-size: root.font-size-px * 1px;
+    }
+    property <length> char-w: char-ruler.preferred-width > 0px
+        ? char-ruler.preferred-width / 30
+        : root.font-size-px * 0.6px;
 
     // ── Current-line highlight ───────────────────────────────────────────────
     // Rendered first (= behind all other content).
@@ -609,9 +625,9 @@ export component Editor inherits Rectangle {
                 height: max(self.preferred-height, editor-scroll.height);
                 single-line: false;
                 wrap:        no-wrap;
-                color:                      Colors.text;
+                color:                      Colors.base;
                 selection-background-color: Colors.selection;
-                selection-foreground-color: Colors.text;
+                selection-foreground-color: Colors.selected-text;
                 font-family: root.font-family;
                 font-size:   root.font-size-px * 1px;
 
@@ -690,6 +706,23 @@ export component Editor inherits Rectangle {
                     root.popup-x = pos.x + editor-scroll.viewport-x;
                     root.popup-y = (root.current-line + 1) * root.line-h + editor-scroll.viewport-y;
                 }
+            }
+
+            // ── Syntax highlight text overlays ───────────────────────────────
+            // Rendered AFTER inner-input (higher z-order) so colored Text
+            // sits on top of the default-colored TextInput text.
+            // Text elements are display-only and do not consume pointer events.
+            for span in root.highlight-spans: Text {
+                x: span.col * root.char-w;
+                y: span.line * root.line-h;
+                text: span.text;
+                font-family: root.font-family;
+                font-size: root.font-size-px * 1px;
+                color: span.kind == 0 ? Colors.hl-keyword
+                     : span.kind == 1 ? Colors.hl-string
+                     : span.kind == 2 ? Colors.hl-comment
+                     : span.kind == 3 ? Colors.hl-number
+                     : Colors.hl-identifier;
             }
         }
     }

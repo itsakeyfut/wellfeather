@@ -41,6 +41,13 @@ export global Colors {
     out property <color> modal-overlay:  #00000099;
     out property <color> hover-subtle:   is-dark ? #ffffff0d : #0000000d;
     out property <color> hover-btn:      is-dark ? #ffffff1a : #00000014;
+
+    // ── Syntax highlight text colors ──────────────────────────────────────────
+    out property <color> hl-keyword:    is-dark ? #569cd6 : #0070c1;  // VS Code keyword blue
+    out property <color> hl-string:     is-dark ? #ce9178 : #c07030;  // VS Code string orange
+    out property <color> hl-comment:    is-dark ? #57a64a : #6a9955;  // VS Code comment green
+    out property <color> hl-number:     is-dark ? #b5cea8 : #098658;  // VS Code number green
+    out property <color> hl-identifier: is-dark ? #9cdcfe : #0070a0;  // VS Code identifier cyan
 }
 
 export global Typography {
