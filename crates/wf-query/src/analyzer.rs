@@ -75,6 +75,46 @@ pub fn is_write_statement(sql: &str) -> bool {
     })
 }
 
+/// Extract the table name from a simple `SELECT … FROM <table>` query.
+///
+/// Returns `None` when the query is not a SELECT, references multiple tables
+/// (JOIN or comma-separated FROM), uses a subquery in the FROM clause, or the
+/// table name cannot be parsed.
+pub fn extract_single_table_name(sql: &str) -> Option<String> {
+    let upper = sql.trim_start().to_uppercase();
+    if !upper.starts_with("SELECT") {
+        return None;
+    }
+    if upper.contains(" JOIN ") || upper.contains(" JOIN\t") || upper.contains(" JOIN\n") {
+        return None;
+    }
+    // Find " FROM " case-insensitively
+    let from_kw = " FROM ";
+    let from_pos = upper.find(from_kw)? + from_kw.len();
+    let rest = sql[from_pos..].trim_start();
+    // Reject subqueries and comma-separated tables
+    if rest.starts_with('(') {
+        return None;
+    }
+    if upper[from_pos..].trim_start().contains(',') {
+        return None;
+    }
+    // Extract the identifier (quoted or unquoted)
+    let name = if let Some(inner) = rest.strip_prefix('"') {
+        let end = inner.find('"')?;
+        inner[..end].to_string()
+    } else if let Some(inner) = rest.strip_prefix('`') {
+        let end = inner.find('`')?;
+        inner[..end].to_string()
+    } else {
+        let end = rest
+            .find(|c: char| c.is_whitespace() || c == ';' || c == ')')
+            .unwrap_or(rest.len());
+        rest[..end].to_string()
+    };
+    if name.is_empty() { None } else { Some(name) }
+}
+
 /// Returns the substring of `sql` for the byte range `start..end`.
 ///
 /// The range is clamped to valid string boundaries.  If `start > end`
@@ -285,7 +325,80 @@ mod tests {
         assert!(!is_write_statement("SELECT inserts FROM t"));
     }
 
-    // ── extract_selection ───────────────────────────────────────────────────
+    // ── extract_single_table_name ───────────────────────────��────────────────
+
+    #[test]
+    fn extract_single_table_name_should_return_name_for_simple_select() {
+        assert_eq!(
+            extract_single_table_name("SELECT * FROM users"),
+            Some("users".to_string())
+        );
+    }
+
+    #[test]
+    fn extract_single_table_name_should_handle_where_clause() {
+        assert_eq!(
+            extract_single_table_name("SELECT id, name FROM orders WHERE id = 1"),
+            Some("orders".to_string())
+        );
+    }
+
+    #[test]
+    fn extract_single_table_name_should_be_case_insensitive() {
+        assert_eq!(
+            extract_single_table_name("select * from Users"),
+            Some("Users".to_string())
+        );
+    }
+
+    #[test]
+    fn extract_single_table_name_should_handle_quoted_identifier() {
+        assert_eq!(
+            extract_single_table_name(r#"SELECT * FROM "my table""#),
+            Some("my table".to_string())
+        );
+        assert_eq!(
+            extract_single_table_name("SELECT * FROM `orders`"),
+            Some("orders".to_string())
+        );
+    }
+
+    #[test]
+    fn extract_single_table_name_should_return_none_for_join() {
+        assert_eq!(
+            extract_single_table_name(
+                "SELECT * FROM users JOIN orders ON users.id = orders.user_id"
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn extract_single_table_name_should_return_none_for_subquery() {
+        assert_eq!(
+            extract_single_table_name("SELECT * FROM (SELECT 1) t"),
+            None
+        );
+    }
+
+    #[test]
+    fn extract_single_table_name_should_return_none_for_non_select() {
+        assert_eq!(
+            extract_single_table_name("INSERT INTO users VALUES (1)"),
+            None
+        );
+        assert_eq!(extract_single_table_name("UPDATE users SET x = 1"), None);
+    }
+
+    #[test]
+    fn extract_single_table_name_should_handle_trailing_semicolon() {
+        assert_eq!(
+            extract_single_table_name("SELECT * FROM products;"),
+            Some("products".to_string())
+        );
+    }
+
+    // ── extract_selection ─────────────────────────────────────────────────��─
 
     #[test]
     fn extract_selection_should_return_exact_byte_range() {

@@ -33,6 +33,7 @@ export component ResultTable inherits Rectangle {
     callback copy-all-tsv();
     callback export-csv();
     callback export-json();
+    callback export-insert-sql();
     pure callback col-x-offset(int) -> float;
     callback sort-col-clicked(int);
     callback change-page-size(int);
@@ -64,8 +65,9 @@ export component ResultTable inherits Rectangle {
             total-rows: root.total-rows;
             page-size:  root.page-size;
             change-page-size(n) => { root.change-page-size(n); }
-            export-csv  => { root.export-csv(); }
-            export-json => { root.export-json(); }
+            export-csv        => { root.export-csv(); }
+            export-json       => { root.export-json(); }
+            export-insert-sql => { root.export-insert-sql(); }
         }
 
         header-inst := ResultTableHeader {

@@ -29,6 +29,7 @@ export component TableView inherits Rectangle {
     callback copy-all-tsv();
     callback export-csv();
     callback export-json();
+    callback export-insert-sql();
     out property <bool> tv-focused: tv-focus.has-focus;
     public function grab-focus() { tv-focus.focus(); }
 
@@ -138,8 +139,9 @@ export component TableView inherits Rectangle {
             copy-cell(v) => { root.copy-cell(v); }
             copy-row(i)  => { root.copy-row(i); }
             copy-all-tsv => { root.copy-all-tsv(); }
-            export-csv   => { root.export-csv(); }
-            export-json  => { root.export-json(); }
+            export-csv        => { root.export-csv(); }
+            export-json       => { root.export-json(); }
+            export-insert-sql => { root.export-insert-sql(); }
         }
 
         // Structure sub-tab

@@ -11,6 +11,7 @@ export component MenuBar inherits Rectangle {
 
     callback export-csv();
     callback export-json();
+    callback export-insert-sql();
     callback quit();
     callback toggle-theme();
     callback toggle-reduce-motion();
@@ -62,13 +63,13 @@ export component MenuBar inherits Rectangle {
             file-popup := PopupWindow {
                 x: 0;
                 y: root.height;
-                width:  180px;
-                height: 3 * Layout.height-menu-item + 1px;
+                width:  200px;
+                height: 4 * Layout.height-menu-item + 1px;
                 close-policy: PopupClosePolicy.close-on-click;
 
                 Rectangle {
-                    width:  180px;
-                    height: 3 * Layout.height-menu-item + 1px;
+                    width:  200px;
+                    height: 4 * Layout.height-menu-item + 1px;
                     background:    Colors.surface0;
                     border-radius: Layout.radius-md;
                     border-width:  1px;
@@ -79,10 +80,11 @@ export component MenuBar inherits Rectangle {
 
                     VerticalLayout {
                         spacing: 0;
-                        MenuItem { text: @tr("Export CSV");  clicked => { root.export-csv();  } }
-                        MenuItem { text: @tr("Export JSON"); clicked => { root.export-json(); } }
+                        MenuItem { text: @tr("Export CSV");        clicked => { root.export-csv();        } }
+                        MenuItem { text: @tr("Export JSON");       clicked => { root.export-json();       } }
+                        MenuItem { text: @tr("Export Insert SQL"); clicked => { root.export-insert-sql(); } }
                         Rectangle { height: 1px; background: Colors.surface1; }
-                        MenuItem { text: @tr("Quit");        clicked => { root.quit();        } }
+                        MenuItem { text: @tr("Quit");              clicked => { root.quit();              } }
                     }
                 }
             }

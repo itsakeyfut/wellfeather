@@ -15,6 +15,7 @@ export component ResultTableToolbar inherits Rectangle {
     callback change-page-size(int);
     callback export-csv();
     callback export-json();
+    callback export-insert-sql();
 
     Rectangle {
         x: 0; y: parent.height - 1px;
@@ -73,13 +74,13 @@ export component ResultTableToolbar inherits Rectangle {
     export-popup := PopupWindow {
         x: root.width - 266px;
         y: root.height + 2px;
-        width: 120px;
-        height: 60px;
+        width: 160px;
+        height: 3 * Layout.height-menu-item;
         close-policy: PopupClosePolicy.close-on-click;
 
         Rectangle {
-            width: 120px;
-            height: 60px;
+            width: 160px;
+            height: 3 * Layout.height-menu-item;
             background: Colors.surface0;
             border-radius: Layout.radius-md;
             border-width: 1px;
@@ -90,8 +91,9 @@ export component ResultTableToolbar inherits Rectangle {
 
             VerticalLayout {
                 spacing: 0;
-                MenuItem { text: @tr("Export CSV");  clicked => { root.export-csv(); } }
-                MenuItem { text: @tr("Export JSON"); clicked => { root.export-json(); } }
+                MenuItem { text: @tr("Export CSV");        clicked => { root.export-csv();        } }
+                MenuItem { text: @tr("Export JSON");       clicked => { root.export-json();       } }
+                MenuItem { text: @tr("Export Insert SQL"); clicked => { root.export-insert-sql(); } }
             }
         }
     }

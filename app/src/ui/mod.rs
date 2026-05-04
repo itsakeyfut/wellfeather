@@ -455,7 +455,7 @@ impl UI {
         Self::register_completion_callbacks(&window, tx_cmd.clone());
         Self::register_completion_accept_callback(&window);
         Self::register_formatter_callback(&window);
-        Self::register_export_callbacks(&window, Arc::clone(&original_data));
+        Self::register_export_callbacks(&window, Arc::clone(&original_data), state.clone());
         Self::register_theme_callback(&window, state.clone(), tx_cmd.clone());
         Self::register_reduce_motion_callback(&window, tx_cmd.clone());
         Self::register_menu_callbacks(&window, tx_cmd.clone());
@@ -2372,8 +2372,13 @@ impl UI {
 
     const CSV_DEFAULT_FILENAME: &str = "query_result.csv";
     const JSON_DEFAULT_FILENAME: &str = "query_result.json";
+    const INSERT_SQL_DEFAULT_FILENAME: &str = "query_result.sql";
 
-    fn register_export_callbacks(window: &crate::AppWindow, original_data: SharedOriginalData) {
+    fn register_export_callbacks(
+        window: &crate::AppWindow,
+        original_data: SharedOriginalData,
+        state: SharedState,
+    ) {
         let ui = window.global::<crate::UiState>();
 
         // ── CSV export ────────────────────────────────────────────────────────
@@ -2445,6 +2450,51 @@ impl UI {
                     let msg = match result {
                         Ok(()) => format!("Saved JSON: {}", path.display()),
                         Err(e) => format!("JSON export failed: {e}"),
+                    };
+                    set_status(window_weak, msg);
+                });
+            });
+        }
+
+        // ── INSERT SQL export ─────────────────────────────────────────────────
+        {
+            let window_weak = window.as_weak(); // clone required: on_export_insert_sql closure
+            let original_data = Arc::clone(&original_data); // clone required: on_export_insert_sql closure
+            ui.on_export_insert_sql(move || {
+                let snapshot = {
+                    let orig = original_data.lock().unwrap_or_else(|p| p.into_inner());
+                    orig.as_ref().map(|d| {
+                        let cols: Vec<String> = d.columns.iter().map(|s| s.to_string()).collect();
+                        (cols, d.rows.clone())
+                    })
+                };
+                let Some((columns, rows)) = snapshot else {
+                    return;
+                };
+                // Auto-detect table name from last SQL; fall back to a safe default.
+                let table_name = state
+                    .query
+                    .last_sql()
+                    .as_deref()
+                    .and_then(wf_query::analyzer::extract_single_table_name)
+                    .unwrap_or_else(|| "exported_table".to_string());
+                let window_weak = window_weak.clone(); // clone required: tokio::spawn needs 'static
+                tokio::spawn(async move {
+                    let Some(handle) = rfd::AsyncFileDialog::new()
+                        .set_title("Save Insert SQL")
+                        .set_file_name(Self::INSERT_SQL_DEFAULT_FILENAME)
+                        .add_filter("SQL files", &["sql"])
+                        .save_file()
+                        .await
+                    else {
+                        return; // user cancelled
+                    };
+                    let path = handle.path().to_path_buf();
+                    let result =
+                        wf_query::export::export_insert_sql(&columns, &rows, &table_name, &path);
+                    let msg = match result {
+                        Ok(()) => format!("Saved Insert SQL: {}", path.display()),
+                        Err(e) => format!("Insert SQL export failed: {e}"),
                     };
                     set_status(window_weak, msg);
                 });
