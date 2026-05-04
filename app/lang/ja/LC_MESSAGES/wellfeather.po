@@ -392,3 +392,99 @@ msgstr "検索（↑↓で履歴）"
 msgctxt "FindReplaceBar"
 msgid "Replace (↑↓ for history)"
 msgstr "置換（↑↓で履歴）"
+
+msgctxt "Sidebar"
+msgid "Snippets"
+msgstr "スニペット"
+
+msgctxt "SnippetEditDialog"
+msgid "Edit Snippet"
+msgstr "スニペットを編集"
+
+msgctxt "SnippetEditDialog"
+msgid "Comment"
+msgstr "コメント"
+
+msgctxt "SnippetEditDialog"
+msgid "Query"
+msgstr "クエリ"
+
+msgctxt "SnippetEditDialog"
+msgid "Comment (optional)"
+msgstr "コメント（任意）"
+
+msgctxt "SnippetEditDialog"
+msgid "Save"
+msgstr "保存"
+
+msgctxt "SnippetEditDialog"
+msgid "Cancel"
+msgstr "キャンセル"
+
+msgctxt "MenuBar"
+msgid "Snippets"
+msgstr "スニペット"
+
+msgctxt "MenuBar"
+msgid "Add Snippet (Ctrl+D)"
+msgstr "スニペットを追加 (Ctrl+D)"
+
+msgctxt "MenuBar"
+msgid "Show Snippets"
+msgstr "スニペットを表示"
+
+msgctxt "SnippetSaveDialog"
+msgid "Save Snippet"
+msgstr "スニペットを保存"
+
+msgctxt "SnippetSaveDialog"
+msgid "What is the purpose of this query?"
+msgstr "このクエリの用途は何ですか？"
+
+msgctxt "SnippetSaveDialog"
+msgid "Comment (optional)"
+msgstr "コメント（任意）"
+
+msgctxt "SnippetSaveDialog"
+msgid "Save"
+msgstr "保存"
+
+msgctxt "SnippetSaveDialog"
+msgid "Cancel"
+msgstr "キャンセル"
+
+msgctxt "SnippetListDialog"
+msgid "Snippets"
+msgstr "スニペット"
+
+msgctxt "SnippetListDialog"
+msgid "No snippets yet"
+msgstr "スニペットがありません"
+
+msgctxt "SnippetListDialog"
+msgid "Edit"
+msgstr "編集"
+
+msgctxt "SnippetListDialog"
+msgid "Delete"
+msgstr "削除"
+
+msgctxt "SnippetListDialog"
+msgid "Add Snippet (Ctrl+D)"
+msgstr "スニペットを追加 (Ctrl+D)"
+
+msgctxt "SnippetBar"
+msgid "Snippets"
+msgstr "スニペット"
+
+msgctxt "SnippetBar"
+msgid "No snippets yet"
+msgstr "スニペットがありません"
+
+msgctxt "SnippetBar"
+msgid "Paste"
+msgstr "貼り付け"
+
+msgctxt "SnippetBar"
+msgid "Run"
+msgstr "実行"

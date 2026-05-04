@@ -4,8 +4,8 @@ import { Colors, Typography, Layout, Icons, Animation } from "../theme.slint";
 export component Sidebar inherits Rectangle {
     background: Colors.base;
 
-    in property <[SidebarNode]> tree:       [];
-    in property <bool>          is-loading: false;
+    in property <[SidebarNode]>    tree:               [];
+    in property <bool>             is-loading:         false;
     callback toggle-node(string);
     callback table-double-clicked(string);
     callback add-connection();

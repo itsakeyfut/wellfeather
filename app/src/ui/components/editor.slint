@@ -86,9 +86,20 @@ export component Editor inherits Rectangle {
     /// Fired when the user presses Ctrl+Shift+F to reformat the SQL.
     callback format-sql();
 
+    /// Fired when the user presses Ctrl+D to save a snippet.
+    /// Passes anchor and cursor byte offsets captured BEFORE TextInput processes the key,
+    /// preserving the selection state.
+    callback open-snippet-save(int, int);
+
     // Pane navigation initiated from inside the editor.
     callback focus-sidebar();
     callback focus-result();
+
+    // ── Selection / cursor exposure (for snippet save) ──────────────────────
+    /// Anchor byte offset; equals cursor-pos when nothing is selected.
+    out property <int> anchor-pos: inner-input.anchor-position-byte-offset;
+    /// Cursor byte offset.
+    out property <int> cursor-pos: inner-input.cursor-position-byte-offset;
 
     // ── Find bar integration ──────────────────────────────────────────────────
     /// True when the find bar is open; allows Esc to close it from the editor.
@@ -546,6 +557,15 @@ export component Editor inherits Rectangle {
                     if (event.text == Key.LeftArrow) { root.focus-sidebar(); EventResult.accept }
                     else if (event.text == Key.DownArrow) { root.focus-result(); EventResult.accept }
                     else { EventResult.reject }
+                } else if (event.text == "d"
+                        && event.modifiers.control
+                        && !event.modifiers.shift
+                        && !event.modifiers.alt) {
+                    root.open-snippet-save(
+                        inner-input.anchor-position-byte-offset,
+                        inner-input.cursor-position-byte-offset
+                    );
+                    EventResult.accept
                 } else if (event.text == Key.Escape
                         && root.find-bar-open
                         && !root.completion-visible) {

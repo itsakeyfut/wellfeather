@@ -1,0 +1,244 @@
+import { SnippetEntry } from "../globals.slint";
+import { Colors, Typography, Layout, Icons, Animation } from "../theme.slint";
+
+/// Draggable floating panel listing snippets for quick insert or execute.
+/// Click a row to reveal Paste / Run buttons as an in-row overlay.
+/// Paste inserts SQL at the editor cursor; Run replaces the editor and executes.
+/// Drag the title bar to reposition; fires position-changed(new-x, new-y) on each move.
+export component SnippetBar inherits Rectangle {
+    in property  <[SnippetEntry]> snippets: [];
+    callback position-changed(float, float);
+    callback insert-sql(string);
+    callback execute-sql(string);
+    callback close();
+
+    width:  460px;
+    height: min(520px, 33px + 1px + inner-items.preferred-height);
+    background:    Colors.surface0;
+    border-radius: Layout.radius-md;
+    border-width:  1px;
+    border-color:  Colors.surface1;
+    drop-shadow-blur:  12px;
+    drop-shadow-color: Colors.shadow;
+    clip: true;
+
+    // Click offset within the bar at the moment the drag starts; held constant through the drag.
+    private property <length> press-x: 0px;
+    private property <length> press-y: 0px;
+    // ID of the currently expanded (overlay-showing) snippet row. "" = none.
+    private property <string> selected-id: "";
+
+    VerticalLayout {
+        // ── Title bar (draggable) ─────────────────────────────────────────────
+        Rectangle {
+            height: 32px;
+            background: Colors.mantle;
+
+            HorizontalLayout {
+                padding-left:  Layout.padding-md;
+                padding-right: Layout.padding-xs;
+                alignment: center;
+
+                Text {
+                    text: @tr("Snippets");
+                    color: Colors.text;
+                    font-size: Typography.size-lg;
+                    font-weight: 600;
+                    horizontal-stretch: 1;
+                    vertical-alignment: center;
+                }
+            }
+
+            drag-ta := TouchArea {
+                width: parent.width;
+                height: parent.height;
+                pointer-event(e) => {
+                    if (e.kind == PointerEventKind.down) {
+                        root.press-x = self.mouse-x;
+                        root.press-y = self.mouse-y;
+                    }
+                }
+                moved => {
+                    // root.x + self.mouse-x is absolute mouse position in parent coords.
+                    // Subtracting the immutable click offset gives the target bar position.
+                    root.position-changed(
+                        (root.x + self.mouse-x - root.press-x) / 1px,
+                        (root.y + self.mouse-y - root.press-y) / 1px
+                    );
+                }
+                mouse-cursor: move;
+            }
+        }
+
+        Rectangle { height: 1px; background: Colors.surface1; }
+
+        // ── Scrollable snippet list ───────────────────────────────────────────
+        Flickable {
+            vertical-stretch: 1;
+            interactive: true;
+            viewport-height: max(inner-items.preferred-height, self.height);
+
+            inner-items := VerticalLayout {
+                spacing: 0;
+
+                if root.snippets.length == 0: Rectangle {
+                    height: 64px;
+                    Text {
+                        width: parent.width; height: parent.height;
+                        text: @tr("No snippets yet");
+                        color: Colors.overlay0;
+                        font-size: Typography.size-base;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                }
+
+                for bk in root.snippets: Rectangle {
+                    height: row-vl.preferred-height;
+
+                    // ── Hover background + click-to-expand ────────────────────
+                    Rectangle {
+                        background: row-ta.has-hover && bk.id != root.selected-id
+                            ? Colors.hover-subtle : transparent;
+                        width: parent.width; height: parent.height;
+                        row-ta := TouchArea {
+                            clicked => { root.selected-id = bk.id; }
+                        }
+                    }
+
+                    // ── Row content (always visible beneath the overlay) ──────
+                    row-vl := VerticalLayout {
+                        x: 0; y: 0; width: parent.width;
+                        spacing: 0;
+
+                        // Header: icon + title
+                        HorizontalLayout {
+                            height: Layout.height-dialog-row;
+                            padding-left:  Layout.padding-md;
+                            padding-right: Layout.padding-sm;
+                            spacing: Layout.spacing-md;
+
+                            VerticalLayout {
+                                alignment: center;
+                                Image {
+                                    width: Layout.icon-md; height: Layout.icon-md;
+                                    source: Icons.snippet;
+                                    colorize: Colors.blue;
+                                    image-fit: contain;
+                                }
+                            }
+
+                            Text {
+                                horizontal-stretch: 1;
+                                text: bk.comment != "" ? bk.comment : bk.name;
+                                color: bk.comment != "" ? Colors.text : Colors.subtext0;
+                                font-size: Typography.size-xl;
+                                font-weight: 700;
+                                overflow: elide;
+                                vertical-alignment: center;
+                            }
+                        }
+
+                        // SQL body (word-wrapped monospace)
+                        HorizontalLayout {
+                            padding-left:  Layout.padding-md;
+                            padding-right: Layout.padding-sm;
+                            padding-bottom: Layout.padding-sm;
+                            spacing: Layout.spacing-md;
+
+                            Rectangle { width: Layout.icon-md; }
+
+                            Text {
+                                text: bk.sql;
+                                color: Colors.subtext1;
+                                font-size: Typography.size-base;
+                                font-family: "JetBrains Mono";
+                                wrap: word-wrap;
+                                overflow: clip;
+                            }
+                        }
+
+                        Rectangle { height: 1px; background: Colors.surface1; }
+                    }
+
+                    // ── Overlay: shown when this row is selected ──────────────
+                    if bk.id == root.selected-id: Rectangle {
+                        x: 0; y: 0;
+                        width: parent.width; height: parent.height;
+                        background: Colors.surface1;
+
+                        // × close (top-right)
+                        Rectangle {
+                            x: parent.width - 28px; y: 4px;
+                            width: 24px; height: 24px;
+                            border-radius: Layout.radius-sm;
+                            background: ov-close-ta.has-hover ? Colors.surface2 : transparent;
+                            Image {
+                                x: (parent.width  - self.width)  / 2;
+                                y: (parent.height - self.height) / 2;
+                                width: Layout.icon-sm; height: Layout.icon-sm;
+                                source: Icons.close;
+                                colorize: Colors.subtext0;
+                                image-fit: contain;
+                            }
+                            ov-close-ta := TouchArea {
+                                clicked => { root.selected-id = ""; }
+                            }
+                        }
+
+                        // Paste + Run buttons (vertically centered in the row)
+                        VerticalLayout {
+                            alignment: center;
+                            HorizontalLayout {
+                                alignment: center;
+                                spacing: Layout.spacing-lg;
+
+                                // Paste button
+                                Rectangle {
+                                    width: 110px; height: Layout.height-btn-md;
+                                    border-radius: Layout.radius-sm;
+                                    background: ov-paste-ta.has-hover ? Colors.blue : Colors.surface2;
+                                    Text {
+                                        text: @tr("Paste");
+                                        color: ov-paste-ta.has-hover ? Colors.base : Colors.text;
+                                        font-size: Typography.size-base;
+                                        font-weight: 500;
+                                        horizontal-alignment: center;
+                                        vertical-alignment: center;
+                                    }
+                                    ov-paste-ta := TouchArea {
+                                        clicked => {
+                                            root.insert-sql(bk.sql);
+                                            root.selected-id = "";
+                                        }
+                                    }
+                                }
+
+                                // Run button
+                                Rectangle {
+                                    width: 110px; height: Layout.height-btn-md;
+                                    border-radius: Layout.radius-sm;
+                                    background: ov-run-ta.has-hover ? Colors.green : Colors.surface2;
+                                    Text {
+                                        text: @tr("Run");
+                                        color: ov-run-ta.has-hover ? Colors.base : Colors.text;
+                                        font-size: Typography.size-base;
+                                        font-weight: 500;
+                                        horizontal-alignment: center;
+                                        vertical-alignment: center;
+                                    }
+                                    ov-run-ta := TouchArea {
+                                        clicked => {
+                                            root.execute-sql(bk.sql);
+                                            root.selected-id = "";
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

@@ -31,7 +31,7 @@ use app::{
 use state::AppState;
 use ui::UI;
 use wf_completion::cache::MetadataCache;
-use wf_config::{ConnectionRepository, crypto, manager::ConfigManager};
+use wf_config::{ConnectionRepository, SnippetRepository, crypto, manager::ConfigManager};
 use wf_db::service::DbService;
 use wf_history::{
     find_history::FindHistoryService, service::HistoryService, session::SessionService,
@@ -85,6 +85,8 @@ fn main() -> anyhow::Result<()> {
     let history_svc = runtime.block_on(HistoryService::new(pool.clone()))?;
     let find_history_svc = runtime.block_on(FindHistoryService::new(pool.clone()))?;
     let session_svc = runtime.block_on(SessionService::new(pool.clone()))?;
+    let snippet_repo: Arc<SnippetRepository> =
+        Arc::new(runtime.block_on(SnippetRepository::new(pool.clone()))?);
     let metadata_cache = runtime.block_on(MetadataCache::new(pool.clone()))?;
 
     // Load all saved connections for the initial sidebar/DB-manager list.
@@ -134,6 +136,7 @@ fn main() -> anyhow::Result<()> {
         initial_connections,
         find_history_svc,
         session_svc,
+        snippet_repo,
     )?;
     ui.run()
 }

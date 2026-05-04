@@ -19,7 +19,7 @@ sidebar sections) that later milestones will extend.
 - [ ] Safe DML mode warns before executing `UPDATE`/`DELETE` without a `WHERE` clause
 - [ ] Read-only mode blocks writes and shows a lock icon on the connection
 - [ ] `Ctrl+F` opens an inline find bar; `Ctrl+H` opens find + replace
-- [ ] Bookmarks are saved to `bookmarks.toml` and accessible from a sidebar section
+- [ ] Snippets are saved to snippets table and accessible from a sidebar section
 - [ ] Connection color dots appear in the sidebar and the status bar active-connection display
 - [ ] Result table supports INSERT SQL export via File → Export → Insert SQL
 - [ ] `Ctrl+P` opens a floating metadata global search palette
@@ -45,7 +45,7 @@ See `docs/roadmap/tasks/v0-8-0.md` for details.
 | T082 | Safe DML mode: WHERE-less UPDATE/DELETE detection and confirmation dialog |
 | T083 | Read-only connection mode: write guard and UI indicator |
 | T084 | Editor find / find-replace floating bar (Ctrl+F / Ctrl+H) |
-| T085 | Query bookmarks: bookmarks.toml persistence and sidebar section |
+| T085 | Query snippets: snippets.toml persistence and sidebar section |
 | T086 | Connection color coding: color dot in sidebar and status bar |
 | T087 | INSERT SQL export from result table |
 | T088 | Metadata global search palette (Ctrl+P) |

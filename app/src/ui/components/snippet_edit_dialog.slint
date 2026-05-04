@@ -1,0 +1,160 @@
+import { Colors, Typography, Layout, Animation } from "../theme.slint";
+
+/// Full-screen modal for editing an existing snippet.
+/// Shows a comment field and a SQL code block (editable, JetBrains Mono).
+export component SnippetEditDialog inherits Rectangle {
+    in property  <bool>   show:    false;
+    in-out property <string> comment: "";
+    in-out property <string> sql:     "";
+    in property  <length>    code-font-size: Typography.size-xl;
+    callback save();
+    callback cancelled();
+    callback exited();
+
+    x: 0; y: 0;
+    background: Colors.modal-overlay;
+
+    animate opacity {
+        duration: root.show ? Animation.enter : Animation.fast;
+        easing:   root.show ? Animation.enter-ease : Animation.exit-ease;
+    }
+    opacity: root.show ? 1 : 0;
+    changed opacity => { if (self.opacity == 0) { root.exited(); } }
+
+    fs := FocusScope {
+        x: 0; y: 0; width: parent.width; height: parent.height;
+        focus-on-click: true;
+        key-pressed(event) => {
+            if (event.text == Key.Escape) { root.cancelled(); EventResult.accept }
+            else { EventResult.reject }
+        }
+
+        Rectangle {
+            x: (parent.width  - self.width)  / 2;
+            y: (parent.height - self.height) / 2;
+            width:  720px;
+            height: 560px;
+            background:    Colors.surface0;
+            border-radius: Layout.radius-lg;
+            border-width:  1px;
+            border-color:  Colors.surface1;
+            drop-shadow-blur:  24px;
+            drop-shadow-color: Colors.shadow-light;
+            clip: true;
+
+            VerticalLayout {
+                padding: Layout.padding-2xl;
+                spacing: Layout.spacing-lg;
+
+                Text {
+                    text: @tr("Edit Snippet");
+                    color: Colors.text;
+                    font-size: Typography.size-xl;
+                    font-weight: 700;
+                }
+
+                // ── Comment field ─────────────────────────────────────────────
+                Text {
+                    text: @tr("Comment");
+                    color: Colors.subtext0;
+                    font-size: Typography.size-lg;
+                }
+
+                Rectangle {
+                    height: 32px;
+                    border-radius: Layout.radius-sm;
+                    border-width:  1px;
+                    border-color:  comment-input.has-focus ? Colors.blue : Colors.surface1;
+                    background:    Colors.base;
+                    comment-input := TextInput {
+                        x: Layout.padding-md;
+                        width:  parent.width - 2 * Layout.padding-md;
+                        height: parent.height;
+                        text           <=> root.comment;
+                        color:          Colors.text;
+                        font-size:      Typography.size-lg;
+                        vertical-alignment: center;
+                        single-line:    true;
+                        accepted => { root.save(); }
+                    }
+                    if comment-input.text == "": Text {
+                        x: Layout.padding-md;
+                        width:  parent.width - 2 * Layout.padding-md;
+                        height: parent.height;
+                        text: @tr("Comment (optional)");
+                        color: Colors.overlay0;
+                        font-size: Typography.size-lg;
+                        vertical-alignment: center;
+                    }
+                }
+
+                // ── SQL code block ────────────────────────────────────────────
+                Text {
+                    text: @tr("Query");
+                    color: Colors.subtext0;
+                    font-size: Typography.size-lg;
+                }
+
+                Rectangle {
+                    vertical-stretch: 1;
+                    border-radius: Layout.radius-sm;
+                    border-width:  1px;
+                    border-color:  sql-input.has-focus ? Colors.blue : Colors.surface1;
+                    background:    Colors.mantle;
+                    clip: true;
+                    sql-input := TextInput {
+                        x: Layout.padding-md;
+                        y: Layout.padding-md;
+                        width:  parent.width - 2 * Layout.padding-md;
+                        height: parent.height - 2 * Layout.padding-md;
+                        text        <=> root.sql;
+                        color:          Colors.text;
+                        font-size:      root.code-font-size;
+                        font-family:    "JetBrains Mono";
+                        selection-background-color: Colors.selection;
+                        single-line:    false;
+                        wrap:           word-wrap;
+                    }
+                }
+
+                // ── Buttons ───────────────────────────────────────────────────
+                HorizontalLayout {
+                    spacing: Layout.spacing-md;
+                    alignment: end;
+
+                    Rectangle {
+                        width: 88px; height: Layout.height-btn-lg;
+                        border-radius: Layout.radius-sm;
+                        border-width:  1px;
+                        border-color:  Colors.surface1;
+                        background:    cancel-ta.has-hover ? Colors.surface1 : transparent;
+                        Text {
+                            text: @tr("Cancel");
+                            color: Colors.text;
+                            font-size: Typography.size-lg;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                        cancel-ta := TouchArea { clicked => { root.cancelled(); } }
+                    }
+
+                    Rectangle {
+                        width: 88px; height: Layout.height-btn-lg;
+                        border-radius: Layout.radius-sm;
+                        background:    Colors.blue;
+                        Text {
+                            text: @tr("Save");
+                            color: Colors.base;
+                            font-size: Typography.size-lg;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                        save-ta := TouchArea { clicked => { root.save(); } }
+                    }
+                }
+            }
+        }
+    }
+
+    init => { comment-input.focus(); }
+}

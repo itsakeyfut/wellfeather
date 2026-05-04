@@ -33,6 +33,8 @@ These shortcuts work from any pane (no modal must be open).
 | `↑` / `↓` | Move cursor up / down one line (timer-based, no key-repeat lag) |
 | `Shift+↑` / `Shift+↓` | Extend selection up / down one line |
 | `Ctrl+F` | Open find bar |
+| `Ctrl+D` | Open snippet save dialog (uses selection, or cursor line if no selection) |
+| `Ctrl+B` | Toggle Snippet Bar |
 | `Esc` (editor focused, find bar open) | Close find bar |
 
 ### Standard text-editing shortcuts (via OS / TextInput)
@@ -49,6 +51,20 @@ These shortcuts work from any pane (no modal must be open).
 | `Ctrl+←` / `Ctrl+→` | Move by word |
 | `Home` / `End` | Move to line start / end |
 | `Ctrl+Home` / `Ctrl+End` | Move to document start / end |
+
+---
+
+## Snippet Bar
+
+A draggable floating panel toggled with `Ctrl+B`. Stays open while working (non-modal).
+Drag the title bar to reposition; last position is persisted across sessions.
+
+| Key / Action | Behaviour |
+|-------------|-----------|
+| `Ctrl+B` | Show / hide Snippet Bar |
+| Single-click on a snippet | Insert the snippet's SQL at the editor cursor |
+| Double-click on a snippet | Set editor text to snippet SQL and execute immediately |
+| `Esc` (Snippet Bar focused) | Close Snippet Bar |
 
 ---
 
