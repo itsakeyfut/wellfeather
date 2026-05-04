@@ -496,3 +496,7 @@ msgstr "Paste"
 msgctxt "SnippetBar"
 msgid "Run"
 msgstr "Run"
+
+msgctxt "MetadataSearch"
+msgid "Search tables, columns…"
+msgstr "Search tables, columns…"
