@@ -496,3 +496,7 @@ msgstr "貼り付け"
 msgctxt "SnippetBar"
 msgid "Run"
 msgstr "実行"
+
+msgctxt "MetadataSearch"
+msgid "Search tables, columns…"
+msgstr "テーブル・カラムを検索…"

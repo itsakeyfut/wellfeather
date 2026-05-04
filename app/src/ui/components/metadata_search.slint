@@ -1,0 +1,341 @@
+import { Colors, Typography, Layout, Icons } from "../theme.slint";
+import { MetadataSearchResult } from "../globals.slint";
+
+export component MetadataSearch inherits Rectangle {
+    in-out property <string>                query:          "";
+    in property    <[MetadataSearchResult]> results:        [];
+    in-out property <int>                   selected-index: 0;
+    callback search-changed();
+    callback accept(string, string, string);  // kind, label, table-name
+    callback close();        // fired by Esc — caller should refocus editor
+    callback close-on-blur(); // fired when search input loses focus (click outside) — caller lets natural focus remain
+
+    property <length> search-row-h: 44px;
+    property <length> results-h:    clamp(root.results.length * 36px, 0px, 252px);
+
+    width:  520px;
+    height: root.search-row-h + root.results-h;
+
+    background:        Colors.surface0;
+    border-radius:     Layout.radius-md;
+    border-width:      1px;
+    border-color:      Colors.surface1;
+    drop-shadow-blur:  12px;
+    drop-shadow-color: Colors.shadow;
+    clip: true;
+
+    // Mirror of search-input.has-focus — needed because `changed` cannot use dot paths.
+    property <bool> _input-focused <=> search-input.has-focus;
+
+    // True while the user is cycling items with Ctrl held + P pressed.
+    // Releasing Ctrl while this is true accepts the highlighted item.
+    property <bool> _navigating: false;
+
+    // Bridge for results-flick.viewport-y so that changed selected-index
+    // can scroll the list without crossing the conditional-block scope boundary.
+    property <length> _results-vpy: 0;
+
+    changed query => {
+        root._navigating = false;  // typing resets Ctrl+P navigation state
+        root._results-vpy = 0;     // reset scroll position on new search
+        root.search-changed();
+    }
+    init => { search-input.focus(); }
+
+    // When the search input loses focus the user clicked something outside the palette.
+    // TouchArea clicks don't steal keyboard focus, so result-item clicks are safe
+    // (accept fires before this handler would close the palette).
+    changed _input-focused => {
+        if (!_input-focused) { root.close-on-blur(); }
+    }
+
+    // Auto-scroll the results list so the highlighted item stays in view.
+    // Uses _results-vpy (aliased to results-flick.viewport-y) and results-h
+    // instead of accessing results-flick directly, since that element is scoped
+    // inside the conditional block and not reachable from here.
+    changed selected-index => {
+        if (root.results.length > 0) {
+            if (root.selected-index * 36px < -root._results-vpy) {
+                root._results-vpy = -(root.selected-index * 36px);
+            } else if ((root.selected-index + 1) * 36px > -root._results-vpy + root.results-h) {
+                root._results-vpy = -((root.selected-index + 1) * 36px - root.results-h);
+            }
+        }
+    }
+
+    // Captures Up/Down/Enter/Esc for keyboard navigation.
+    palette-focus := FocusScope {
+        focus-on-click: false;
+
+        capture-key-pressed(event) => {
+            if (event.text == Key.Escape) {
+                root._navigating = false;
+                root.close();
+                EventResult.accept
+            } else if (event.text == Key.UpArrow) {
+                root._navigating = false;
+                if (root.selected-index > 0) { root.selected-index -= 1; }
+                EventResult.accept
+            } else if (event.text == Key.DownArrow) {
+                root._navigating = false;
+                if (root.selected-index < root.results.length - 1) { root.selected-index += 1; }
+                EventResult.accept
+            } else if (event.text == Key.Return) {
+                root._navigating = false;
+                if (root.results.length > 0) {
+                    root.accept(
+                        root.results[root.selected-index].kind,
+                        root.results[root.selected-index].label,
+                        root.results[root.selected-index].table-name
+                    );
+                }
+                EventResult.accept
+            } else if (event.modifiers.control
+                    && !event.modifiers.shift
+                    && !event.modifiers.alt
+                    && event.text == "p") {
+                // Ctrl+P while palette is open: cycle to the next item (wraps around).
+                if (root.results.length > 0) {
+                    root.selected-index = root.selected-index < root.results.length - 1
+                        ? root.selected-index + 1
+                        : 0;
+                    root._navigating = true;
+                }
+                EventResult.accept
+            } else {
+                EventResult.reject
+            }
+        }
+
+        capture-key-released(event) => {
+            // When Ctrl is released after Ctrl+P navigation, accept the highlighted item.
+            // event.modifiers reflects the modifiers still held after this key is released,
+            // so releasing Ctrl gives event.modifiers.control == false.
+            if (root._navigating && !event.modifiers.control) {
+                root._navigating = false;
+                if (root.results.length > 0) {
+                    root.accept(
+                        root.results[root.selected-index].kind,
+                        root.results[root.selected-index].label,
+                        root.results[root.selected-index].table-name
+                    );
+                }
+                EventResult.accept
+            } else {
+                EventResult.reject
+            }
+        }
+
+        VerticalLayout {
+            spacing: 0;
+
+            // ── Search input row ─────────────────────────────────────────────
+            Rectangle {
+                height: root.search-row-h;
+                background: Colors.surface0;
+
+                // Backdrop: lowest z-order; clicking anywhere in the row (including
+                // padding or over the placeholder) refocuses the TextInput.
+                TouchArea {
+                    mouse-cursor: text;
+                    clicked => { search-input.focus(); }
+                }
+
+                // TextInput fills the full row — no sibling placeholder competing
+                // for horizontal space, so clicking anywhere in the content area
+                // always lands on the TextInput and focuses it.
+                HorizontalLayout {
+                    padding-left:  Layout.padding-sm;
+                    padding-right: Layout.padding-sm;
+                    spacing: Layout.spacing-md;
+
+                    search-input := TextInput {
+                        horizontal-stretch: 1;
+                        single-line: true;
+                        text <=> root.query;
+                        color: Colors.text;
+                        font-size: Typography.size-base;
+                        vertical-alignment: center;
+                    }
+                }
+
+                // Placeholder overlay: declared after HLayout (higher z) so it
+                // renders on top, but Text is non-interactive so clicks fall
+                // through to the TextInput below.
+                if root.query == "": Text {
+                    x: Layout.padding-sm;
+                    y: 0;
+                    width: parent.width - Layout.padding-sm;
+                    height: parent.height;
+                    text: @tr("Search tables, columns\u{2026}");
+                    color: Colors.overlay0;
+                    font-size: Typography.size-base;
+                    vertical-alignment: center;
+                }
+
+                // Bottom separator
+                Rectangle {
+                    x: 0; y: parent.height - 1px;
+                    width: parent.width; height: 1px;
+                    background: Colors.surface1;
+                }
+            }
+
+            // ── Results list ─────────────────────────────────────────────────
+            if root.results.length > 0: Rectangle {
+                width: parent.width;
+                height: root.results-h;
+
+                results-flick := Flickable {
+                    width: parent.width;
+                    height: parent.height;
+                    viewport-height: max(self.height, root.results.length * 36px);
+                    viewport-y <=> root._results-vpy;
+
+                    VerticalLayout {
+                        width: parent.width;
+                        spacing: 0;
+
+                        for r[i] in root.results: Rectangle {
+                            height: 36px;
+                            width: root.width;
+                            background: i == root.selected-index ? Colors.sidebar-sel : transparent;
+
+                            HorizontalLayout {
+                                padding-left:  Layout.padding-sm;
+                                padding-right: Layout.padding-sm;
+                                spacing:       Layout.spacing-md;
+
+                                // Kind badge wrapper: fills the row height so the colored square
+                                // can be vertically centered inside via absolute y position.
+                                Rectangle {
+                                    width: 20px;
+
+                                    Rectangle {
+                                        x: 0;
+                                        y: (parent.height - 20px) / 2;
+                                        width: 20px; height: 20px;
+                                        border-radius: 3px;
+                                        background: r.kind == "column"
+                                            ? Colors.yellow
+                                            : r.kind == "view"
+                                                ? Colors.green
+                                                : Colors.blue;
+
+                                        if r.kind == "table": Image {
+                                            x: (parent.width  - self.width)  / 2;
+                                            y: (parent.height - self.height) / 2;
+                                            width: Layout.icon-sm; height: Layout.icon-sm;
+                                            source: Icons.table-list;
+                                            colorize: Colors.base;
+                                            image-fit: contain;
+                                        }
+                                        if r.kind == "view": Image {
+                                            x: (parent.width  - self.width)  / 2;
+                                            y: (parent.height - self.height) / 2;
+                                            width: Layout.icon-sm; height: Layout.icon-sm;
+                                            source: Icons.code;
+                                            colorize: Colors.base;
+                                            image-fit: contain;
+                                        }
+                                        if r.kind == "column": Image {
+                                            x: (parent.width  - self.width)  / 2;
+                                            y: (parent.height - self.height) / 2;
+                                            width: Layout.icon-sm; height: Layout.icon-sm;
+                                            source: Icons.columns;
+                                            colorize: Colors.base;
+                                            image-fit: contain;
+                                        }
+                                    }
+                                }
+
+                                // Label: takes all remaining horizontal space.
+                                Text {
+                                    horizontal-stretch: 1;
+                                    text: r.label;
+                                    color: Colors.text;
+                                    font-size: Typography.size-base;
+                                    vertical-alignment: center;
+                                    overflow: elide;
+                                }
+
+                                // Type detail (shown for columns)
+                                if r.detail != "": Text {
+                                    text: r.detail;
+                                    color: Colors.subtext1;
+                                    font-size: Typography.size-sm;
+                                    vertical-alignment: center;
+                                }
+                            }
+
+                            TouchArea {
+                                mouse-cursor: pointer;
+                                clicked => { root.accept(r.kind, r.label, r.table-name); }
+                            }
+                        }
+                    }
+                }
+
+                // ── Scrollbar overlay (only when content overflows) ───────
+                if results-flick.viewport-height > results-flick.height: Rectangle {
+                    property <length> overflow:   results-flick.viewport-height - results-flick.height;
+                    property <length> track-h:    parent.height - 4px;
+                    property <length> thumb-h:    clamp(results-flick.height * results-flick.height / results-flick.viewport-height, 20px, track-h);
+                    property <length> _press-my:  0px;
+                    property <length> _press-vpy: 0px;
+
+                    x: parent.width - 14px;
+                    width: 14px;
+                    height: parent.height;
+                    background: transparent;
+
+                    // Track
+                    Rectangle {
+                        x: 3px; y: 2px;
+                        width: 8px;
+                        height: parent.track-h;
+                        border-radius: 0;
+                        background: Colors.surface1;
+                    }
+
+                    // Thumb — color and opacity respond to hover/drag state of sb-ta
+                    Rectangle {
+                        x: 3px;
+                        y: clamp(
+                            (-results-flick.viewport-y) / parent.overflow * (parent.track-h - parent.thumb-h),
+                            0px,
+                            parent.track-h - parent.thumb-h
+                        ) + 2px;
+                        width: 8px;
+                        height: parent.thumb-h;
+                        border-radius: 0;
+                        background: sb-ta.pressed
+                            ? Colors.subtext0
+                            : sb-ta.has-hover ? Colors.overlay1 : Colors.overlay0;
+                        opacity: sb-ta.pressed ? 1.0 : sb-ta.has-hover ? 0.75 : 0.45;
+                    }
+
+                    // Drag area covering the full track (declared last for highest z-order)
+                    sb-ta := TouchArea {
+                        pointer-event(e) => {
+                            if (e.kind == PointerEventKind.down) {
+                                parent._press-my  = self.mouse-y;
+                                parent._press-vpy = results-flick.viewport-y;
+                            }
+                        }
+                        moved => {
+                            results-flick.viewport-y = clamp(
+                                parent._press-vpy
+                                    - (self.mouse-y - parent._press-my)
+                                    * parent.overflow
+                                    / (parent.track-h - parent.thumb-h),
+                                -parent.overflow,
+                                0px
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

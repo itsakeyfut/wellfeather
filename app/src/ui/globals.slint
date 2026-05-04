@@ -60,3 +60,10 @@ export struct SnippetEntry {
     comment: string,
     sql: string,
 }
+
+export struct MetadataSearchResult {
+    kind: string,       // "table" | "view" | "column"
+    label: string,      // "users" or "users.name"
+    detail: string,     // "" or "VARCHAR(255)"
+    table-name: string, // parent table name (= label for tables/views)
+}

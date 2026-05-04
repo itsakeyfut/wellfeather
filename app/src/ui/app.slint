@@ -7,7 +7,7 @@ import "../../assets/fonts/NotoSansJP-Bold.ttf";
 import "../../assets/fonts/JetBrainsMono-Regular.ttf";
 import "../../assets/fonts/JetBrainsMono-Bold.ttf";
 
-import { ConnectionEntry, RowData, SidebarNode, CompletionRow, TabEntry, ColumnData, SnippetEntry } from "globals.slint";
+import { ConnectionEntry, RowData, SidebarNode, CompletionRow, TabEntry, ColumnData, SnippetEntry, MetadataSearchResult } from "globals.slint";
 import { Colors, Typography, Layout, Icons, Animation } from "theme.slint";
 import { CompletionPopup } from "components/completion_popup.slint";
 import { ConnectionForm }  from "components/connection_form.slint";
@@ -28,6 +28,7 @@ import { SnippetSaveDialog }     from "components/snippet_save_dialog.slint";
 import { SnippetListDialog }     from "components/snippet_list_dialog.slint";
 import { SnippetEditDialog }     from "components/snippet_edit_dialog.slint";
 import { SnippetBar }            from "components/snippet_bar.slint";
+import { MetadataSearch }        from "components/metadata_search.slint";
 
 // UiState is defined here (root file) so that Slint generates Rust bindings for it.
 // Sub-components that need global state receive properties bound from UiState below.
@@ -324,6 +325,18 @@ export global UiState {
     callback refresh-tv-data();
     callback fetch-tv-ddl();
     callback change-tv-page-size(int);
+
+    // ── Metadata search palette (Ctrl+P) ──────────────────────────────────────
+    in-out property <bool>                   show-metadata-search:    false;
+    in-out property <string>                 metadata-search-query:   "";
+    in-out property <[MetadataSearchResult]> metadata-search-results: [];
+    in-out property <int>                    metadata-search-selected: 0;
+    /// Open the palette: checks active connection, shows status if none.
+    callback metadata-search-open();
+    /// Re-compute search results from the current query + active connection metadata.
+    callback metadata-search();
+    /// Accept a result: dispatches table-open or column-copy action.
+    callback metadata-search-select(string, string, string);  // kind, label, table-name
 }
 
 export component AppWindow inherits Window {
@@ -470,7 +483,8 @@ export component AppWindow inherits Window {
                     || UiState.show-safe-dml-confirm
                     || UiState.show-snippet-save
                     || UiState.show-snippet-list
-                    || UiState.show-snippet-edit) {
+                    || UiState.show-snippet-edit
+                    || UiState.show-metadata-search) {
                 EventResult.reject
             } else if (event.modifiers.control
                     && !event.modifiers.shift
@@ -509,6 +523,18 @@ export component AppWindow inherits Window {
                     && !event.modifiers.alt
                     && event.text == "b") {
                 UiState.show-snippet-bar = !UiState.show-snippet-bar;
+                EventResult.accept
+            } else if (event.modifiers.control
+                    && !event.modifiers.shift
+                    && !event.modifiers.alt
+                    && event.text == "p") {
+                if (!UiState.show-metadata-search) {
+                    UiState.metadata-search-open();
+                }
+                // When the palette is already open, Ctrl+P (move next) and
+                // Ctrl-release (accept) are handled inside MetadataSearch's
+                // capture-key-pressed / capture-key-released, which fire before
+                // this root key-pressed handler when search-input has focus.
                 EventResult.accept
             } else if (event.modifiers.control
                     && !event.modifiers.shift
@@ -1206,6 +1232,29 @@ export component AppWindow inherits Window {
             insert-sql(sql)  => { UiState.load-snippet-sql(sql, editor-inst.cursor-pos); }
             execute-sql(sql) => { UiState.execute-snippet-sql(sql); }
             close => { UiState.show-snippet-bar = false; }
+        }
+
+        // ── Metadata search palette (Ctrl+P) ──────────────────────────────────
+        if UiState.show-metadata-search: MetadataSearch {
+            x: sidebar-width + (main-width - self.width) / 2;
+            y: menu-bar-height + tab-bar-height + 20px;
+            query          <=> UiState.metadata-search-query;
+            results:           UiState.metadata-search-results;
+            selected-index <=> UiState.metadata-search-selected;
+            search-changed => { UiState.metadata-search(); }
+            accept(kind, label, tname) => { UiState.metadata-search-select(kind, label, tname); }
+            close => {
+                // Esc key: close palette and return focus to editor cursor position.
+                UiState.show-metadata-search  = false;
+                UiState.metadata-search-query = "";
+                editor-inst.grab-focus();
+            }
+            close-on-blur => {
+                // Focus moved elsewhere (e.g. user clicked the editor): close palette
+                // without forcing focus — the click already positioned focus naturally.
+                UiState.show-metadata-search  = false;
+                UiState.metadata-search-query = "";
+            }
         }
 
     }
