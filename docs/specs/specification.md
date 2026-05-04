@@ -636,21 +636,47 @@ DB implementation:
 
 `Ctrl+F`: find bar. `Ctrl+H`: find + replace bar. Floats over editor text (does not push content down). Features: case-sensitive toggle, regex toggle, match count (`3 / 12`), next/prev navigation, replace-one and replace-all. `Esc` or ✕ to close.
 
-### 23-5. Query Bookmarks
+### 23-5. Query Snippets
 
-Saved to `bookmarks.toml` (same directory as `config.toml`):
+Named SQL snippets saved to `wellfeather.db` (shared SQLite, `ConfigManager::app_dir()`).
 
-```toml
-[[bookmark]]
-id = "uuid"
-name = "Monthly Summary"
-folder = "Reports"
-connection_id = "uuid"   # omit for global
-sql = "SELECT ..."
-created_at = "2026-04-30T..."
+**Schema:**
+
+```sql
+CREATE TABLE snippets (
+    id            TEXT    PRIMARY KEY,
+    name          TEXT    NOT NULL,
+    comment       TEXT    NOT NULL DEFAULT '',
+    connection_id TEXT,               -- NULL = global
+    sql           TEXT    NOT NULL,
+    created_at    TEXT    NOT NULL,
+    sort_order    INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE snippet_bar_position (
+    id  INTEGER PRIMARY KEY CHECK (id = 1),  -- single-row sentinel
+    x   REAL    NOT NULL DEFAULT 0.0,
+    y   REAL    NOT NULL DEFAULT 0.0
+);
 ```
 
-Sidebar "Bookmarks" section (above connection tree). Double-click to load into editor. `Ctrl+D` or right-click "Save as bookmark" to save current SQL. Right-click: rename / delete / move to folder.
+**Saving (`Ctrl+D` / menu Snippets → Add Snippet):**
+- If text is range-selected in the editor → selected text becomes the SQL.
+- If no selection → the cursor's current line is used.
+- A save dialog opens with a pre-filled **Name** (first 40 chars of the SQL) and an optional **Comment** field.
+
+**Snippet List Modal (menu Snippets → Show Snippets):**
+- Lists all snippets with name and comment preview.
+- Inline rename and delete actions per row.
+
+**Snippet Bar (`Ctrl+B` to toggle):**
+- Lightweight floating panel — not a modal; stays open while working.
+- Draggable anywhere on screen; last position persisted in `snippet_bar_position`.
+- **Single-click**: inserts the snippet's SQL into the editor at the cursor position.
+- **Double-click**: sets the editor text to the snippet SQL and executes immediately (`Ctrl+Enter` equivalent).
+- Global snippets (no `connection_id`) always shown. Per-connection snippets shown only when that connection is active.
+
+**Sidebar:** No snippet section — access is exclusively via the menu bar and Snippet Bar.
 
 ### 23-6. Connection Color Coding
 
@@ -683,7 +709,7 @@ All tabs share the active connection. Tab SQL text, name, and order persisted in
 
 ### 24-2. Code Snippets
 
-Saved to `snippets.toml`. Sidebar "Snippets" section mirrors the Bookmarks pattern. `Ctrl+Shift+S` opens a fuzzy-search palette for quick insert at cursor position.
+Saved to `snippets.toml`. Sidebar "Snippets" section mirrors the Snippets pattern. `Ctrl+Shift+S` opens a fuzzy-search palette for quick insert at cursor position.
 
 ### 24-3. Parameterized Queries
 

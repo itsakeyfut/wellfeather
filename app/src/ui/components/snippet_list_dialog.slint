@@ -1,0 +1,288 @@
+import { SnippetEntry } from "../globals.slint";
+import { Colors, Typography, Layout, Icons, Animation } from "../theme.slint";
+
+/// Modal dialog listing all snippets. Matches the Connections modal layout.
+/// Single-click row inserts SQL; double-click executes.
+export component SnippetListDialog inherits Rectangle {
+    in property  <bool>            show:      false;
+    in property  <[SnippetEntry]> snippets: [];
+    in property  <length>          code-font-size: Typography.size-xl;
+    callback rename-snippet(string, string, string);   // id, current_comment, current_sql
+    callback delete-snippet(string);           // id
+    callback insert-sql(string);                // single-click
+    callback execute-sql(string);               // double-click
+    callback add-snippet();
+    callback close();
+    callback exited();
+
+    x: 0; y: 0;
+    background: Colors.shadow;
+
+    animate opacity {
+        duration: root.show ? Animation.enter : Animation.fast;
+        easing:   root.show ? Animation.enter-ease : Animation.exit-ease;
+    }
+    opacity: root.show ? 1 : 0;
+    changed opacity => { if (self.opacity == 0) { root.exited(); } }
+
+    fs := FocusScope {
+        x: 0; y: 0; width: parent.width; height: parent.height;
+        focus-on-click: true;
+        key-pressed(event) => {
+            if (event.text == Key.Escape) { root.close(); EventResult.accept }
+            else { EventResult.reject }
+        }
+
+        // ── Centered card ─────────────────────────────────────────────────────
+        Rectangle {
+            x: (parent.width  - self.width)  / 2;
+            y: (parent.height - self.height) / 2;
+            width:  720px;
+            height: 560px;
+            background:    Colors.surface0;
+            border-radius: Layout.radius-lg;
+            border-width:  1px;
+            border-color:  Colors.surface2;
+            drop-shadow-blur:  24px;
+            drop-shadow-color: Colors.shadow-light;
+            clip: true;
+
+            VerticalLayout {
+                // ── Header ────────────────────────────────────────────────────
+                Rectangle {
+                    height: Layout.height-dialog-row;
+                    background: Colors.mantle;
+
+                    HorizontalLayout {
+                        padding-left:  Layout.padding-2xl;
+                        padding-right: Layout.padding-sm;
+                        spacing: 0;
+
+                        Text {
+                            text: @tr("Snippets");
+                            color: Colors.text;
+                            font-size: Typography.size-xl;
+                            font-weight: 700;
+                            vertical-alignment: center;
+                            horizontal-stretch: 1;
+                        }
+
+                        close-rect := Rectangle {
+                            width: 36px;
+                            border-radius: Layout.radius-md;
+                            background: close-ta.has-hover ? Colors.surface1 : transparent;
+                            Image {
+                                x: (parent.width  - self.width)  / 2;
+                                y: (parent.height - self.height) / 2;
+                                width: Layout.icon-lg; height: Layout.icon-lg;
+                                source: Icons.close;
+                                colorize: Colors.subtext0;
+                                image-fit: contain;
+                            }
+                            close-ta := TouchArea { clicked => { root.close(); } }
+                        }
+                    }
+
+                    Rectangle {
+                        y: parent.height - 1px;
+                        height: 1px; width: parent.width;
+                        background: Colors.surface1;
+                    }
+                }
+
+                // ── Scrollable snippet list ───────────────────────────────────
+                list-scroll := Flickable {
+                    vertical-stretch: 1;
+                    interactive: true;
+                    viewport-height: max(list-content.preferred-height, self.height);
+
+                    list-content := VerticalLayout {
+                        if root.snippets.length == 0: Rectangle {
+                            height: 466px;
+                            Text {
+                                width: parent.width; height: parent.height;
+                                text: @tr("No snippets yet");
+                                color: Colors.overlay0;
+                                font-size: Typography.size-lg;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+                        }
+
+                        for bk in root.snippets: Rectangle {
+                            height: row-vl.preferred-height;
+
+                            row-ta := TouchArea {
+                                width: parent.width; height: parent.height;
+                                clicked        => { root.insert-sql(bk.sql); }
+                                double-clicked => { root.execute-sql(bk.sql); }
+                            }
+
+                            Rectangle {
+                                background: row-ta.has-hover ? Colors.hover-subtle : transparent;
+                                width: parent.width; height: parent.height;
+                            }
+
+                            row-vl := VerticalLayout {
+                                x: 0; y: 0; width: parent.width;
+                                spacing: 0;
+
+                                // ── Header: icon + comment (title) + action buttons ──
+                                HorizontalLayout {
+                                    height: Layout.height-dialog-row;
+                                    padding-left:  Layout.padding-2xl;
+                                    padding-right: Layout.padding-md;
+                                    spacing: Layout.spacing-lg;
+
+                                    VerticalLayout {
+                                        alignment: center;
+                                        Image {
+                                            width: Layout.icon-lg; height: Layout.icon-lg;
+                                            source: Icons.snippet;
+                                            colorize: Colors.blue;
+                                            image-fit: contain;
+                                        }
+                                    }
+
+                                    Text {
+                                        horizontal-stretch: 1;
+                                        text: bk.comment != "" ? bk.comment : bk.name;
+                                        color: bk.comment != "" ? Colors.text : Colors.subtext0;
+                                        font-size: Typography.size-xl;
+                                        font-weight: 700;
+                                        overflow: elide;
+                                        vertical-alignment: center;
+                                    }
+
+                                    // Edit button
+                                    VerticalLayout {
+                                        alignment: center;
+                                        width: 60px;
+                                        edit-rect := Rectangle {
+                                            height: Layout.height-btn-md;
+                                            border-radius: Layout.radius-md;
+                                            background: edit-ta.has-hover ? Colors.surface2 : Colors.surface1;
+                                            HorizontalLayout {
+                                                alignment: center;
+                                                spacing: Layout.spacing-sm;
+                                                Image {
+                                                    width: Layout.icon-sm;
+                                                    source: Icons.edit;
+                                                    colorize: Colors.text;
+                                                    image-fit: contain;
+                                                }
+                                                Text {
+                                                    text: @tr("Edit");
+                                                    color: Colors.text;
+                                                    font-size: Typography.size-md;
+                                                    vertical-alignment: center;
+                                                }
+                                            }
+                                            edit-ta := TouchArea {
+                                                clicked => { root.rename-snippet(bk.id, bk.comment, bk.sql); }
+                                            }
+                                        }
+                                    }
+
+                                    // Delete button
+                                    VerticalLayout {
+                                        alignment: center;
+                                        width: 72px;
+                                        del-rect := Rectangle {
+                                            height: Layout.height-btn-md;
+                                            border-radius: Layout.radius-md;
+                                            background: del-ta.has-hover ? Colors.red : Colors.surface1;
+                                            HorizontalLayout {
+                                                alignment: center;
+                                                spacing: Layout.spacing-sm;
+                                                Image {
+                                                    width: Layout.icon-sm;
+                                                    source: Icons.close;
+                                                    colorize: del-ta.has-hover ? Colors.base : Colors.red;
+                                                    image-fit: contain;
+                                                }
+                                                Text {
+                                                    text: @tr("Delete");
+                                                    color: del-ta.has-hover ? Colors.base : Colors.red;
+                                                    font-size: Typography.size-md;
+                                                    vertical-alignment: center;
+                                                }
+                                            }
+                                            del-ta := TouchArea {
+                                                clicked => { root.delete-snippet(bk.id); }
+                                            }
+                                        }
+                                    }
+                                }
+
+                                // ── SQL body (word-wrapped monospace) ────────────
+                                HorizontalLayout {
+                                    padding-left:  Layout.padding-2xl;
+                                    padding-right: Layout.padding-md;
+                                    padding-bottom: Layout.padding-sm;
+                                    spacing: Layout.spacing-lg;
+
+                                    Rectangle { width: Layout.icon-lg; }
+
+                                    Text {
+                                        text: bk.sql;
+                                        color: Colors.subtext1;
+                                        font-size: root.code-font-size;
+                                        font-family: "JetBrains Mono";
+                                        wrap: word-wrap;
+                                        overflow: clip;
+                                    }
+                                }
+
+                                // ── Separator ────────────────────────────────────
+                                Rectangle {
+                                    height: 1px;
+                                    background: Colors.surface1;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // ── Separator ─────────────────────────────────────────────────
+                Rectangle {
+                    height: 1px;
+                    background: Colors.surface1;
+                }
+
+                // ── Footer: Add snippet ───────────────────────────────────────
+                Rectangle {
+                    height: Layout.height-footer;
+
+                    footer-ta := TouchArea {
+                        width: parent.width; height: parent.height;
+                        clicked => { root.add-snippet(); }
+                    }
+
+                    Rectangle {
+                        background: footer-ta.has-hover ? Colors.hover-subtle : transparent;
+                        width: parent.width; height: parent.height;
+                    }
+
+                    HorizontalLayout {
+                        padding-left: Layout.padding-2xl;
+                        spacing: Layout.spacing-md;
+                        Image {
+                            width: Layout.icon-md;
+                            source: Icons.plus;
+                            colorize: Colors.blue;
+                            image-fit: contain;
+                        }
+                        Text {
+                            text: @tr("Add Snippet (Ctrl+D)");
+                            color: Colors.blue;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    init => { fs.focus(); }
+}

@@ -20,6 +20,8 @@ export component MenuBar inherits Rectangle {
     callback run-all(string);
     callback cancel-query();
     callback set-language(string);
+    callback add-snippet();
+    callback show-snippets();
     in property <string> editor-text;
     in property <string> language: "en";
     in property <bool>   has-active-connection: false;
@@ -178,6 +180,56 @@ export component MenuBar inherits Rectangle {
                         if root.has-active-connection: MenuItem {
                             text: @tr("Disconnect");
                             clicked => { root.disconnect(); }
+                        }
+                    }
+                }
+            }
+        }
+
+        // ── Snippets ─────────────────────────────────────────────────────────
+        Rectangle {
+            width: 90px;
+            background: bm-ta.has-hover ? Colors.surface1 : transparent;
+            border-radius: Layout.radius-sm;
+
+            Text {
+                text: @tr("Snippets");
+                color: Colors.text;
+                font-size:   Typography.size-base;
+                horizontal-alignment: center;
+                vertical-alignment:   center;
+            }
+            bm-ta := TouchArea {
+                clicked => { bm-popup.show(); }
+            }
+            bm-popup := PopupWindow {
+                x: 0;
+                y: root.height;
+                width:  200px;
+                height: 2 * Layout.height-menu-item + 1px;
+                close-policy: PopupClosePolicy.close-on-click;
+
+                Rectangle {
+                    width:  200px;
+                    height: 2 * Layout.height-menu-item + 1px;
+                    background:    Colors.surface0;
+                    border-radius: Layout.radius-md;
+                    border-width:  1px;
+                    border-color:  Colors.surface2;
+                    drop-shadow-blur:  8px;
+                    drop-shadow-color: Colors.shadow;
+                    clip: true;
+
+                    VerticalLayout {
+                        spacing: 0;
+                        MenuItem {
+                            text: @tr("Add Snippet (Ctrl+D)");
+                            clicked => { root.add-snippet(); }
+                        }
+                        Rectangle { height: 1px; background: Colors.surface1; }
+                        MenuItem {
+                            text: @tr("Show Snippets");
+                            clicked => { root.show-snippets(); }
                         }
                     }
                 }

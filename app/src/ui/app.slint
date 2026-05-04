@@ -7,7 +7,7 @@ import "../../assets/fonts/NotoSansJP-Bold.ttf";
 import "../../assets/fonts/JetBrainsMono-Regular.ttf";
 import "../../assets/fonts/JetBrainsMono-Bold.ttf";
 
-import { ConnectionEntry, RowData, SidebarNode, CompletionRow, TabEntry, ColumnData } from "globals.slint";
+import { ConnectionEntry, RowData, SidebarNode, CompletionRow, TabEntry, ColumnData, SnippetEntry } from "globals.slint";
 import { Colors, Typography, Layout, Icons, Animation } from "theme.slint";
 import { CompletionPopup } from "components/completion_popup.slint";
 import { ConnectionForm }  from "components/connection_form.slint";
@@ -23,7 +23,11 @@ import { AddConnectionDialog } from "components/dialogs/add_connection_dialog.sl
 import { AllRowsDialog }       from "components/dialogs/all_rows_dialog.slint";
 import { SafeDmlDialog }       from "components/dialogs/safe_dml_dialog.slint";
 import { DbManagerDialog }     from "components/dialogs/db_manager_dialog.slint";
-import { FindReplaceBar }     from "components/find_replace_bar.slint";
+import { FindReplaceBar }          from "components/find_replace_bar.slint";
+import { SnippetSaveDialog }     from "components/snippet_save_dialog.slint";
+import { SnippetListDialog }     from "components/snippet_list_dialog.slint";
+import { SnippetEditDialog }     from "components/snippet_edit_dialog.slint";
+import { SnippetBar }            from "components/snippet_bar.slint";
 
 // UiState is defined here (root file) so that Slint generates Rust bindings for it.
 // Sub-components that need global state receive properties bound from UiState below.
@@ -154,6 +158,42 @@ export global UiState {
     in-out property <bool>   conn-safe-dml: true;
     /// Active connection read_only setting (set by Rust on connect).
     in-out property <bool>   conn-read-only: false;
+
+    // ── Snippets ─────────────────────────────────────────────────────────────
+    in-out property <[SnippetEntry]> snippets: [];
+    /// Show the save dialog. Rust pre-fills name from first 40 chars of SQL.
+    callback open-snippet-save(int, int);   // anchor-pos, cursor-pos
+    /// Persist the snippet after user confirms in the save dialog.
+    callback save-snippet(string, string, string);  // name, comment, sql
+    /// Remove a snippet from the list modal.
+    callback delete-snippet-item(string);      // id
+    /// Save edits (comment + sql) for an existing snippet.
+    callback save-snippet-edit(string, string, string);   // id, comment, sql
+    /// Insert snippet SQL at the editor cursor position.
+    callback load-snippet-sql(string, int);
+    /// Set editor text to snippet SQL and execute immediately.
+    callback execute-snippet-sql(string);
+    /// Persist the Snippet Bar position after dragging.
+    callback save-snippet-bar-position(float, float);
+
+    // ── Snippet save dialog ──────────────────────────────────────────────────
+    in-out property <bool>   show-snippet-save:    false;
+    in-out property <string> snippet-save-name:    "";
+    in-out property <string> snippet-save-comment: "";
+    in-out property <string> snippet-save-sql:     "";
+
+    // ── Snippet list dialog ──────────────────────────────────────────────────
+    in-out property <bool>   show-snippet-list:    false;
+    // ── Snippet edit dialog ──────────────────────────────────────────────────
+    in-out property <bool>   show-snippet-edit:    false;
+    in-out property <string> snippet-edit-id:      "";
+    in-out property <string> snippet-edit-comment: "";
+    in-out property <string> snippet-edit-sql:     "";
+
+    // ── Snippet Bar ──────────────────────────────────────────────────────────
+    in-out property <bool>  show-snippet-bar: false;
+    in-out property <float> snippet-bar-x:    0.0;
+    in-out property <float> snippet-bar-y:    100.0;
 
     // ── Find / replace bar ────────────────────────────────────────────────────
     in-out property <bool>   show-find-bar:         false;
@@ -394,6 +434,18 @@ export component AppWindow inherits Window {
     private property <bool> _db-mgr-open:  UiState.show-db-manager;
     changed _db-mgr-open => { if (_db-mgr-open) { _db-mgr-alive = true; } }
 
+    private property <bool> _bk-save-alive:   false;
+    private property <bool> _bk-save-open:    UiState.show-snippet-save;
+    changed _bk-save-open => { if (_bk-save-open) { _bk-save-alive = true; } }
+
+    private property <bool> _bk-list-alive:   false;
+    private property <bool> _bk-list-open:    UiState.show-snippet-list;
+    changed _bk-list-open => { if (_bk-list-open) { _bk-list-alive = true; } }
+
+    private property <bool> _bk-edit-alive: false;
+    private property <bool> _bk-edit-open:  UiState.show-snippet-edit;
+    changed _bk-edit-open => { if (_bk-edit-open) { _bk-edit-alive = true; } }
+
     // ── Root key-intercept FocusScope ─────────────────────────────────────────
     // Global shortcuts live in key-pressed (bubble phase) so they fire regardless
     // of which inner FocusScope — editor, table-view, sidebar, result — has focus.
@@ -413,7 +465,10 @@ export component AppWindow inherits Window {
                     || UiState.show-test-result-popup
                     || UiState.show-add-confirm-popup
                     || UiState.show-all-rows-confirm
-                    || UiState.show-safe-dml-confirm) {
+                    || UiState.show-safe-dml-confirm
+                    || UiState.show-snippet-save
+                    || UiState.show-snippet-list
+                    || UiState.show-snippet-edit) {
                 EventResult.reject
             } else if (event.modifiers.control
                     && !event.modifiers.shift
@@ -446,6 +501,12 @@ export component AppWindow inherits Window {
                     && UiState.active-tab-kind-sql
                     && event.text == "f") {
                 UiState.show-find-bar = true;
+                EventResult.accept
+            } else if (event.modifiers.control
+                    && !event.modifiers.shift
+                    && !event.modifiers.alt
+                    && event.text == "b") {
+                UiState.show-snippet-bar = !UiState.show-snippet-bar;
                 EventResult.accept
             } else if (event.modifiers.control
                     && !event.modifiers.shift
@@ -535,6 +596,8 @@ export component AppWindow inherits Window {
             run-all(sql)   => { UiState.run-all(sql); }
             cancel-query   => { UiState.cancel-query(); }
             set-language(lang) => { UiState.set-language(lang); }
+            add-snippet   => { UiState.open-snippet-save(editor-inst.anchor-pos, editor-inst.cursor-pos); }
+            show-snippets => { UiState.show-snippet-list = true; }
         }
 
         // ── Tab bar (above the editor only) ──────────────────────────────────
@@ -555,8 +618,8 @@ export component AppWindow inherits Window {
             y: menu-bar-height;
             width:  sidebar-width;
             height: content-height + tab-bar-height;
-            tree:        UiState.sidebar-tree;
-            is-loading:  UiState.sidebar-loading;
+            tree:               UiState.sidebar-tree;
+            is-loading:         UiState.sidebar-loading;
             toggle-node(id) => { UiState.toggle-sidebar-node(id); }
             table-double-clicked(name) => { UiState.table-double-clicked(name); }
             add-connection => { UiState.open-connection-form(); }
@@ -636,6 +699,7 @@ export component AppWindow inherits Window {
                     UiState.find-sel-start = -1;
                     UiState.find-sel-end = -1;
                 }
+                open-snippet-save(a, c) => { UiState.open-snippet-save(a, c); }
                 focus-sidebar => { root.focused-pane = 0; sidebar-inst.grab-focus(); }
                 focus-result  => {
                     if (UiState.result-panel-open) {
@@ -1045,6 +1109,98 @@ export component AppWindow inherits Window {
                 UiState.open-connection-form();
             }
             exited => { _db-mgr-alive = false; }
+        }
+
+        // ── Snippet save dialog ──────────────────────────────────────────────
+        if _bk-save-alive: SnippetSaveDialog {
+            x: 0; y: 0;
+            width: root.width; height: root.height;
+            show:    UiState.show-snippet-save;
+            comment <=> UiState.snippet-save-comment;
+            save => {
+                UiState.save-snippet(
+                    UiState.snippet-save-name,
+                    UiState.snippet-save-comment,
+                    UiState.snippet-save-sql
+                );
+                UiState.show-snippet-save    = false;
+                UiState.snippet-save-comment = "";
+            }
+            cancelled => { UiState.show-snippet-save = false; }
+            exited    => { _bk-save-alive = false; }
+        }
+
+        // ── Snippet list dialog ───────────────────────────────────────────────
+        if _bk-list-alive: SnippetListDialog {
+            x: 0; y: 0;
+            width: root.width; height: root.height;
+            show:           UiState.show-snippet-list;
+            snippets:       UiState.snippets;
+            code-font-size: UiState.font-size * 1px;
+            rename-snippet(id, comment, sql) => {
+                UiState.show-snippet-list    = false;
+                UiState.snippet-edit-id      = id;
+                UiState.snippet-edit-comment = comment;
+                UiState.snippet-edit-sql     = sql;
+                UiState.show-snippet-edit    = true;
+            }
+            delete-snippet(id) => { UiState.delete-snippet-item(id); }
+            insert-sql(sql)  => {
+                UiState.show-snippet-list = false;
+                UiState.load-snippet-sql(sql, editor-inst.cursor-pos);
+            }
+            execute-sql(sql) => {
+                UiState.show-snippet-list = false;
+                UiState.execute-snippet-sql(sql);
+            }
+            add-snippet => {
+                UiState.show-snippet-list = false;
+                UiState.open-snippet-save(editor-inst.anchor-pos, editor-inst.cursor-pos);
+            }
+            close  => { UiState.show-snippet-list = false; }
+            exited => { _bk-list-alive = false; }
+        }
+
+        // ── Snippet edit dialog ──────────────────────────────────────────────
+        if _bk-edit-alive: SnippetEditDialog {
+            x: 0; y: 0;
+            width: root.width; height: root.height;
+            show:           UiState.show-snippet-edit;
+            comment        <=> UiState.snippet-edit-comment;
+            sql            <=> UiState.snippet-edit-sql;
+            code-font-size:    UiState.font-size * 1px;
+            save => {
+                UiState.save-snippet-edit(
+                    UiState.snippet-edit-id,
+                    UiState.snippet-edit-comment,
+                    UiState.snippet-edit-sql
+                );
+                UiState.show-snippet-edit = false;
+            }
+            cancelled => {
+                UiState.show-snippet-edit = false;
+                UiState.show-snippet-list = true;
+            }
+            exited    => { _bk-edit-alive = false; }
+        }
+
+        // ── Snippet Bar (draggable floating panel) ────────────────────────────
+        if UiState.show-snippet-bar: SnippetBar {
+            x: UiState.snippet-bar-x * 1px;
+            y: UiState.snippet-bar-y * 1px;
+            snippets: UiState.snippets;
+            position-changed(new-x, new-y) => {
+                UiState.snippet-bar-x = clamp(
+                    new-x, 0.0, (root.width - 460px) / 1px
+                );
+                UiState.snippet-bar-y = clamp(
+                    new-y, 0.0, (root.height - 80px) / 1px
+                );
+                UiState.save-snippet-bar-position(UiState.snippet-bar-x, UiState.snippet-bar-y);
+            }
+            insert-sql(sql)  => { UiState.load-snippet-sql(sql, editor-inst.cursor-pos); }
+            execute-sql(sql) => { UiState.execute-snippet-sql(sql); }
+            close => { UiState.show-snippet-bar = false; }
         }
 
     }

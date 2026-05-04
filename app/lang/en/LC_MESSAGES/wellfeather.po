@@ -392,3 +392,99 @@ msgstr "Find (↑↓ for history)"
 msgctxt "FindReplaceBar"
 msgid "Replace (↑↓ for history)"
 msgstr "Replace (↑↓ for history)"
+
+msgctxt "Sidebar"
+msgid "Snippets"
+msgstr "Snippets"
+
+msgctxt "SnippetEditDialog"
+msgid "Edit Snippet"
+msgstr "Edit Snippet"
+
+msgctxt "SnippetEditDialog"
+msgid "Comment"
+msgstr "Comment"
+
+msgctxt "SnippetEditDialog"
+msgid "Query"
+msgstr "Query"
+
+msgctxt "SnippetEditDialog"
+msgid "Comment (optional)"
+msgstr "Comment (optional)"
+
+msgctxt "SnippetEditDialog"
+msgid "Save"
+msgstr "Save"
+
+msgctxt "SnippetEditDialog"
+msgid "Cancel"
+msgstr "Cancel"
+
+msgctxt "MenuBar"
+msgid "Snippets"
+msgstr "Snippets"
+
+msgctxt "MenuBar"
+msgid "Add Snippet (Ctrl+D)"
+msgstr "Add Snippet (Ctrl+D)"
+
+msgctxt "MenuBar"
+msgid "Show Snippets"
+msgstr "Show Snippets"
+
+msgctxt "SnippetSaveDialog"
+msgid "Save Snippet"
+msgstr "Save Snippet"
+
+msgctxt "SnippetSaveDialog"
+msgid "What is the purpose of this query?"
+msgstr "What is the purpose of this query?"
+
+msgctxt "SnippetSaveDialog"
+msgid "Comment (optional)"
+msgstr "Comment (optional)"
+
+msgctxt "SnippetSaveDialog"
+msgid "Save"
+msgstr "Save"
+
+msgctxt "SnippetSaveDialog"
+msgid "Cancel"
+msgstr "Cancel"
+
+msgctxt "SnippetListDialog"
+msgid "Snippets"
+msgstr "Snippets"
+
+msgctxt "SnippetListDialog"
+msgid "No snippets yet"
+msgstr "No snippets yet"
+
+msgctxt "SnippetListDialog"
+msgid "Edit"
+msgstr "Edit"
+
+msgctxt "SnippetListDialog"
+msgid "Delete"
+msgstr "Delete"
+
+msgctxt "SnippetListDialog"
+msgid "Add Snippet (Ctrl+D)"
+msgstr "Add Snippet (Ctrl+D)"
+
+msgctxt "SnippetBar"
+msgid "Snippets"
+msgstr "Snippets"
+
+msgctxt "SnippetBar"
+msgid "No snippets yet"
+msgstr "No snippets yet"
+
+msgctxt "SnippetBar"
+msgid "Paste"
+msgstr "Paste"
+
+msgctxt "SnippetBar"
+msgid "Run"
+msgstr "Run"
