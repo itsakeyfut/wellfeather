@@ -42,6 +42,38 @@ fn send_cmd(tx: &mpsc::Sender<Command>, cmd: Command) {
     });
 }
 
+/// Tokenize `sql` and return Slint-typed `HighlightSpan` values for rendering.
+fn compute_highlight_spans(sql: &str) -> Vec<crate::HighlightSpan> {
+    wf_query::highlight::highlight(sql)
+        .into_iter()
+        .map(|s| crate::HighlightSpan {
+            line: s.line,
+            col: s.col,
+            text: s.text.into(),
+            kind: s.kind,
+        })
+        .collect()
+}
+
+/// Update a persistent highlight VecModel in-place to avoid destroying and
+/// recreating all overlay Text elements on every keystroke.
+fn apply_highlight_spans(
+    model: &Rc<slint::VecModel<crate::HighlightSpan>>,
+    spans: Vec<crate::HighlightSpan>,
+) {
+    let n = model.row_count();
+    let m = spans.len();
+    for (i, span) in spans.iter().enumerate().take(n.min(m)) {
+        model.set_row_data(i, span.clone());
+    }
+    for span in spans.into_iter().skip(n) {
+        model.push(span);
+    }
+    while model.row_count() > m {
+        model.remove(model.row_count() - 1);
+    }
+}
+
 /// Post a status-bar update to the UI thread from any thread.
 fn set_status(weak: slint::Weak<crate::AppWindow>, msg: String) {
     let _ = slint::invoke_from_event_loop(move || {
@@ -454,7 +486,12 @@ impl UI {
         Self::register_editor_callbacks(&window, state.clone(), tx_cmd.clone());
         Self::register_completion_callbacks(&window, tx_cmd.clone());
         Self::register_completion_accept_callback(&window);
-        Self::register_formatter_callback(&window);
+        let hl_model: Rc<slint::VecModel<crate::HighlightSpan>> =
+            Rc::new(slint::VecModel::from(vec![]));
+        window
+            .global::<crate::UiState>()
+            .set_highlight_spans(hl_model.clone().into());
+        Self::register_formatter_callback(&window, hl_model.clone());
         Self::register_export_callbacks(&window, Arc::clone(&original_data), state.clone());
         Self::register_theme_callback(&window, state.clone(), tx_cmd.clone());
         Self::register_reduce_motion_callback(&window, tx_cmd.clone());
@@ -465,6 +502,7 @@ impl UI {
             tx_cmd.clone(),
             Rc::clone(&tabs_state),
             Arc::clone(&sidebar_state),
+            hl_model.clone(),
         );
         // Set initial page size and theme on the Slint window from shared state.
         let ui_global = window.global::<crate::UiState>();
@@ -552,6 +590,16 @@ impl UI {
         Self::register_snippet_callbacks(&window, Arc::clone(&snippet_repo));
         Self::register_status_callbacks(&window, state.clone());
         Self::register_metadata_search_callbacks(&window, Arc::clone(&sidebar_state));
+        Self::register_highlight_callbacks(&window, hl_model.clone());
+
+        // Highlight the editor text that was already set from session / tab restore.
+        {
+            let initial_text = ui_global.get_editor_text().to_string();
+            if !initial_text.is_empty() {
+                let spans = compute_highlight_spans(&initial_text);
+                apply_highlight_spans(&hl_model, spans);
+            }
+        }
 
         // Load initial snippets (global only — no connection yet).
         {
@@ -1272,6 +1320,7 @@ impl UI {
         tx_cmd: mpsc::Sender<Command>,
         tabs_state: Rc<RefCell<tabs_state::TabsState>>,
         sidebar_state: Arc<Mutex<SidebarUiState>>,
+        hl_model: Rc<slint::VecModel<crate::HighlightSpan>>,
     ) {
         let ui = window.global::<crate::UiState>();
 
@@ -1309,6 +1358,7 @@ impl UI {
             let window_weak = window.as_weak();
             let tabs_state = Rc::clone(&tabs_state); // clone required: callback closure needs owned tabs_state
             let sidebar_state = Arc::clone(&sidebar_state); // clone required: callback closure needs owned sidebar_state
+            let hl_model = Rc::clone(&hl_model); // clone required: on_switch_tab closure
             ui.on_switch_tab(move |i| {
                 let i = i as usize;
                 let current_text = window_weak
@@ -1374,12 +1424,18 @@ impl UI {
                         ),
                     }
                 };
+                let spans = if kind_sql {
+                    compute_highlight_spans(&editor_text)
+                } else {
+                    vec![]
+                };
                 with_ui(&window_weak, |ui| {
                     ui.set_tabs(Rc::new(slint::VecModel::from(slint_tabs)).into());
                     ui.set_active_tab_index(active_idx);
                     ui.set_active_tab_kind_sql(kind_sql);
                     if kind_sql {
                         ui.set_editor_text(editor_text.into());
+                        apply_highlight_spans(&hl_model, spans);
                     } else {
                         ui.set_tv_table_name(tv_name.into());
                         ui.set_tv_columns(Rc::new(slint::VecModel::from(tv_cols)).into());
@@ -1393,6 +1449,7 @@ impl UI {
         {
             let window_weak = window.as_weak();
             let tabs_state = Rc::clone(&tabs_state); // clone required: callback closure needs owned tabs_state
+            let hl_model = Rc::clone(&hl_model); // clone required: on_close_tab closure
             ui.on_close_tab(move |i| {
                 let i = i as usize;
                 let current_text = window_weak
@@ -1413,12 +1470,18 @@ impl UI {
                     _ => (false, String::new()),
                 };
                 drop(ts);
+                let spans = if kind_sql {
+                    compute_highlight_spans(&editor_text)
+                } else {
+                    vec![]
+                };
                 with_ui(&window_weak, |ui| {
                     ui.set_tabs(Rc::new(slint::VecModel::from(slint_tabs)).into());
                     ui.set_active_tab_index(active_idx);
                     ui.set_active_tab_kind_sql(kind_sql);
                     if kind_sql {
                         ui.set_editor_text(editor_text.into());
+                        apply_highlight_spans(&hl_model, spans);
                     }
                 });
             });
@@ -2359,14 +2422,19 @@ impl UI {
         );
     }
 
-    fn register_formatter_callback(window: &crate::AppWindow) {
+    fn register_formatter_callback(
+        window: &crate::AppWindow,
+        hl_model: Rc<slint::VecModel<crate::HighlightSpan>>,
+    ) {
         let ui = window.global::<crate::UiState>();
         let window_weak = window.as_weak(); // clone required: on_format_sql closure
         ui.on_format_sql(move || {
             with_ui(&window_weak, |ui| {
                 let text = ui.get_editor_text().to_string();
                 let formatted = wf_query::formatter::format_sql(&text);
+                let spans = compute_highlight_spans(&formatted);
                 ui.set_editor_text(formatted.into());
+                apply_highlight_spans(&hl_model, spans);
             });
         });
     }
@@ -3418,6 +3486,19 @@ impl UI {
     fn register_status_callbacks(_window: &crate::AppWindow, _state: SharedState) {
         // Status bar text is updated by spawn_event_handler via invoke_from_event_loop.
         // No additional setup needed here.
+    }
+
+    // ── Syntax highlight callback ─────────────────────────────────────────────
+
+    fn register_highlight_callbacks(
+        window: &crate::AppWindow,
+        hl_model: Rc<slint::VecModel<crate::HighlightSpan>>,
+    ) {
+        let ui = window.global::<crate::UiState>();
+        ui.on_update_highlight(move |sql| {
+            let spans = compute_highlight_spans(&sql);
+            apply_highlight_spans(&hl_model, spans);
+        });
     }
 
     // ── Snippet callbacks ────────────────────────────────────────────────────
