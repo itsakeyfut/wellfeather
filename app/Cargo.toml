@@ -25,6 +25,7 @@ serde              = { workspace = true, features = ["derive"] }
 toml               = "1"
 rust-i18n          = "4.0.0"
 regex              = "1.12.3"
+fuzzy-matcher      = "0.3.7"
 directories        = "6.0.0"
 thiserror          = { workspace = true }
 
