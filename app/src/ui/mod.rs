@@ -209,6 +209,7 @@ use wf_config::models::{ConnectionConfig, DbTypeName, Theme};
 use crate::{
     app::{
         command::{Command, ConfigUpdate},
+        command_registry,
         event::{Event, StateEvent},
         session::config_to_db_conn,
     },
@@ -590,7 +591,12 @@ impl UI {
         Self::register_snippet_callbacks(&window, Arc::clone(&snippet_repo));
         Self::register_status_callbacks(&window, state.clone());
         Self::register_metadata_search_callbacks(&window, Arc::clone(&sidebar_state));
-        Self::register_command_palette_callbacks(&window);
+        Self::register_command_palette_callbacks(
+            &window,
+            Arc::clone(&sidebar_state),
+            tx_cmd.clone(),
+            enc_key,
+        );
         Self::register_highlight_callbacks(&window, hl_model.clone());
 
         // Highlight the editor text that was already set from session / tab restore.
@@ -3484,43 +3490,59 @@ impl UI {
 
     // ── Command palette (Ctrl+K) ──────────────────────────────────────────────
 
-    fn register_command_palette_callbacks(window: &crate::AppWindow) {
+    fn register_command_palette_callbacks(
+        window: &crate::AppWindow,
+        sidebar_state: Arc<Mutex<SidebarUiState>>,
+        tx_cmd: mpsc::Sender<Command>,
+        enc_key: [u8; 32],
+    ) {
         let ui = window.global::<crate::UiState>();
 
-        // command-palette-open: populate with all commands (unfiltered), show palette.
+        // command-palette-open: rebuild the full action list (including current
+        // connections) then show the palette.
         {
             let window_weak = window.as_weak(); // clone required: on_command_palette_open closure
+            let sidebar_state = Arc::clone(&sidebar_state); // clone required: capture for open callback
             ui.on_command_palette_open(move || {
                 let Some(w) = window_weak.upgrade() else {
                     return;
                 };
                 let ui = w.global::<crate::UiState>();
+                let conns = current_connections(&sidebar_state);
+                let actions = command_registry::build_actions(&conns);
+                let items = palette_items_to_slint(&actions);
                 ui.set_command_palette_query("".into());
                 ui.set_command_palette_selected(0);
-                let items = palette_items_to_slint(ALL_COMMANDS);
                 ui.set_command_palette_items(Rc::new(slint::VecModel::from(items)).into());
                 ui.set_show_command_palette(true);
             });
         }
 
-        // command-palette-search: fuzzy-filter the command list.
+        // command-palette-search: rebuild with current connections then fuzzy-filter.
         {
             let window_weak = window.as_weak(); // clone required: on_command_palette_search closure
+            let sidebar_state = Arc::clone(&sidebar_state); // clone required: capture for search callback
             ui.on_command_palette_search(move |query| {
                 let Some(w) = window_weak.upgrade() else {
                     return;
                 };
                 let ui = w.global::<crate::UiState>();
-                let matched = fuzzy_filter_commands(query.as_str());
+                let conns = current_connections(&sidebar_state);
+                let all = command_registry::build_actions(&conns);
+                let matched = command_registry::filter_actions(&all, query.as_str());
                 let items = palette_items_to_slint(&matched);
                 ui.set_command_palette_items(Rc::new(slint::VecModel::from(items)).into());
                 ui.set_command_palette_selected(0);
             });
         }
 
-        // command-palette-execute: close palette then dispatch the chosen command.
+        // command-palette-execute: close palette then dispatch the chosen action.
+        // "connect:<id>" entries send Command::Connect through tx_cmd; all other
+        // ids are handled by dispatch_palette_command via Slint callbacks.
         {
             let window_weak = window.as_weak(); // clone required: on_command_palette_execute closure
+            let sidebar_state = Arc::clone(&sidebar_state); // clone required: capture for execute callback
+            let tx_cmd = tx_cmd.clone(); // clone required: capture for execute callback
             ui.on_command_palette_execute(move |id| {
                 let Some(w) = window_weak.upgrade() else {
                     return;
@@ -3528,7 +3550,26 @@ impl UI {
                 let ui = w.global::<crate::UiState>();
                 ui.set_show_command_palette(false);
                 ui.set_command_palette_query("".into());
-                dispatch_palette_command(&ui, id.as_str());
+                let id_str = id.as_str();
+                if let Some(conn_id) = id_str.strip_prefix("connect:") {
+                    let conn_cfg = {
+                        let sb = sidebar_state.lock().unwrap_or_else(|p| p.into_inner());
+                        sb.config_connections
+                            .iter()
+                            .find(|c| c.id == conn_id)
+                            .cloned()
+                    };
+                    if let Some(cc) = conn_cfg {
+                        let conn = config_to_db_conn(&cc);
+                        let password = conn
+                            .password_encrypted
+                            .as_ref()
+                            .and_then(|enc| wf_config::crypto::decrypt(enc, &enc_key).ok());
+                        send_cmd(&tx_cmd, Command::Connect(conn, password));
+                    }
+                } else {
+                    dispatch_palette_command(&ui, id_str);
+                }
             });
         }
     }
@@ -4304,59 +4345,29 @@ fn parse_col_eq(query: &str) -> Option<(String, &str)> {
 // Command palette
 // ---------------------------------------------------------------------------
 
-/// Static command registry: (id, label, shortcut).
-///
-/// `label` is the English display string; it is matched by the fuzzy filter
-/// and shown in the palette.  `shortcut` is purely informational.
-const ALL_COMMANDS: &[(&str, &str, &str)] = &[
-    ("run-all", "Run All Queries", "Ctrl+Shift+Enter"),
-    ("cancel-query", "Cancel Query", "Esc"),
-    ("format-sql", "Format SQL", "Ctrl+Shift+F"),
-    ("find", "Find in Editor", "Ctrl+F"),
-    ("find-replace", "Find and Replace", "Ctrl+H"),
-    ("new-tab", "New Tab", "Ctrl+T"),
-    ("close-tab", "Close Tab", "Ctrl+W"),
-    ("next-tab", "Next Tab", "Ctrl+Tab"),
-    ("prev-tab", "Previous Tab", "Ctrl+Shift+Tab"),
-    ("toggle-snippet-bar", "Toggle Snippet Bar", "Ctrl+B"),
-    ("open-metadata-search", "Metadata Search", "Ctrl+P"),
-    ("save-snippet", "Save Snippet", "Ctrl+D"),
-    ("show-snippets", "Show Snippets", ""),
-    ("export-csv", "Export CSV", ""),
-    ("export-json", "Export JSON", ""),
-    ("export-insert-sql", "Export Insert SQL", ""),
-    ("open-db-manager", "Manage Connections", ""),
-    ("disconnect", "Disconnect", ""),
-    ("toggle-theme", "Toggle Theme", ""),
-    ("toggle-reduce-motion", "Toggle Reduce Motion", ""),
-];
-
-/// Filter `ALL_COMMANDS` by `query` using fuzzy matching.
-///
-/// Returns all commands (ordered) when `query` is empty.
-/// Otherwise ranks matches by score (highest first).
-fn fuzzy_filter_commands(query: &str) -> Vec<(&'static str, &'static str, &'static str)> {
-    if query.is_empty() {
-        return ALL_COMMANDS.to_vec();
-    }
-    use fuzzy_matcher::FuzzyMatcher as _;
-    let matcher = fuzzy_matcher::skim::SkimMatcherV2::default();
-    let mut scored: Vec<(i64, &(&str, &str, &str))> = ALL_COMMANDS
+/// Collect the current saved connections as `(id, name)` pairs without
+/// holding the sidebar lock across any other work.
+fn current_connections(sidebar_state: &Arc<Mutex<SidebarUiState>>) -> Vec<(String, String)> {
+    sidebar_state
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .config_connections
         .iter()
-        .filter_map(|cmd| matcher.fuzzy_match(cmd.1, query).map(|s| (s, cmd)))
-        .collect();
-    scored.sort_by_key(|b| std::cmp::Reverse(b.0));
-    scored.into_iter().map(|(_, cmd)| *cmd).collect()
+        .map(|c| (c.id.clone(), c.name.clone()))
+        .collect()
 }
 
-/// Convert `(id, label, shortcut)` tuples to Slint `CommandPaletteItem` values.
-fn palette_items_to_slint(items: &[(&str, &str, &str)]) -> Vec<crate::CommandPaletteItem> {
+/// Convert [`command_registry::PaletteAction`] values to Slint
+/// `CommandPaletteItem` structs for display in the palette.
+fn palette_items_to_slint(
+    items: &[command_registry::PaletteAction],
+) -> Vec<crate::CommandPaletteItem> {
     items
         .iter()
-        .map(|(id, label, shortcut)| crate::CommandPaletteItem {
-            id: (*id).into(),
-            label: (*label).into(),
-            shortcut: (*shortcut).into(),
+        .map(|a| crate::CommandPaletteItem {
+            id: a.id.as_str().into(),
+            label: a.label.as_str().into(),
+            shortcut: a.shortcut.into(),
         })
         .collect()
 }
