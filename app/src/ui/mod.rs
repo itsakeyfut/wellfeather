@@ -4345,7 +4345,7 @@ fn fuzzy_filter_commands(query: &str) -> Vec<(&'static str, &'static str, &'stat
         .iter()
         .filter_map(|cmd| matcher.fuzzy_match(cmd.1, query).map(|s| (s, cmd)))
         .collect();
-    scored.sort_by(|a, b| b.0.cmp(&a.0));
+    scored.sort_by_key(|b| std::cmp::Reverse(b.0));
     scored.into_iter().map(|(_, cmd)| *cmd).collect()
 }
 
@@ -4377,17 +4377,13 @@ fn dispatch_palette_command(ui: &crate::UiState, id: &str) {
         "format-sql" => {
             ui.invoke_format_sql();
         }
-        "find" => {
-            if ui.get_active_tab_kind_sql() {
-                ui.set_find_bar_with_replace(false);
-                ui.set_show_find_bar(true);
-            }
+        "find" if ui.get_active_tab_kind_sql() => {
+            ui.set_find_bar_with_replace(false);
+            ui.set_show_find_bar(true);
         }
-        "find-replace" => {
-            if ui.get_active_tab_kind_sql() {
-                ui.set_find_bar_with_replace(true);
-                ui.set_show_find_bar(true);
-            }
+        "find-replace" if ui.get_active_tab_kind_sql() => {
+            ui.set_find_bar_with_replace(true);
+            ui.set_show_find_bar(true);
         }
         "new-tab" => {
             ui.invoke_new_tab();
