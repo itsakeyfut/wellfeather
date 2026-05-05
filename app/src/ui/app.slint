@@ -7,7 +7,7 @@ import "../../assets/fonts/NotoSansJP-Bold.ttf";
 import "../../assets/fonts/JetBrainsMono-Regular.ttf";
 import "../../assets/fonts/JetBrainsMono-Bold.ttf";
 
-import { ConnectionEntry, RowData, SidebarNode, CompletionRow, TabEntry, ColumnData, SnippetEntry, MetadataSearchResult, HighlightSpan } from "globals.slint";
+import { ConnectionEntry, RowData, SidebarNode, CompletionRow, TabEntry, ColumnData, SnippetEntry, MetadataSearchResult, HighlightSpan, CommandPaletteItem } from "globals.slint";
 import { Colors, Typography, Layout, Icons, Animation } from "theme.slint";
 import { CompletionPopup } from "components/completion_popup.slint";
 import { ConnectionForm }  from "components/connection_form.slint";
@@ -29,6 +29,7 @@ import { SnippetListDialog }     from "components/snippet_list_dialog.slint";
 import { SnippetEditDialog }     from "components/snippet_edit_dialog.slint";
 import { SnippetBar }            from "components/snippet_bar.slint";
 import { MetadataSearch }        from "components/metadata_search.slint";
+import { CommandPalette }        from "components/command_palette.slint";
 
 // UiState is defined here (root file) so that Slint generates Rust bindings for it.
 // Sub-components that need global state receive properties bound from UiState below.
@@ -343,6 +344,18 @@ export global UiState {
     callback metadata-search();
     /// Accept a result: dispatches table-open or column-copy action.
     callback metadata-search-select(string, string, string);  // kind, label, table-name
+
+    // ── Command palette (Ctrl+K) ──────────────────────────────────────────────
+    in-out property <bool>                 show-command-palette:    false;
+    in-out property <string>               command-palette-query:   "";
+    in-out property <[CommandPaletteItem]> command-palette-items:   [];
+    in-out property <int>                  command-palette-selected: 0;
+    /// Open the palette with all commands shown.
+    callback command-palette-open();
+    /// Re-filter the command list by the current query string.
+    callback command-palette-search(string);
+    /// Execute the command identified by id.
+    callback command-palette-execute(string);
 }
 
 export component AppWindow inherits Window {
@@ -490,7 +503,8 @@ export component AppWindow inherits Window {
                     || UiState.show-snippet-save
                     || UiState.show-snippet-list
                     || UiState.show-snippet-edit
-                    || UiState.show-metadata-search) {
+                    || UiState.show-metadata-search
+                    || UiState.show-command-palette) {
                 EventResult.reject
             } else if (event.modifiers.control
                     && !event.modifiers.shift
@@ -522,6 +536,15 @@ export component AppWindow inherits Window {
                     && !event.modifiers.alt
                     && UiState.active-tab-kind-sql
                     && event.text == "f") {
+                UiState.find-bar-with-replace = false;
+                UiState.show-find-bar = true;
+                EventResult.accept
+            } else if (event.modifiers.control
+                    && !event.modifiers.shift
+                    && !event.modifiers.alt
+                    && UiState.active-tab-kind-sql
+                    && event.text == "h") {
+                UiState.find-bar-with-replace = true;
                 UiState.show-find-bar = true;
                 EventResult.accept
             } else if (event.modifiers.control
@@ -541,6 +564,14 @@ export component AppWindow inherits Window {
                 // Ctrl-release (accept) are handled inside MetadataSearch's
                 // capture-key-pressed / capture-key-released, which fire before
                 // this root key-pressed handler when search-input has focus.
+                EventResult.accept
+            } else if (event.modifiers.control
+                    && !event.modifiers.shift
+                    && !event.modifiers.alt
+                    && event.text == "k") {
+                if (!UiState.show-command-palette) {
+                    UiState.command-palette-open();
+                }
                 EventResult.accept
             } else if (event.modifiers.control
                     && !event.modifiers.shift
@@ -1264,6 +1295,29 @@ export component AppWindow inherits Window {
                 // without forcing focus — the click already positioned focus naturally.
                 UiState.show-metadata-search  = false;
                 UiState.metadata-search-query = "";
+            }
+        }
+
+        // ── Command palette (Ctrl+K) ───────────────────────────────────────────
+        if UiState.show-command-palette: CommandPalette {
+            x: sidebar-width + (main-width - self.width) / 2;
+            y: menu-bar-height + tab-bar-height + 20px;
+            query          <=> UiState.command-palette-query;
+            items:             UiState.command-palette-items;
+            selected-index <=> UiState.command-palette-selected;
+            search-changed(q) => { UiState.command-palette-search(q); }
+            execute(id) => {
+                UiState.command-palette-execute(id);
+                editor-inst.grab-focus();
+            }
+            close => {
+                UiState.show-command-palette  = false;
+                UiState.command-palette-query = "";
+                editor-inst.grab-focus();
+            }
+            close-on-blur => {
+                UiState.show-command-palette  = false;
+                UiState.command-palette-query = "";
             }
         }
 

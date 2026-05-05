@@ -68,6 +68,12 @@ export struct MetadataSearchResult {
     table-name: string, // parent table name (= label for tables/views)
 }
 
+export struct CommandPaletteItem {
+    id: string,
+    label: string,
+    shortcut: string,
+}
+
 /// One syntax-highlight span rendered as a colored Text element over the editor text.
 /// kind: 0=keyword, 1=string-literal, 2=comment, 3=number, 4=identifier (gap fill)
 export struct HighlightSpan {
