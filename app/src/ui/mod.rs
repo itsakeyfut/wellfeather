@@ -3552,6 +3552,9 @@ impl UI {
                 ui.set_command_palette_query("".into());
                 let id_str = id.as_str();
                 if let Some(conn_id) = id_str.strip_prefix("connect:") {
+                    if ui.get_active_connection_id().as_str() == conn_id {
+                        return;
+                    }
                     let conn_cfg = {
                         let sb = sidebar_state.lock().unwrap_or_else(|p| p.into_inner());
                         sb.config_connections

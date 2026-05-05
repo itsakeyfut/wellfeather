@@ -140,17 +140,15 @@ mod tests {
 
     #[test]
     fn filter_actions_should_rank_better_matches_first() {
-        let conns = vec![
-            ("a".to_string(), "format".to_string()),
-            ("b".to_string(), "Format SQL".to_string()),
-        ];
+        let conns = vec![("a".to_string(), "Connect: Staging".to_string())];
         let actions = build_actions(&conns);
-        let filtered = filter_actions(&actions, "format");
-        // The exact match "format" and "Format SQL" should both appear.
-        // Just verify the results are non-empty and in some order.
+        // "format" matches both the static "Format SQL" and potentially others.
+        let filtered = filter_actions(&actions, "format sql");
+        // "Format SQL" is an exact phrase; it must appear in results.
+        assert!(filtered.iter().any(|a| a.id == "format-sql"));
+        // All returned results scored positively — verify ordering is stable.
         assert!(!filtered.is_empty());
-        // The first result should have a higher or equal score to the last.
-        // Both contain "format" so both match; verify no panic on ordering.
-        let _ = filtered[0].id.clone();
+        // The connection entry "Connect: Staging" should NOT match "format sql".
+        assert!(!filtered.iter().any(|a| a.id == "connect:a"));
     }
 }
