@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+    "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleIdentifier</key>
+    <string>com.wellfeather.app</string>
+    <key>CFBundleName</key>
+    <string>wellfeather</string>
+    <key>CFBundleDisplayName</key>
+    <string>wellfeather</string>
+    <key>CFBundleExecutable</key>
+    <string>wellfeather</string>
+    <key>CFBundleVersion</key>
+    <string>{VERSION}</string>
+    <key>CFBundleShortVersionString</key>
+    <string>{VERSION}</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>10.15</string>
+    <key>NSHighResolutionCapable</key>
+    <true/>
+    <key>NSSupportsAutomaticGraphicsSwitching</key>
+    <true/>
+    <key>LSApplicationCategoryType</key>
+    <string>public.app-category.developer-tools</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
+    <key>NSHumanReadableCopyright</key>
+    <string>© 2026 itsakeyfut</string>
+</dict>
+</plist>

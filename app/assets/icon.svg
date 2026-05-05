@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 120 120" role="img">
+  <title>wellfeather</title>
+  <desc>Lightweight SQL editor — feather composed of data rows with one accented active row.</desc>
+
+  <!-- Background -->
+  <rect width="120" height="120" rx="26" fill="#0E2A44"/>
+
+  <!-- Shaft -->
+  <rect x="59" y="22" width="2" height="80" rx="1" fill="#5DCAA5"/>
+
+  <!-- Left data rows -->
+  <rect x="48" y="30" width="10" height="3.5" rx="1.5" fill="#5DCAA5"/>
+  <rect x="44" y="42" width="14" height="3.5" rx="1.5" fill="#5DCAA5"/>
+  <rect x="42" y="53" width="16" height="4.5" rx="2" fill="#E5B559"/>
+  <rect x="44" y="66" width="14" height="3.5" rx="1.5" fill="#5DCAA5"/>
+  <rect x="48" y="78" width="10" height="3.5" rx="1.5" fill="#5DCAA5"/>
+  <rect x="53" y="90" width="5" height="3.5" rx="1.5" fill="#5DCAA5"/>
+
+  <!-- Right data rows -->
+  <rect x="62" y="30" width="10" height="3.5" rx="1.5" fill="#5DCAA5"/>
+  <rect x="62" y="42" width="14" height="3.5" rx="1.5" fill="#5DCAA5"/>
+  <rect x="62" y="53" width="16" height="4.5" rx="2" fill="#E5B559"/>
+  <rect x="62" y="66" width="14" height="3.5" rx="1.5" fill="#5DCAA5"/>
+  <rect x="62" y="78" width="10" height="3.5" rx="1.5" fill="#5DCAA5"/>
+  <rect x="62" y="90" width="5" height="3.5" rx="1.5" fill="#5DCAA5"/>
+</svg>

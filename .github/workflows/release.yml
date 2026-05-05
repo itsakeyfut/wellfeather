@@ -9,12 +9,10 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  release-windows:
+  build-windows:
     runs-on: windows-latest
-
     permissions:
       contents: write
-
     steps:
       - uses: actions/checkout@v4
 
@@ -22,16 +20,46 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
-      - name: Build release binary
-        run: cargo build --release -p wellfeather
+      - name: Build MSIX package
+        run: cargo x package --platform windows
 
-      - name: Create archive
-        shell: pwsh
-        run: |
-          $tag = "${{ github.ref_name }}"
-          $archive = "wellfeather-${tag}-x86_64-windows.zip"
-          Compress-Archive -Path target/release/wellfeather.exe -DestinationPath $archive
-          echo "ARCHIVE=$archive" >> $env:GITHUB_ENV
+      - name: Upload MSIX artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: wellfeather-windows
+          path: packaging/output/*.msix
+
+  build-macos:
+    runs-on: macos-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build DMG package
+        run: cargo x package --platform macos
+
+      - name: Upload DMG artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: wellfeather-macos
+          path: packaging/output/*.dmg
+
+  create-release:
+    needs: [build-windows, build-macos]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts/
 
       - name: Extract release notes from CHANGELOG
         shell: bash
@@ -45,7 +73,9 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: ${{ env.ARCHIVE }}
+          files: |
+            artifacts/wellfeather-windows/*.msix
+            artifacts/wellfeather-macos/*.dmg
           draft: false
           generate_release_notes: false
           body_path: release_notes.txt
