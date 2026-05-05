@@ -9,7 +9,9 @@ use wf_db::models::QueryResult;
 
 #[derive(Default)]
 struct QueryData {
+    #[allow(dead_code)] // written via set_loading; read only in tests via is_loading()
     is_loading: bool,
+    #[allow(dead_code)] // stored for future retrieval; no public getter exposed yet
     result: Option<QueryResult>,
     cancel_token: Option<CancellationToken>,
     last_sql: Option<String>,
@@ -36,6 +38,7 @@ impl Default for QueryState {
 
 impl QueryState {
     /// Returns `true` while a query is executing.
+    #[allow(dead_code)] // used in tests; production UI uses ui.set_is_loading() directly
     pub fn is_loading(&self) -> bool {
         self.data
             .read()
@@ -44,6 +47,7 @@ impl QueryState {
     }
 
     /// Sets the loading flag.  Call with `true` at query start, `false` on finish.
+    #[allow(dead_code)] // used in tests; production UI uses ui.set_is_loading() directly
     pub fn set_loading(&self, v: bool) {
         self.data
             .write()
@@ -52,6 +56,7 @@ impl QueryState {
     }
 
     /// Stores the result of the most recently completed query.
+    #[allow(dead_code)] // used in tests; getter not yet exposed
     pub fn set_result(&self, r: QueryResult) {
         self.data.write().unwrap_or_else(|p| p.into_inner()).result = Some(r);
     }

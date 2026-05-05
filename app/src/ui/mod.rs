@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 mod tabs_state;
 
 use std::cell::RefCell;
@@ -72,6 +70,37 @@ fn apply_highlight_spans(
     while model.row_count() > m {
         model.remove(model.row_count() - 1);
     }
+}
+
+/// Acquire the sidebar lock with poison recovery, run `f`, and release.
+fn with_sidebar<R>(s: &Arc<Mutex<SidebarUiState>>, f: impl FnOnce(&SidebarUiState) -> R) -> R {
+    f(&s.lock().unwrap_or_else(|p| p.into_inner()))
+}
+
+/// Acquire the sidebar lock mutably with poison recovery, run `f`, and release.
+fn with_sidebar_mut<R>(
+    s: &Arc<Mutex<SidebarUiState>>,
+    f: impl FnOnce(&mut SidebarUiState) -> R,
+) -> R {
+    f(&mut s.lock().unwrap_or_else(|p| p.into_inner()))
+}
+
+/// Map a slice of `ConnectionConfig` entries to Slint `ConnectionEntry` values.
+/// Pass the active connection id; connections whose id matches get `is_active: true`.
+/// Pass `""` to mark all entries as inactive.
+fn config_connections_to_entries(
+    conns: &[wf_config::models::ConnectionConfig],
+    active_id: &str,
+) -> Vec<crate::ConnectionEntry> {
+    conns
+        .iter()
+        .map(|c| crate::ConnectionEntry {
+            is_active: c.id == active_id,
+            db_type: db_type_label_config(&c.db_type).into(),
+            name: c.name.clone().into(),
+            id: c.id.clone().into(),
+        })
+        .collect()
 }
 
 /// Post a status-bar update to the UI thread from any thread.
@@ -484,7 +513,7 @@ impl UI {
             Rc::clone(&tabs_state),
         );
         Self::register_connection_form_callbacks(&window, tx_cmd.clone(), enc_key);
-        Self::register_editor_callbacks(&window, state.clone(), tx_cmd.clone());
+        Self::register_editor_callbacks(&window, tx_cmd.clone());
         Self::register_completion_callbacks(&window, tx_cmd.clone());
         Self::register_completion_accept_callback(&window);
         let hl_model: Rc<slint::VecModel<crate::HighlightSpan>> =
@@ -557,28 +586,20 @@ impl UI {
         }
         // Populate the connection list and sidebar from all saved connections at startup
         // so they are visible even when no DB is running.
-        {
-            let sb = sidebar_state.lock().unwrap_or_else(|p| p.into_inner());
-            let entries: Vec<crate::ConnectionEntry> = sb
-                .config_connections
-                .iter()
-                .map(|c| crate::ConnectionEntry {
-                    is_active: false,
-                    db_type: db_type_label_config(&c.db_type).into(),
-                    name: c.name.clone().into(),
-                    id: c.id.clone().into(),
-                })
-                .collect();
-            ui_global.set_connection_list(Rc::new(slint::VecModel::from(entries)).into());
-            let nodes = build_sidebar_tree(
-                &sb.config_connections,
-                "",
-                &sb.metadata,
-                &sb.expanded,
-                &sb.read_only,
-            );
-            ui_global.set_sidebar_tree(Rc::new(slint::VecModel::from(nodes)).into());
-        }
+        let (startup_entries, startup_nodes) = with_sidebar(&sidebar_state, |sb| {
+            (
+                config_connections_to_entries(&sb.config_connections, ""),
+                build_sidebar_tree(
+                    &sb.config_connections,
+                    "",
+                    &sb.metadata,
+                    &sb.expanded,
+                    &sb.read_only,
+                ),
+            )
+        });
+        ui_global.set_connection_list(Rc::new(slint::VecModel::from(startup_entries)).into());
+        ui_global.set_sidebar_tree(Rc::new(slint::VecModel::from(startup_nodes)).into());
 
         Self::register_result_callbacks(
             &window,
@@ -589,7 +610,6 @@ impl UI {
         Self::register_language_callback(&window, tx_cmd.clone());
         Self::register_find_replace_callbacks(&window, find_history_svc);
         Self::register_snippet_callbacks(&window, Arc::clone(&snippet_repo));
-        Self::register_status_callbacks(&window, state.clone());
         Self::register_metadata_search_callbacks(&window, Arc::clone(&sidebar_state));
         Self::register_command_palette_callbacks(
             &window,
@@ -669,7 +689,6 @@ impl UI {
                             safe_dml,
                             read_only,
                             window_weak.clone(),
-                            state.clone(),
                             Arc::clone(&sidebar_state),
                         );
                         // Refresh snippets to include per-connection entries.
@@ -706,7 +725,6 @@ impl UI {
                     Event::ConnectionRemoved(id) => Self::handle_connection_removed(
                         id,
                         window_weak.clone(),
-                        state.clone(),
                         Arc::clone(&sidebar_state),
                     ),
                     Event::MetadataLoaded(conn_id, meta) => Self::handle_metadata_loaded(
@@ -764,19 +782,10 @@ impl UI {
         safe_dml: bool,
         read_only: bool,
         ww: slint::Weak<crate::AppWindow>,
-        state: SharedState,
         sidebar_state: Arc<Mutex<SidebarUiState>>,
     ) {
         // Build Send data outside invoke_from_event_loop (Rc<VecModel> is not Send).
-        let entries: Vec<crate::ConnectionEntry> = connections
-            .iter()
-            .map(|c| crate::ConnectionEntry {
-                is_active: c.id == id,
-                db_type: db_type_label_config(&c.db_type).into(),
-                name: c.name.clone().into(),
-                id: c.id.clone().into(),
-            })
-            .collect();
+        let entries = config_connections_to_entries(&connections, &id);
         let base_status = connections
             .iter()
             .find(|c| c.id == id)
@@ -790,17 +799,15 @@ impl UI {
         } else {
             base_status
         };
-        {
-            let mut sb = sidebar_state.lock().unwrap_or_else(|p| p.into_inner());
+        with_sidebar_mut(&sidebar_state, |sb| {
             sb.expanded.insert(format!("conn:{}", id));
             sb.config_connections = connections.clone();
             sb.read_only = connections
                 .iter()
                 .map(|c| (c.id.clone(), c.read_only))
                 .collect();
-        }
-        let sidebar_nodes = {
-            let sb = sidebar_state.lock().unwrap_or_else(|p| p.into_inner());
+        });
+        let sidebar_nodes = with_sidebar(&sidebar_state, |sb| {
             build_sidebar_tree(
                 &sb.config_connections,
                 &id,
@@ -808,9 +815,7 @@ impl UI {
                 &sb.expanded,
                 &sb.read_only,
             )
-        };
-        // Update AppState active connection if not already tracked (needed for read-only check).
-        let _ = state.conn.active(); // no-op; active is set by controller before event fires
+        });
         // clone required: invoke_from_event_loop closure must be 'static
         let _ = slint::invoke_from_event_loop(move || {
             with_ui(&ww, move |ui| {
@@ -846,21 +851,15 @@ impl UI {
         sidebar_state: Arc<Mutex<SidebarUiState>>,
     ) {
         // Update the cached flags and rebuild the sidebar tree outside the UI thread.
-        {
-            let mut sb = sidebar_state.lock().unwrap_or_else(|p| p.into_inner());
+        with_sidebar_mut(&sidebar_state, |sb| {
             sb.read_only.insert(id.clone(), read_only);
             if let Some(cc) = sb.config_connections.iter_mut().find(|c| c.id == id) {
                 cc.safe_dml = safe_dml;
                 cc.read_only = read_only;
             }
-        }
-        let sidebar_nodes = {
-            let sb = sidebar_state.lock().unwrap_or_else(|p| p.into_inner());
-            let active_id = state
-                .conn
-                .active()
-                .map(|c| c.id.clone())
-                .unwrap_or_default();
+        });
+        let active_id = state.conn.active().map(|c| c.id).unwrap_or_default();
+        let sidebar_nodes = with_sidebar(&sidebar_state, |sb| {
             build_sidebar_tree(
                 &sb.config_connections,
                 &active_id,
@@ -868,7 +867,7 @@ impl UI {
                 &sb.expanded,
                 &sb.read_only,
             )
-        };
+        });
         // Recompute the status bar label only when this is the active connection.
         let active_id = state
             .conn
@@ -878,15 +877,16 @@ impl UI {
         let is_active = active_id == id;
         let new_status = if is_active {
             let base = {
-                let sb = sidebar_state.lock().unwrap_or_else(|p| p.into_inner());
-                sb.config_connections
-                    .iter()
-                    .find(|c| c.id == id)
-                    .map(|c| match c.database.as_deref() {
-                        Some(db) if !db.is_empty() => format!("{} / {}", c.name, db),
-                        _ => c.name.clone(),
-                    })
-                    .unwrap_or_else(|| id.clone())
+                with_sidebar(&sidebar_state, |sb| {
+                    sb.config_connections
+                        .iter()
+                        .find(|c| c.id == id)
+                        .map(|c| match c.database.as_deref() {
+                            Some(db) if !db.is_empty() => format!("{} / {}", c.name, db),
+                            _ => c.name.clone(),
+                        })
+                        .unwrap_or_else(|| id.clone())
+                })
             };
             if read_only {
                 Some(format!("{} · {}", base, t!("status.read_only")))
@@ -1053,28 +1053,16 @@ impl UI {
     fn handle_connection_removed(
         id: String,
         ww: slint::Weak<crate::AppWindow>,
-        _state: SharedState,
         sidebar_state: Arc<Mutex<SidebarUiState>>,
     ) {
-        {
-            let mut sb = sidebar_state.lock().unwrap_or_else(|p| p.into_inner());
+        with_sidebar_mut(&sidebar_state, |sb| {
             sb.config_connections.retain(|c| c.id != id);
             sb.read_only.remove(&id);
             sb.metadata.remove(&id);
             sb.expanded.remove(&format!("conn:{}", id));
-        }
-        let (entries, sidebar_nodes) = {
-            let sb = sidebar_state.lock().unwrap_or_else(|p| p.into_inner());
-            let e = sb
-                .config_connections
-                .iter()
-                .map(|c| crate::ConnectionEntry {
-                    is_active: false,
-                    db_type: db_type_label_config(&c.db_type).into(),
-                    name: c.name.clone().into(),
-                    id: c.id.clone().into(),
-                })
-                .collect::<Vec<_>>();
+        });
+        let (entries, sidebar_nodes) = with_sidebar(&sidebar_state, |sb| {
+            let e = config_connections_to_entries(&sb.config_connections, "");
             let nodes = build_sidebar_tree(
                 &sb.config_connections,
                 "",
@@ -1083,7 +1071,7 @@ impl UI {
                 &sb.read_only,
             );
             (e, nodes)
-        };
+        });
         // clone required: invoke_from_event_loop closure must be 'static
         let _ = slint::invoke_from_event_loop(move || {
             with_ui(&ww, move |ui| {
@@ -1106,17 +1094,11 @@ impl UI {
         state: SharedState,
         sidebar_state: Arc<Mutex<SidebarUiState>>,
     ) {
-        {
-            let mut sb = sidebar_state.lock().unwrap_or_else(|p| p.into_inner());
+        with_sidebar_mut(&sidebar_state, |sb| {
             sb.metadata.insert(conn_id, meta);
-        }
-        let nodes = {
-            let sb = sidebar_state.lock().unwrap_or_else(|p| p.into_inner());
-            let active_id = state
-                .conn
-                .active()
-                .map(|c| c.id.clone())
-                .unwrap_or_default();
+        });
+        let active_id = state.conn.active().map(|c| c.id).unwrap_or_default();
+        let nodes = with_sidebar(&sidebar_state, |sb| {
             build_sidebar_tree(
                 &sb.config_connections,
                 &active_id,
@@ -1124,7 +1106,7 @@ impl UI {
                 &sb.expanded,
                 &sb.read_only,
             )
-        };
+        });
         // clone required: invoke_from_event_loop closure must be 'static
         let _ = slint::invoke_from_event_loop(move || {
             with_ui(&ww, move |ui| {
@@ -1398,18 +1380,18 @@ impl UI {
                             table_name,
                             sub_tab,
                         }) => {
-                            let sb = sidebar_state.lock().unwrap_or_else(|p| p.into_inner());
-                            let cols = sb
-                                .metadata
-                                .get(&conn_id)
-                                .and_then(|meta| {
-                                    meta.tables
-                                        .iter()
-                                        .chain(meta.views.iter())
-                                        .find(|t| t.name == table_name)
-                                        .map(|ti| columns_to_slint(&ti.columns))
-                                })
-                                .unwrap_or_default();
+                            let cols = with_sidebar(&sidebar_state, |sb| {
+                                sb.metadata
+                                    .get(&conn_id)
+                                    .and_then(|meta| {
+                                        meta.tables
+                                            .iter()
+                                            .chain(meta.views.iter())
+                                            .find(|t| t.name == table_name)
+                                            .map(|ti| columns_to_slint(&ti.columns))
+                                    })
+                                    .unwrap_or_default()
+                            });
                             (
                                 slint_tabs,
                                 active_idx,
@@ -1573,8 +1555,7 @@ impl UI {
                 if tab_id.is_empty() {
                     return;
                 }
-                let kind = {
-                    let sb = sidebar_state.lock().unwrap_or_else(|p| p.into_inner());
+                let kind = with_sidebar(&sidebar_state, |sb| {
                     if let Some(meta) = sb.metadata.get(&conn_id) {
                         if meta.views.iter().any(|v| v.name == tv_table_name) {
                             "view".to_string()
@@ -1584,7 +1565,7 @@ impl UI {
                     } else {
                         "table".to_string()
                     }
-                };
+                });
                 with_ui(&window_weak, |ui| {
                     ui.set_tv_ddl("".into());
                     ui.set_tv_ddl_loading(true);
@@ -1713,10 +1694,9 @@ impl UI {
             ui_state.on_edit_connection(move |id| {
                 let id = id.to_string();
                 // Look up from config_connections — works even when the DB is not running.
-                let conn_cfg = {
-                    let sb = sidebar_state.lock().unwrap_or_else(|p| p.into_inner());
+                let conn_cfg = with_sidebar(&sidebar_state, |sb| {
                     sb.config_connections.iter().find(|c| c.id == id).cloned()
-                };
+                });
                 let Some(conn_cfg) = conn_cfg else {
                     return;
                 };
@@ -1806,13 +1786,12 @@ impl UI {
                         .map(|c| c.id.clone())
                         .unwrap_or_default();
                     if conn_id != active_id {
-                        let conn_cfg = {
-                            let sb = sidebar_state.lock().unwrap_or_else(|p| p.into_inner());
+                        let conn_cfg = with_sidebar(&sidebar_state, |sb| {
                             sb.config_connections
                                 .iter()
                                 .find(|c| c.id == conn_id)
                                 .cloned()
-                        };
+                        });
                         if let Some(cc) = conn_cfg {
                             let conn = config_to_db_conn(&cc);
                             let password = conn
@@ -1826,17 +1805,15 @@ impl UI {
                     }
                 }
                 // Toggle expanded state (active connection and category nodes).
-                {
-                    let mut sb = sidebar_state.lock().unwrap_or_else(|p| p.into_inner());
+                with_sidebar_mut(&sidebar_state, |sb| {
                     if sb.expanded.contains(&id) {
                         sb.expanded.remove(&id);
                     } else {
                         sb.expanded.insert(id.clone());
                     }
-                }
+                });
                 // Rebuild and push the updated tree (already on UI thread)
-                let nodes = {
-                    let sb = sidebar_state.lock().unwrap_or_else(|p| p.into_inner());
+                let nodes = with_sidebar(&sidebar_state, |sb| {
                     let active_id = state
                         .conn
                         .active()
@@ -1849,7 +1826,7 @@ impl UI {
                         &sb.expanded,
                         &sb.read_only,
                     )
-                };
+                });
                 with_ui(&window_weak, |ui| {
                     let model = ui.get_sidebar_tree();
                     if model.row_count() == nodes.len() {
@@ -1880,10 +1857,9 @@ impl UI {
                 if id == active_id {
                     return;
                 }
-                let conn_cfg = {
-                    let sb = sidebar_state.lock().unwrap_or_else(|p| p.into_inner());
+                let conn_cfg = with_sidebar(&sidebar_state, |sb| {
                     sb.config_connections.iter().find(|c| c.id == id).cloned()
-                };
+                });
                 if let Some(cc) = conn_cfg {
                     let conn = config_to_db_conn(&cc);
                     let password = conn
@@ -1921,15 +1897,13 @@ impl UI {
                 state.conn.clear_active();
 
                 // Collapse the node and drop metadata for the disconnected connection.
-                {
-                    let mut sb = sidebar_state.lock().unwrap_or_else(|p| p.into_inner());
+                with_sidebar_mut(&sidebar_state, |sb| {
                     sb.expanded.remove(&format!("conn:{}", id));
                     sb.metadata.remove(&id);
-                }
+                });
 
                 // Rebuild tree (no active connection, no expanded node for id).
-                let (nodes, entries) = {
-                    let sb = sidebar_state.lock().unwrap_or_else(|p| p.into_inner());
+                let (nodes, entries) = with_sidebar(&sidebar_state, |sb| {
                     let nodes = build_sidebar_tree(
                         &sb.config_connections,
                         "",
@@ -1937,18 +1911,9 @@ impl UI {
                         &sb.expanded,
                         &sb.read_only,
                     );
-                    let entries = sb
-                        .config_connections
-                        .iter()
-                        .map(|c| crate::ConnectionEntry {
-                            is_active: false,
-                            db_type: db_type_label_config(&c.db_type).into(),
-                            name: c.name.clone().into(),
-                            id: c.id.clone().into(),
-                        })
-                        .collect::<Vec<_>>();
+                    let entries = config_connections_to_entries(&sb.config_connections, "");
                     (nodes, entries)
-                };
+                });
 
                 // Already on the UI thread — update directly.
                 with_ui(&window_weak, move |ui| {
@@ -1996,8 +1961,7 @@ impl UI {
                     let active_idx = ts.active_index as i32;
                     (tab_id, is_new, slint_tabs, active_idx, tv_sub_tab)
                 };
-                let tv_cols = {
-                    let sb = sidebar_state.lock().unwrap_or_else(|p| p.into_inner());
+                let tv_cols = with_sidebar(&sidebar_state, |sb| {
                     sb.metadata
                         .get(&conn_id)
                         .and_then(|meta| {
@@ -2008,7 +1972,7 @@ impl UI {
                                 .map(|ti| columns_to_slint(&ti.columns))
                         })
                         .unwrap_or_default()
-                };
+                });
                 with_ui(&window_weak, |ui| {
                     ui.set_tabs(Rc::new(slint::VecModel::from(slint_tabs)).into());
                     ui.set_active_tab_index(active_idx);
@@ -2168,11 +2132,7 @@ impl UI {
 
     // ── Editor callbacks (TODO) ───────────────────────────────────────────────
 
-    fn register_editor_callbacks(
-        window: &crate::AppWindow,
-        _state: SharedState,
-        tx_cmd: mpsc::Sender<Command>,
-    ) {
+    fn register_editor_callbacks(window: &crate::AppWindow, tx_cmd: mpsc::Sender<Command>) {
         let ui = window.global::<crate::UiState>();
 
         // Pure callback: count newlines + 1 to derive the line count for the
@@ -3441,13 +3401,13 @@ impl UI {
                 let ui = w.global::<crate::UiState>();
                 let query = ui.get_metadata_search_query().to_string();
                 let active_id = ui.get_active_connection_id().to_string();
-                let sb = sidebar_state.lock().unwrap_or_else(|p| p.into_inner());
-                let items = if let Some(meta) = sb.metadata.get(&active_id) {
-                    search_metadata(&query, meta)
-                } else {
-                    vec![]
-                };
-                drop(sb);
+                let items = with_sidebar(&sidebar_state, |sb| {
+                    if let Some(meta) = sb.metadata.get(&active_id) {
+                        search_metadata(&query, meta)
+                    } else {
+                        vec![]
+                    }
+                });
                 let slint_items = items_to_slint(items);
                 ui.set_metadata_search_results(Rc::new(slint::VecModel::from(slint_items)).into());
                 ui.set_metadata_search_selected(0);
@@ -3555,13 +3515,12 @@ impl UI {
                     if ui.get_active_connection_id().as_str() == conn_id {
                         return;
                     }
-                    let conn_cfg = {
-                        let sb = sidebar_state.lock().unwrap_or_else(|p| p.into_inner());
+                    let conn_cfg = with_sidebar(&sidebar_state, |sb| {
                         sb.config_connections
                             .iter()
                             .find(|c| c.id == conn_id)
                             .cloned()
-                    };
+                    });
                     if let Some(cc) = conn_cfg {
                         let conn = config_to_db_conn(&cc);
                         let password = conn
@@ -3575,13 +3534,6 @@ impl UI {
                 }
             });
         }
-    }
-
-    // ── Status callbacks (TODO) ───────────────────────────────────────────────
-
-    fn register_status_callbacks(_window: &crate::AppWindow, _state: SharedState) {
-        // Status bar text is updated by spawn_event_handler via invoke_from_event_loop.
-        // No additional setup needed here.
     }
 
     // ── Syntax highlight callback ─────────────────────────────────────────────
@@ -3795,14 +3747,6 @@ async fn do_refresh_snippets(
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-
-fn db_type_label(dt: &DbType) -> &'static str {
-    match dt {
-        DbType::PostgreSQL => "PostgreSQL",
-        DbType::MySQL => "MySQL",
-        DbType::SQLite => "SQLite",
-    }
-}
 
 fn db_type_label_config(dt: &DbTypeName) -> &'static str {
     match dt {
