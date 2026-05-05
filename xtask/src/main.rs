@@ -20,9 +20,9 @@ enum Commands {
     PreCommit,
     /// Install git pre-commit hook
     InstallHooks,
-    /// Build distribution packages (Windows MSIX, macOS DMG)
+    /// Build distribution packages (Windows MSIX, macOS DMG, Linux AppImage)
     Package {
-        /// Target platform: windows, macos, or all (default: current platform)
+        /// Target platform: windows, macos, linux, or all (default: current platform)
         #[arg(long, default_value = "current")]
         platform: String,
         /// Enable code signing
