@@ -4,6 +4,8 @@ use colored::Colorize;
 use std::process::{Command, Stdio};
 use std::time::Instant;
 
+mod package;
+
 #[derive(Parser)]
 #[command(name = "x")]
 #[command(about = "Development automation for wellfeather")]
@@ -18,6 +20,33 @@ enum Commands {
     PreCommit,
     /// Install git pre-commit hook
     InstallHooks,
+    /// Build distribution packages (Windows MSIX, macOS DMG)
+    Package {
+        /// Target platform: windows, macos, or all (default: current platform)
+        #[arg(long, default_value = "current")]
+        platform: String,
+        /// Enable code signing
+        #[arg(long)]
+        sign: bool,
+        /// Windows: path to .pfx certificate file
+        #[arg(long)]
+        certificate_path: Option<String>,
+        /// Windows: .pfx certificate password
+        #[arg(long)]
+        certificate_password: Option<String>,
+        /// macOS: certificate identity for codesign
+        #[arg(long)]
+        certificate_name: Option<String>,
+        /// macOS: submit for Apple Notarization after signing
+        #[arg(long)]
+        notarize: bool,
+        /// macOS: Apple ID for notarization
+        #[arg(long)]
+        apple_id: Option<String>,
+        /// macOS: Team ID for notarization
+        #[arg(long)]
+        team_id: Option<String>,
+    },
 }
 
 fn main() -> Result<()> {
@@ -26,6 +55,25 @@ fn main() -> Result<()> {
     match cli.command {
         Commands::PreCommit => run_pre_commit(),
         Commands::InstallHooks => install_hooks(),
+        Commands::Package {
+            platform,
+            sign,
+            certificate_path,
+            certificate_password,
+            certificate_name,
+            notarize,
+            apple_id,
+            team_id,
+        } => package::run_package(&package::PackageConfig {
+            platform,
+            sign,
+            certificate_path,
+            certificate_password,
+            certificate_name,
+            notarize,
+            apple_id,
+            team_id,
+        }),
     }
 }
 

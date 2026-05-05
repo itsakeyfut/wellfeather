@@ -8,3 +8,4 @@ publish = false
 clap = { version = "4", features = ["derive"] }
 anyhow = "1"
 colored = "2"
+toml = "1"
