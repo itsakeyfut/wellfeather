@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 
 pub mod command;
+pub mod command_registry;
 pub mod controller;
 pub mod event;
 pub mod localized_message;
