@@ -25,6 +25,11 @@ serde              = { workspace = true, features = ["derive"] }
 toml               = "1"
 rust-i18n          = "4.0.0"
 regex              = "1.12.3"
+directories        = "6.0.0"
+thiserror          = { workspace = true }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { version = "0.62.2", features = ["Win32_UI_HiDpi"] }
 
 [dev-dependencies]
 tempfile = "3.27.0"

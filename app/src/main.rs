@@ -19,19 +19,24 @@ slint::include_modules!();
 rust_i18n::i18n!("locales", fallback = "en");
 
 mod app;
+mod platform;
 mod state;
 mod ui;
 
 use std::sync::Arc;
 
+use anyhow::Context as _;
 use app::{
     controller::AppController,
     session::{SessionManager, config_to_db_conn},
 };
+use platform::{CurrentPlatform, Platform};
 use state::AppState;
 use ui::UI;
 use wf_completion::cache::MetadataCache;
-use wf_config::{ConnectionRepository, SnippetRepository, crypto, manager::ConfigManager};
+use wf_config::{
+    ConnectionRepository, SnippetRepository, crypto, manager::ConfigManager, models::Theme,
+};
 use wf_db::service::DbService;
 use wf_history::{
     find_history::FindHistoryService, service::HistoryService, session::SessionService,
@@ -39,9 +44,14 @@ use wf_history::{
 
 /// Entry point. Runs on the main OS thread; the Slint event loop must stay here.
 fn main() -> anyhow::Result<()> {
+    // Initialise tracing first so that enable_dpi_awareness() can log warnings.
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
+
+    // Enable per-monitor DPI awareness before any window is created (Windows only;
+    // no-op on macOS and Linux where scaling is handled by the OS / desktop environment).
+    platform::enable_dpi_awareness();
 
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -51,8 +61,30 @@ fn main() -> anyhow::Result<()> {
     // an explicit runtime handle.
     let _guard = runtime.enter();
 
+    // Resolve OS-specific directories once at startup and ensure they exist.
+    // The SQLite database is intentionally kept in config_dir (same as ConfigManager::app_dir())
+    // for backward compatibility with existing installations.
+    let config_dir = CurrentPlatform::get_config_dir()
+        .context("cannot resolve OS application config directory")?;
+    let data_dir =
+        CurrentPlatform::get_data_dir().context("cannot resolve OS application data directory")?;
+    let cache_dir = CurrentPlatform::get_cache_dir()
+        .context("cannot resolve OS application cache directory")?;
+    std::fs::create_dir_all(&config_dir).context("cannot create application config directory")?;
+    std::fs::create_dir_all(&data_dir).context("cannot create application data directory")?;
+    std::fs::create_dir_all(&cache_dir).context("cannot create application cache directory")?;
+    tracing::debug!(
+        config = %config_dir.display(),
+        data   = %data_dir.display(),
+        cache  = %cache_dir.display(),
+        "application directories resolved"
+    );
+
+    // Detect whether this is a first launch (no saved config yet) for dark-mode auto-detection.
+    let config_file_exists = config_dir.join("config.toml").exists();
+
     // Load (or generate) the AES-256-GCM key used to encrypt stored passwords.
-    let enc_key = crypto::load_or_create_key(&ConfigManager::app_dir())?;
+    let enc_key = crypto::load_or_create_key(&config_dir)?;
 
     let state = Arc::new(AppState::new());
 
@@ -64,7 +96,16 @@ fn main() -> anyhow::Result<()> {
         state
             .ui
             .set_page_size(u32::from(config.editor.page_size) as usize);
-        state.ui.set_theme(config.appearance.theme);
+        // On first launch (no saved config): auto-detect the system dark/light mode.
+        // On subsequent launches: respect the theme the user explicitly chose and saved.
+        let theme = if config_file_exists {
+            config.appearance.theme
+        } else if CurrentPlatform::is_dark_mode_enabled() {
+            Theme::Dark
+        } else {
+            Theme::Light
+        };
+        state.ui.set_theme(theme);
     }
 
     // Open the single shared SQLite database for all persistence needs.
@@ -72,7 +113,7 @@ fn main() -> anyhow::Result<()> {
         sqlx::sqlite::SqlitePoolOptions::new()
             .connect_with(
                 sqlx::sqlite::SqliteConnectOptions::new()
-                    .filename(ConfigManager::app_dir().join("wellfeather.db"))
+                    .filename(config_dir.join("wellfeather.db"))
                     .create_if_missing(true)
                     .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal),
             )
