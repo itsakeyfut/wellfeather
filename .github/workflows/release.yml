@@ -20,6 +20,9 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
+      - name: Install ImageMagick
+        run: choco install imagemagick -y --no-progress
+
       - name: Build MSIX package
         run: cargo x package --platform windows
 
