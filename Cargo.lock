@@ -6765,6 +6765,7 @@ dependencies = [
  "anyhow",
  "arboard",
  "chrono",
+ "directories",
  "regex",
  "rfd",
  "rust-i18n",
@@ -6773,6 +6774,7 @@ dependencies = [
  "slint-build",
  "sqlx",
  "tempfile",
+ "thiserror 2.0.18",
  "tokio",
  "tokio-util",
  "toml 1.1.2+spec-1.1.0",
@@ -6784,6 +6786,7 @@ dependencies = [
  "wf-db",
  "wf-history",
  "wf-query",
+ "windows 0.62.2",
 ]
 
 [[package]]
