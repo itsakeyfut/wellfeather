@@ -3,6 +3,7 @@ use colored::Colorize;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
+pub mod linux;
 pub mod macos;
 pub mod windows;
 
@@ -25,6 +26,8 @@ impl PackageConfig {
                     "windows"
                 } else if cfg!(target_os = "macos") {
                     "macos"
+                } else if cfg!(target_os = "linux") {
+                    "linux"
                 } else {
                     "all"
                 }
@@ -56,11 +59,13 @@ pub fn run_package(config: &PackageConfig) -> Result<()> {
     match platform {
         "windows" => windows::build_msix(config)?,
         "macos" => macos::build_dmg(config)?,
+        "linux" => linux::build_appimage(config)?,
         "all" => {
             windows::build_msix(config)?;
             macos::build_dmg(config)?;
+            linux::build_appimage(config)?;
         }
-        other => anyhow::bail!("Unknown platform: {other}. Use: windows, macos, or all"),
+        other => anyhow::bail!("Unknown platform: {other}. Use: windows, macos, linux, or all"),
     }
 
     Ok(())

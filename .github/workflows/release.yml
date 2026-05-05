@@ -12,7 +12,7 @@ jobs:
   build-windows:
     runs-on: windows-latest
     permissions:
-      contents: write
+      contents: read
     steps:
       - uses: actions/checkout@v4
 
@@ -35,7 +35,7 @@ jobs:
   build-macos:
     runs-on: macos-latest
     permissions:
-      contents: write
+      contents: read
     steps:
       - uses: actions/checkout@v4
 
@@ -52,8 +52,37 @@ jobs:
           name: wellfeather-macos
           path: packaging/output/*.dmg
 
+  build-linux:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y imagemagick
+          wget -q -O /tmp/appimagetool \
+            https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage
+          chmod +x /tmp/appimagetool
+          echo "/tmp" >> $GITHUB_PATH
+
+      - name: Build AppImage
+        run: ARCH=x86_64 APPIMAGE_EXTRACT_AND_RUN=1 cargo x package --platform linux
+
+      - name: Upload AppImage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: wellfeather-linux
+          path: packaging/output/*.AppImage
+
   create-release:
-    needs: [build-windows, build-macos]
+    needs: [build-windows, build-macos, build-linux]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -79,6 +108,7 @@ jobs:
           files: |
             artifacts/wellfeather-windows/*.msix
             artifacts/wellfeather-macos/*.dmg
+            artifacts/wellfeather-linux/*.AppImage
           draft: false
           generate_release_notes: false
           body_path: release_notes.txt

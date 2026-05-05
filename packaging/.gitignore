@@ -3,3 +3,4 @@ temp/
 *.msix
 *.dmg
 *.app
+*.AppImage

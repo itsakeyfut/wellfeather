@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=wellfeather
+Comment=A lightweight, keyboard-centric SQL client
+Exec=wellfeather
+Icon=wellfeather
+Categories=Development;Database;
+Terminal=false
+StartupNotify=true
