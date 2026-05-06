@@ -161,6 +161,17 @@ impl ConnectionRepository {
         Ok(())
     }
 
+    /// Set `last_used_at` to an explicit Unix timestamp (for deterministic tests).
+    #[cfg(test)]
+    async fn touch_last_used_at(&self, id: &str, ts: i64) -> anyhow::Result<()> {
+        sqlx::query("UPDATE connections SET last_used_at = ? WHERE id = ?")
+            .bind(ts)
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
     async fn next_sort_order(&self) -> anyhow::Result<i64> {
         let max: Option<i64> = sqlx::query_scalar("SELECT MAX(sort_order) FROM connections")
             .fetch_one(&self.pool)
@@ -279,10 +290,8 @@ mod tests {
         let repo = ConnectionRepository::open_memory().await.unwrap();
         repo.upsert(&make_conn("c1")).await.unwrap();
         repo.upsert(&make_conn("c2")).await.unwrap();
-        repo.touch_last_used("c1").await.unwrap();
-        // small delay so the unixepoch() values differ
-        tokio::time::sleep(std::time::Duration::from_millis(1100)).await;
-        repo.touch_last_used("c2").await.unwrap();
+        repo.touch_last_used_at("c1", 1000).await.unwrap();
+        repo.touch_last_used_at("c2", 2000).await.unwrap();
         let last = repo.last_used().await.unwrap().unwrap();
         assert_eq!(last.id, "c2");
     }
