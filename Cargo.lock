@@ -6918,6 +6918,7 @@ version = "0.8.0"
 dependencies = [
  "anyhow",
  "chrono",
+ "percent-encoding",
  "serde",
  "sqlx",
  "thiserror 2.0.18",
