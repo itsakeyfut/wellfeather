@@ -1,9 +1,7 @@
-use std::time::Instant;
-
 use sqlx::{Column, Row, SqlitePool, TypeInfo};
 
 use crate::error::DbError;
-use crate::models::{ColumnInfo, DbMetadata, QueryResult, TableInfo};
+use crate::models::{ColumnInfo, DbMetadata, TableInfo};
 
 /// Connect to a SQLite database at `url`.
 ///
@@ -18,60 +16,14 @@ pub async fn connect(url: &str) -> Result<SqlitePool, DbError> {
         .map_err(|e| DbError::ConnectionFailed(e.to_string()))
 }
 
-/// Execute `sql` against `pool` and return a [`QueryResult`].
-///
-/// - **SELECT / row-returning statements**: columns and rows are populated;
-///   `row_count` equals the number of returned rows.
-/// - **DML / DDL statements**: rows are empty; `row_count` equals
-///   `rows_affected()` reported by SQLite.
-/// - **NULL values** map to `None` in every cell.
-/// - `execution_time_ms` is measured with [`Instant`].
-pub async fn execute(pool: &SqlitePool, sql: &str) -> Result<QueryResult, DbError> {
-    let started = Instant::now();
-
-    if super::is_row_returning(sql) {
-        let rows = sqlx::query(sql)
-            .fetch_all(pool)
-            .await
-            .map_err(DbError::from)?;
-
-        let columns: Vec<String> = rows
-            .first()
-            .map(|r| r.columns().iter().map(|c| c.name().to_string()).collect())
-            .unwrap_or_default();
-
-        let data: Vec<Vec<Option<String>>> = rows
-            .iter()
-            .map(|row| (0..row.len()).map(|i| cell_to_string(row, i)).collect())
-            .collect();
-
-        let row_count = data.len();
-        Ok(QueryResult {
-            columns,
-            rows: data,
-            row_count,
-            execution_time_ms: started.elapsed().as_millis(),
-        })
-    } else {
-        let result = sqlx::query(sql)
-            .execute(pool)
-            .await
-            .map_err(DbError::from)?;
-
-        Ok(QueryResult {
-            columns: vec![],
-            rows: vec![],
-            row_count: result.rows_affected() as usize,
-            execution_time_ms: started.elapsed().as_millis(),
-        })
-    }
-}
+super::impl_execute!(SqlitePool);
 
 /// Fetch schema metadata from the SQLite database:
 /// tables, views, indexes, and per-table columns.
 /// SQLite has no stored procedures — that field is always empty.
 pub async fn fetch_metadata(pool: &SqlitePool) -> Result<DbMetadata, DbError> {
     use sqlx::Row as _;
+    let mut acc = super::MetadataAccumulator::new();
 
     // ── tables ────────────────────────────────────────────────────────────────
     let table_rows = sqlx::query(
@@ -83,11 +35,10 @@ pub async fn fetch_metadata(pool: &SqlitePool) -> Result<DbMetadata, DbError> {
     .await
     .map_err(DbError::from)?;
 
-    let mut tables = Vec::new();
     for row in &table_rows {
         let name: String = row.get("name");
         let columns = pragma_columns(pool, &name).await?;
-        tables.push(TableInfo { name, columns });
+        acc.push_table(TableInfo { name, columns });
     }
 
     // ── views ─────────────────────────────────────────────────────────────────
@@ -96,11 +47,10 @@ pub async fn fetch_metadata(pool: &SqlitePool) -> Result<DbMetadata, DbError> {
         .await
         .map_err(DbError::from)?;
 
-    let mut views = Vec::new();
     for row in &view_rows {
         let name: String = row.get("name");
         let columns = pragma_columns(pool, &name).await?;
-        views.push(TableInfo { name, columns });
+        acc.push_view(TableInfo { name, columns });
     }
 
     // ── indexes ───────────────────────────────────────────────────────────────
@@ -113,14 +63,9 @@ pub async fn fetch_metadata(pool: &SqlitePool) -> Result<DbMetadata, DbError> {
     .await
     .map_err(DbError::from)?;
 
-    let indexes: Vec<String> = index_rows.iter().map(|r| r.get("name")).collect();
+    acc.set_indexes(index_rows.iter().map(|r| r.get("name")).collect());
 
-    Ok(DbMetadata {
-        tables,
-        views,
-        stored_procs: vec![],
-        indexes,
-    })
+    Ok(acc.build())
 }
 
 /// Fetch the DDL `CREATE` statement for `name` from `sqlite_master`.

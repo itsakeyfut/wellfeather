@@ -1,11 +1,7 @@
-use std::time::Instant;
-
 use sqlx::{Column, MySqlPool, Row, TypeInfo};
 
-use std::collections::HashMap;
-
 use crate::error::DbError;
-use crate::models::{ColumnInfo, DbMetadata, QueryResult, TableInfo};
+use crate::models::{ColumnInfo, DbMetadata};
 
 /// Connect to a MySQL database at `url`.
 ///
@@ -16,58 +12,15 @@ pub async fn connect(url: &str) -> Result<MySqlPool, DbError> {
         .map_err(|e| DbError::ConnectionFailed(e.to_string()))
 }
 
-/// Execute `sql` against `pool` and return a [`QueryResult`].
-///
-/// - **SELECT / row-returning statements**: columns and rows are populated.
-/// - **DML / DDL statements**: rows are empty; `row_count` = `rows_affected()`.
-/// - **NULL values** map to `None`.
-/// - `execution_time_ms` is measured with [`Instant`].
-pub async fn execute(pool: &MySqlPool, sql: &str) -> Result<QueryResult, DbError> {
-    let started = Instant::now();
-
-    if super::is_row_returning(sql) {
-        let rows = sqlx::query(sql)
-            .fetch_all(pool)
-            .await
-            .map_err(DbError::from)?;
-
-        let columns: Vec<String> = rows
-            .first()
-            .map(|r| r.columns().iter().map(|c| c.name().to_string()).collect())
-            .unwrap_or_default();
-
-        let data: Vec<Vec<Option<String>>> = rows
-            .iter()
-            .map(|row| (0..row.len()).map(|i| cell_to_string(row, i)).collect())
-            .collect();
-
-        let row_count = data.len();
-        Ok(QueryResult {
-            columns,
-            rows: data,
-            row_count,
-            execution_time_ms: started.elapsed().as_millis(),
-        })
-    } else {
-        let result = sqlx::query(sql)
-            .execute(pool)
-            .await
-            .map_err(DbError::from)?;
-
-        Ok(QueryResult {
-            columns: vec![],
-            rows: vec![],
-            row_count: result.rows_affected() as usize,
-            execution_time_ms: started.elapsed().as_millis(),
-        })
-    }
-}
+super::impl_execute!(MySqlPool);
 
 /// Fetch schema metadata from the connected MySQL database.
 ///
 /// Queries `information_schema` restricted to the current schema (`DATABASE()`).
 /// PG/MySQL tests are `#[ignore]` — run with `cargo test -- --ignored`.
 pub async fn fetch_metadata(pool: &MySqlPool) -> Result<DbMetadata, DbError> {
+    let mut acc = super::MetadataAccumulator::new();
+
     // ── all columns (single round-trip) ───────────────────────────────────────
     let col_rows = sqlx::query(
         "SELECT table_name, column_name, data_type, is_nullable \
@@ -79,14 +32,15 @@ pub async fn fetch_metadata(pool: &MySqlPool) -> Result<DbMetadata, DbError> {
     .await
     .map_err(DbError::from)?;
 
-    let mut col_map: HashMap<String, Vec<ColumnInfo>> = HashMap::new();
     for row in &col_rows {
-        let table = get_meta_str(row, 0);
-        col_map.entry(table).or_default().push(ColumnInfo {
-            name: get_meta_str(row, 1),
-            data_type: get_meta_str(row, 2),
-            nullable: get_meta_str(row, 3) == "YES",
-        });
+        acc.add_column(
+            get_meta_str(row, 0),
+            ColumnInfo {
+                name: get_meta_str(row, 1),
+                data_type: get_meta_str(row, 2),
+                nullable: get_meta_str(row, 3) == "YES",
+            },
+        );
     }
 
     // ── tables ────────────────────────────────────────────────────────────────
@@ -99,14 +53,9 @@ pub async fn fetch_metadata(pool: &MySqlPool) -> Result<DbMetadata, DbError> {
     .await
     .map_err(DbError::from)?;
 
-    let tables: Vec<TableInfo> = table_rows
-        .iter()
-        .map(|r| {
-            let name = get_meta_str(r, 0);
-            let columns = col_map.remove(&name).unwrap_or_default();
-            TableInfo { name, columns }
-        })
-        .collect();
+    for row in &table_rows {
+        acc.add_table(get_meta_str(row, 0));
+    }
 
     // ── views ─────────────────────────────────────────────────────────────────
     let view_rows = sqlx::query(
@@ -118,14 +67,9 @@ pub async fn fetch_metadata(pool: &MySqlPool) -> Result<DbMetadata, DbError> {
     .await
     .map_err(DbError::from)?;
 
-    let views: Vec<TableInfo> = view_rows
-        .iter()
-        .map(|r| {
-            let name = get_meta_str(r, 0);
-            let columns = col_map.remove(&name).unwrap_or_default();
-            TableInfo { name, columns }
-        })
-        .collect();
+    for row in &view_rows {
+        acc.add_view(get_meta_str(row, 0));
+    }
 
     // ── stored procedures ─────────────────────────────────────────────────────
     let proc_rows = sqlx::query(
@@ -137,7 +81,7 @@ pub async fn fetch_metadata(pool: &MySqlPool) -> Result<DbMetadata, DbError> {
     .await
     .map_err(DbError::from)?;
 
-    let stored_procs: Vec<String> = proc_rows.iter().map(|r| get_meta_str(r, 0)).collect();
+    acc.set_stored_procs(proc_rows.iter().map(|r| get_meta_str(r, 0)).collect());
 
     // ── indexes ───────────────────────────────────────────────────────────────
     let index_rows = sqlx::query(
@@ -149,14 +93,9 @@ pub async fn fetch_metadata(pool: &MySqlPool) -> Result<DbMetadata, DbError> {
     .await
     .map_err(DbError::from)?;
 
-    let indexes: Vec<String> = index_rows.iter().map(|r| get_meta_str(r, 0)).collect();
+    acc.set_indexes(index_rows.iter().map(|r| get_meta_str(r, 0)).collect());
 
-    Ok(DbMetadata {
-        tables,
-        views,
-        stored_procs,
-        indexes,
-    })
+    Ok(acc.build())
 }
 
 /// Fetch the DDL `CREATE` statement for `name` from MySQL.
