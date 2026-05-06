@@ -168,7 +168,9 @@ mod tests {
         let conn = sqlite_memory_conn("conn-1");
 
         assert!(!svc.is_connected("conn-1"));
-        svc.connect(&conn, None).await.unwrap();
+        svc.connect(&conn, None)
+            .await
+            .expect("failed to connect to in-memory SQLite");
         assert!(svc.is_connected("conn-1"));
     }
 
@@ -177,7 +179,9 @@ mod tests {
         let svc = DbService::new();
         let conn = sqlite_memory_conn("conn-2");
 
-        svc.connect(&conn, None).await.unwrap();
+        svc.connect(&conn, None)
+            .await
+            .expect("failed to connect to in-memory SQLite");
         assert!(svc.is_connected("conn-2"));
 
         svc.disconnect("conn-2");
@@ -198,8 +202,12 @@ mod tests {
         let c1 = sqlite_memory_conn("a");
         let c2 = sqlite_memory_conn("b");
 
-        svc.connect(&c1, None).await.unwrap();
-        svc.connect(&c2, None).await.unwrap();
+        svc.connect(&c1, None)
+            .await
+            .expect("failed to connect to in-memory SQLite");
+        svc.connect(&c2, None)
+            .await
+            .expect("failed to connect to in-memory SQLite");
 
         assert!(svc.is_connected("a"));
         assert!(svc.is_connected("b"));
@@ -216,7 +224,9 @@ mod tests {
         let svc2 = svc.clone();
 
         let conn = sqlite_memory_conn("shared");
-        svc.connect(&conn, None).await.unwrap();
+        svc.connect(&conn, None)
+            .await
+            .expect("failed to connect to in-memory SQLite");
 
         assert!(svc2.is_connected("shared"));
     }
@@ -227,9 +237,14 @@ mod tests {
     async fn execute_should_return_query_result_for_connected_id() {
         let svc = DbService::new();
         let conn = sqlite_memory_conn("exec-1");
-        svc.connect(&conn, None).await.unwrap();
+        svc.connect(&conn, None)
+            .await
+            .expect("failed to connect to in-memory SQLite");
 
-        let result = svc.execute("exec-1", "SELECT 42 AS answer").await.unwrap();
+        let result = svc
+            .execute("exec-1", "SELECT 42 AS answer")
+            .await
+            .expect("query should succeed on connected SQLite");
 
         assert_eq!(result.row_count, 1);
         assert_eq!(result.rows[0][0], Some("42".to_string()));
@@ -241,7 +256,10 @@ mod tests {
 
         let err = svc.execute("unknown", "SELECT 1").await.unwrap_err();
 
-        assert!(matches!(err, DbError::ConnectionFailed(_)));
+        assert!(
+            matches!(err, DbError::ConnectionFailed(_)),
+            "expected ConnectionFailed for unknown id, got {err:?}"
+        );
     }
 
     // ── execute_with_cancel ───────────────────────────────────────────────────
@@ -250,7 +268,9 @@ mod tests {
     async fn execute_with_cancel_should_return_result_when_not_cancelled() {
         let svc = DbService::new();
         let conn = sqlite_memory_conn("cancel-1");
-        svc.connect(&conn, None).await.unwrap();
+        svc.connect(&conn, None)
+            .await
+            .expect("failed to connect to in-memory SQLite");
 
         let token = CancellationToken::new();
         let result = svc
@@ -265,7 +285,9 @@ mod tests {
     async fn execute_with_cancel_should_return_cancelled_when_token_fires() {
         let svc = DbService::new();
         let conn = sqlite_memory_conn("cancel-2");
-        svc.connect(&conn, None).await.unwrap();
+        svc.connect(&conn, None)
+            .await
+            .expect("failed to connect to in-memory SQLite");
 
         let token = CancellationToken::new();
         token.cancel(); // fire immediately before the query starts
@@ -275,7 +297,10 @@ mod tests {
             .await
             .unwrap_err();
 
-        assert!(matches!(err, DbError::Cancelled));
+        assert!(
+            matches!(err, DbError::Cancelled),
+            "expected Cancelled when token fires, got {err:?}"
+        );
     }
 
     #[tokio::test]
@@ -288,6 +313,9 @@ mod tests {
             .await
             .unwrap_err();
 
-        assert!(matches!(err, DbError::ConnectionFailed(_)));
+        assert!(
+            matches!(err, DbError::ConnectionFailed(_)),
+            "expected ConnectionFailed for unknown id, got {err:?}"
+        );
     }
 }

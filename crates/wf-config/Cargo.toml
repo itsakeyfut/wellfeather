@@ -27,3 +27,4 @@ base64      = "0.22.1"
 
 [dev-dependencies]
 tempfile = "3.27.0"
+proptest = "1.11.0"

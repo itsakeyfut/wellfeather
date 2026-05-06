@@ -425,4 +425,19 @@ mod tests {
     fn extract_selection_should_swap_start_and_end_when_reversed() {
         assert_eq!(extract_selection("SELECT 1; SELECT 2", 8, 0), "SELECT 1");
     }
+
+    // ── proptest ──────────────────────────────────────────────────────────────
+
+    use proptest::prelude::*;
+
+    proptest! {
+        #[test]
+        fn extract_statement_at_should_never_panic(
+            sql in ".*",
+            cursor in 0usize..=200,
+        ) {
+            let cursor = cursor.min(sql.len());
+            let _ = extract_statement_at(&sql, cursor);
+        }
+    }
 }

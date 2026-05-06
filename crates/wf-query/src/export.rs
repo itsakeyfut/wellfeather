@@ -217,7 +217,8 @@ mod tests {
         let cols = vec!["a".to_string(), "b".to_string()];
         let rows = vec![vec![Some("hello".to_string()), None]];
         let bytes = result_to_json_bytes(&cols, &rows);
-        let parsed: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        let parsed: serde_json::Value =
+            serde_json::from_slice(&bytes).expect("bytes should be valid JSON");
         assert_eq!(
             parsed[0]["a"],
             serde_json::Value::String("hello".to_string())
@@ -234,7 +235,8 @@ mod tests {
             Some("hello".to_string()),
         ]];
         let bytes = result_to_json_bytes(&cols, &rows);
-        let parsed: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        let parsed: serde_json::Value =
+            serde_json::from_slice(&bytes).expect("bytes should be valid JSON");
         assert_eq!(parsed[0]["i"], serde_json::json!(42));
         assert_eq!(parsed[0]["f"], serde_json::json!(1.5));
         assert_eq!(parsed[0]["s"], serde_json::json!("hello"));
@@ -246,7 +248,8 @@ mod tests {
         let rows: Vec<Vec<Option<String>>> = vec![];
         let bytes = result_to_csv_bytes(&cols, &rows);
         assert!(bytes.starts_with(b"\xef\xbb\xbf"), "BOM missing");
-        let text = std::str::from_utf8(&bytes[3..]).unwrap();
+        let text =
+            std::str::from_utf8(&bytes[3..]).expect("CSV bytes should be valid UTF-8 after BOM");
         assert!(text.contains("id"), "header missing");
         assert!(text.contains("name"), "header missing");
     }
@@ -256,7 +259,8 @@ mod tests {
         let cols = vec!["a".to_string(), "b".to_string()];
         let rows = vec![vec![Some("hello".to_string()), None]];
         let bytes = result_to_csv_bytes(&cols, &rows);
-        let text = std::str::from_utf8(&bytes[3..]).unwrap();
+        let text =
+            std::str::from_utf8(&bytes[3..]).expect("CSV bytes should be valid UTF-8 after BOM");
         assert!(text.contains("hello"), "value missing");
         assert!(text.contains("hello,"), "NULL not serialised as empty");
     }
@@ -266,7 +270,43 @@ mod tests {
         let cols = vec!["v".to_string()];
         let rows = vec![vec![Some("a,b".to_string())]];
         let bytes = result_to_csv_bytes(&cols, &rows);
-        let text = std::str::from_utf8(&bytes[3..]).unwrap();
+        let text =
+            std::str::from_utf8(&bytes[3..]).expect("CSV bytes should be valid UTF-8 after BOM");
         assert!(text.contains("\"a,b\""), "comma not escaped: {text}");
+    }
+
+    // ── proptest ──────────────────────────────────────────────────────────────
+
+    use proptest::prelude::*;
+
+    proptest! {
+        #[test]
+        fn result_to_csv_should_contain_any_printable_ascii_value(
+            value in "[ -~]{0,80}",
+        ) {
+            let columns = vec!["col".to_string()];
+            let rows = vec![vec![Some(value.clone())]];
+            let csv = result_to_csv_bytes(&columns, &rows);
+            // Skip the 3-byte UTF-8 BOM before checking
+            let text = String::from_utf8_lossy(&csv[3..]);
+            let escaped = value.replace('"', "\"\"");
+            prop_assert!(
+                text.contains(&value) || text.contains(&escaped),
+                "value {value:?} not found in CSV:\n{text}"
+            );
+        }
+
+        #[test]
+        fn result_to_json_should_produce_valid_json_for_any_values(
+            value in "[ -~]{0,80}",
+        ) {
+            let columns = vec!["col".to_string()];
+            let rows = vec![vec![Some(value.clone())]];
+            let bytes = result_to_json_bytes(&columns, &rows);
+            prop_assert!(
+                serde_json::from_slice::<serde_json::Value>(&bytes).is_ok(),
+                "output is not valid JSON for value {value:?}"
+            );
+        }
     }
 }

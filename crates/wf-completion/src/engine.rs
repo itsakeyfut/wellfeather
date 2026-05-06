@@ -498,4 +498,24 @@ mod tests {
         let all_items = CompletionEngine::complete(ctx, &meta, "");
         assert_eq!(all_items.len(), 2);
     }
+
+    // ── proptest ──────────────────────────────────────────────────────────────
+
+    use proptest::prelude::*;
+
+    proptest! {
+        #[test]
+        fn complete_should_never_panic_on_arbitrary_prefix(
+            prefix in ".*",
+        ) {
+            let meta = DbMetadata::default();
+            let _ = CompletionEngine::complete(CompletionContext::Keyword, &meta, &prefix);
+            let _ = CompletionEngine::complete(CompletionContext::TableName, &meta, &prefix);
+            let _ = CompletionEngine::complete(
+                CompletionContext::ColumnName { table: None },
+                &meta,
+                &prefix,
+            );
+        }
+    }
 }
