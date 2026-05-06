@@ -19,5 +19,6 @@ serde     = { workspace = true }
 thiserror = { workspace = true }
 uuid      = { workspace = true }
 chrono    = { workspace = true }
-anyhow    = { workspace = true }
-tracing   = { workspace = true }
+anyhow            = { workspace = true }
+tracing           = { workspace = true }
+percent-encoding  = "2.3.2"

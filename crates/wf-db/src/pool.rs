@@ -1,3 +1,4 @@
+use percent_encoding::{NON_ALPHANUMERIC, utf8_percent_encode};
 use sqlx::{MySqlPool, PgPool, SqlitePool};
 
 use crate::drivers;
@@ -97,19 +98,34 @@ impl DbPool {
 // URL helpers (pub(crate) for unit-test visibility)
 // ---------------------------------------------------------------------------
 
+/// Percent-encode a credential component (username or password) for safe
+/// embedding in a connection URL authority section.
+fn encode_credential(s: &str) -> String {
+    utf8_percent_encode(s, NON_ALPHANUMERIC).to_string()
+}
+
 /// Build a PostgreSQL connection URL from `conn` and a plaintext `password`.
 /// Returns `conn.connection_string` unchanged if present (string-mode takes priority).
+/// Username and password are percent-encoded so reserved characters (`@`, `:`,
+/// `/`, etc.) do not corrupt the URL.
 pub(crate) fn pg_url(conn: &DbConnection, password: Option<&str>) -> String {
     if let Some(url) = &conn.connection_string {
         return url.clone();
     }
     let host = conn.host.as_deref().unwrap_or("localhost");
     let port = conn.port.unwrap_or(5432);
-    let user = conn.user.as_deref().unwrap_or("");
+    let user = encode_credential(conn.user.as_deref().unwrap_or(""));
     let db = conn.database.as_deref().unwrap_or("");
     match password {
         Some(pw) if !pw.is_empty() => {
-            format!("postgresql://{}:{}@{}:{}/{}", user, pw, host, port, db)
+            format!(
+                "postgresql://{}:{}@{}:{}/{}",
+                user,
+                encode_credential(pw),
+                host,
+                port,
+                db
+            )
         }
         _ => format!("postgresql://{}@{}:{}/{}", user, host, port, db),
     }
@@ -117,17 +133,26 @@ pub(crate) fn pg_url(conn: &DbConnection, password: Option<&str>) -> String {
 
 /// Build a MySQL connection URL from `conn` and a plaintext `password`.
 /// Returns `conn.connection_string` unchanged if present.
+/// Username and password are percent-encoded so reserved characters do not
+/// corrupt the URL.
 pub(crate) fn my_url(conn: &DbConnection, password: Option<&str>) -> String {
     if let Some(url) = &conn.connection_string {
         return url.clone();
     }
     let host = conn.host.as_deref().unwrap_or("localhost");
     let port = conn.port.unwrap_or(3306);
-    let user = conn.user.as_deref().unwrap_or("");
+    let user = encode_credential(conn.user.as_deref().unwrap_or(""));
     let db = conn.database.as_deref().unwrap_or("");
     match password {
         Some(pw) if !pw.is_empty() => {
-            format!("mysql://{}:{}@{}:{}/{}", user, pw, host, port, db)
+            format!(
+                "mysql://{}:{}@{}:{}/{}",
+                user,
+                encode_credential(pw),
+                host,
+                port,
+                db
+            )
         }
         _ => format!("mysql://{}@{}:{}/{}", user, host, port, db),
     }
@@ -278,6 +303,62 @@ mod tests {
         let conn = my_conn_fields();
         let url = my_url(&conn, Some("pass123"));
         assert_eq!(url, "mysql://bob:pass123@mysql.example.com:3306/shop");
+    }
+
+    #[test]
+    fn pg_url_should_percent_encode_special_chars_in_password() {
+        let conn = pg_conn_fields();
+        // "@" in password would break URL authority parsing if not encoded
+        let url = pg_url(&conn, Some("pass@word"));
+        assert!(
+            !url.contains("pass@word"),
+            "raw @ must not appear in URL: {url}"
+        );
+        assert!(
+            url.contains("pass%40word"),
+            "@ must be percent-encoded as %40: {url}"
+        );
+        // ":" in password would split user:pass at wrong byte
+        let url2 = pg_url(&conn, Some("pa:ss"));
+        assert!(
+            !url2.contains(":pa:"),
+            "raw : must not appear twice: {url2}"
+        );
+        assert!(
+            url2.contains("pa%3Ass"),
+            "colon must be encoded as %3A: {url2}"
+        );
+    }
+
+    #[test]
+    fn my_url_should_percent_encode_special_chars_in_password() {
+        let conn = my_conn_fields();
+        let url = my_url(&conn, Some("pass@word"));
+        assert!(
+            !url.contains("pass@word"),
+            "raw @ must not appear in URL: {url}"
+        );
+        assert!(
+            url.contains("pass%40word"),
+            "@ must be percent-encoded as %40: {url}"
+        );
+        let url2 = my_url(&conn, Some("p/q?r#s"));
+        assert!(
+            !url2.contains("p/q"),
+            "slash must not appear unencoded: {url2}"
+        );
+    }
+
+    #[test]
+    fn pg_url_should_percent_encode_special_chars_in_username() {
+        let mut conn = pg_conn_fields();
+        conn.user = Some("al ice".to_string()); // space in username
+        let url = pg_url(&conn, None);
+        assert!(
+            !url.contains("al ice"),
+            "raw space must not appear in URL: {url}"
+        );
+        assert!(url.contains("al%20ice"), "space must be %20-encoded: {url}");
     }
 
     #[test]
