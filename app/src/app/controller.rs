@@ -13,34 +13,25 @@
 //! Both channels are bounded (`capacity = CMD_CHANNEL_CAPACITY`). The controller task exits cleanly
 //! when all `Sender<Command>` clones are dropped (i.e. when the UI window closes).
 
+mod config;
+mod connection;
+mod metadata;
+mod query;
+
 use std::sync::Arc;
 
-use chrono::Utc;
-use rust_i18n::t;
 use tokio::sync::mpsc;
-use tokio_util::sync::CancellationToken;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, warn};
 use wf_completion::{cache::MetadataCache, service::CompletionService};
 use wf_config::ConnectionRepository;
-use wf_db::{
-    error::DbError,
-    models::{DbConnection, DbType},
-    service::DbService,
-};
+use wf_db::service::DbService;
 use wf_history::service::HistoryService;
 
 use crate::{
-    app::{
-        LocalizedMessage,
-        command::{Command, ConfigUpdate},
-        event::{Event, StateEvent},
-        session::{SessionManager, db_to_config_conn},
-    },
+    app::{command::Command, event::Event, session::SessionManager},
     state::SharedState,
 };
 
-/// Async command loop that drives the application backend.
-///
 const CMD_CHANNEL_CAPACITY: usize = 64;
 
 /// Owns the [`DbService`] pool, the [`SessionManager`] for config persistence,
@@ -133,498 +124,6 @@ impl AppController {
             }
         }
     }
-
-    /// Handle a `Connect` command.
-    ///
-    /// On success:
-    /// 1. Persists the session via [`SessionManager::save_connection`].
-    /// 2. Adds the connection to [`SharedState`] if it is not already present.
-    /// 3. Marks it as the active connection.
-    /// 4. Sends [`Event::Connected`] to the UI.
-    ///
-    /// On failure, sends [`Event::QueryError`] with the error message.
-    async fn handle_connect(&self, conn: DbConnection, password: Option<String>) {
-        let id = conn.id.clone();
-        info!(conn_id = %id, "handling Connect command");
-        match self.db.connect(&conn, password.as_deref()).await {
-            Ok(()) => {
-                // Persist to repository so we can auto-reconnect on next launch.
-                let conn_cfg = db_to_config_conn(&conn);
-                if let Err(e) = self.repo.upsert(&conn_cfg).await {
-                    warn!(conn_id = %id, error = %e, "failed to upsert connection");
-                }
-                if let Err(e) = self.repo.touch_last_used(&id).await {
-                    warn!(conn_id = %id, error = %e, "failed to touch last_used");
-                }
-                // Add or update the connection in the runtime list.
-                let already_saved = self.state.conn.all().iter().any(|c| c.id == id);
-                if already_saved {
-                    self.state.conn.update(conn);
-                } else {
-                    self.state.conn.add(conn);
-                }
-                self.state.conn.set_active(&id);
-                info!(conn_id = %id, "connected successfully");
-                // Load the full list from the repo so the UI can show all saved connections.
-                let connections = self.repo.all().await.unwrap_or_default();
-                let (safe_dml, read_only) = connections
-                    .iter()
-                    .find(|c| c.id == id)
-                    .map(|c| (c.safe_dml, c.read_only))
-                    .unwrap_or((true, false));
-                let _ = self
-                    .tx_event
-                    .send(Event::Connected {
-                        id: id.clone(),
-                        connections,
-                        safe_dml,
-                        read_only,
-                    })
-                    .await;
-
-                let db = self.db.clone(); // clone required: tokio::spawn needs 'static
-                let tx = self.tx_event.clone(); // clone required: tokio::spawn needs 'static
-                let cache = self.metadata_cache.clone(); // clone required: tokio::spawn needs 'static
-                let fetch_id = id.clone(); // clone required: owned id for async block
-                tokio::spawn(async move {
-                    match db.fetch_metadata(&fetch_id).await {
-                        Ok(meta) => {
-                            if let Err(e) = cache.store(&fetch_id, meta.clone()).await {
-                                warn!(conn_id = %fetch_id, error = %e, "failed to store metadata");
-                            }
-                            let _ = tx.send(Event::MetadataLoaded(fetch_id.clone(), meta)).await;
-                        }
-                        Err(e) => {
-                            warn!(conn_id = %fetch_id, error = %e, "metadata fetch failed");
-                            let _ = tx.send(Event::MetadataFetchFailed(e.to_string())).await;
-                        }
-                    }
-                });
-            }
-            Err(e) => {
-                warn!(conn_id = %id, error = %e, "connection failed");
-                let _ = self
-                    .tx_event
-                    .send(Event::ConnectError(e.localized_message()))
-                    .await;
-            }
-        }
-    }
-
-    /// Handle a `TestConnection` command.
-    ///
-    /// Tries to establish a connection, then immediately drops it.
-    /// Does **not** add the connection to [`SharedState`] or the sidebar.
-    /// Sends [`Event::TestConnectionOk`] on success or
-    /// [`Event::TestConnectionFailed`] on failure.
-    async fn handle_test_connection(&self, conn: DbConnection, password: Option<String>) {
-        let id = conn.id.clone();
-        info!(conn_id = %id, "handling TestConnection command");
-        match self.db.connect(&conn, password.as_deref()).await {
-            Ok(()) => {
-                // Drop the temporary pool immediately — do not persist to state.
-                self.db.disconnect(&id);
-                info!(conn_id = %id, "test connection succeeded");
-                let _ = self.tx_event.send(Event::TestConnectionOk).await;
-            }
-            Err(e) => {
-                warn!(conn_id = %id, error = %e, "test connection failed");
-                let _ = self
-                    .tx_event
-                    .send(Event::TestConnectionFailed(e.localized_message()))
-                    .await;
-            }
-        }
-    }
-
-    /// Handle a `Disconnect` command.
-    ///
-    /// Drops the connection pool for `id` and sends [`Event::Disconnected`] to the UI.
-    async fn handle_disconnect(&self, id: String) {
-        info!(conn_id = %id, "handling Disconnect command");
-        self.db.disconnect(&id);
-        let _ = self.tx_event.send(Event::Disconnected(id)).await;
-    }
-
-    /// Handle a `RemoveConnection` command.
-    ///
-    /// Drops the connection pool if active, removes from state, and deletes from config.
-    async fn handle_remove_connection(&self, id: String) {
-        info!(conn_id = %id, "handling RemoveConnection command");
-        self.db.disconnect(&id);
-        self.state.conn.remove(&id);
-        if let Err(e) = self.repo.delete(&id).await {
-            warn!(conn_id = %id, error = %e, "failed to delete connection from repo");
-        }
-        let _ = self.tx_event.send(Event::ConnectionRemoved(id)).await;
-    }
-
-    /// Handle a `RunQuery` / `RunAll` / `RunSelection` command.
-    ///
-    /// Steps:
-    /// 1. Cancel any in-flight query via `QueryState::cancel`.
-    /// 2. Bail with [`Event::QueryError`] if there is no active connection.
-    /// 3. Create a fresh [`CancellationToken`] and register it in `QueryState`.
-    /// 4. Send [`Event::QueryStarted`] to the UI immediately.
-    /// 5. Spawn a background task that calls [`DbService::execute_with_cancel`]
-    ///    and sends [`Event::QueryFinished`] / [`Event::QueryCancelled`] /
-    ///    [`Event::QueryError`] when done.
-    async fn handle_run_query(&self, sql: String) {
-        info!("handling RunQuery command");
-        self.state.query.cancel();
-
-        let conn_id = match self.state.conn.active() {
-            Some(c) => c.id.clone(),
-            None => {
-                warn!("RunQuery: no active connection");
-                let _ = self
-                    .tx_event
-                    .send(Event::QueryError(
-                        t!("error.no_active_connection").to_string(),
-                    ))
-                    .await;
-                return;
-            }
-        };
-
-        if self.is_read_only_blocked(&conn_id, &sql).await {
-            return;
-        }
-
-        self.state.query.set_last_sql(sql.clone());
-
-        let token = CancellationToken::new();
-        self.state.query.set_cancel_token(token.clone());
-        debug!("sending event: QueryStarted");
-        let _ = self.tx_event.send(Event::QueryStarted).await;
-
-        let page_size = self.state.ui.page_size();
-        let sql_to_run = apply_limit(&sql, page_size);
-
-        let db = self.db.clone(); // clone required: tokio::spawn needs 'static
-        let tx = self.tx_event.clone(); // clone required: tokio::spawn needs 'static
-        let history = self.history.clone(); // clone required: tokio::spawn needs 'static
-        let sql_hist = sql.clone(); // clone required: history record needs owned sql
-        let conn_id_hist = conn_id.clone(); // clone required: history record needs owned id
-        tokio::spawn(async move {
-            let now = Utc::now().timestamp();
-            match db.execute_with_cancel(&conn_id, &sql_to_run, token).await {
-                Ok(result) => {
-                    let exec = wf_db::models::QueryExecution {
-                        id: 0,
-                        sql: sql_hist,
-                        duration_ms: result.execution_time_ms,
-                        success: true,
-                        error_message: None,
-                        timestamp: now,
-                        connection_id: conn_id_hist,
-                    };
-                    if let Err(e) = history.insert(&exec).await {
-                        warn!("failed to save history: {e}");
-                    }
-                    debug!("sending event: QueryFinished");
-                    let _ = tx.send(Event::QueryFinished(result)).await;
-                }
-                Err(DbError::Cancelled) => {
-                    debug!("sending event: QueryCancelled");
-                    let _ = tx.send(Event::QueryCancelled).await;
-                }
-                Err(e) => {
-                    error!(error = %e, "query execution failed");
-                    let exec = wf_db::models::QueryExecution {
-                        id: 0,
-                        sql: sql_hist,
-                        duration_ms: 0,
-                        success: false,
-                        error_message: Some(e.to_string()),
-                        timestamp: now,
-                        connection_id: conn_id_hist,
-                    };
-                    if let Err(he) = history.insert(&exec).await {
-                        warn!("failed to save history: {he}");
-                    }
-                    debug!("sending event: QueryError");
-                    let _ = tx.send(Event::QueryError(e.localized_message())).await;
-                }
-            }
-        });
-    }
-
-    /// Handle a `RunAll` command.
-    ///
-    /// Splits the SQL on semicolons and executes each non-empty statement
-    /// sequentially using a single cancellation token.  Only the result of the
-    /// last statement is surfaced to the UI so the result panel is not spammed.
-    /// This approach is DB-agnostic and does not require any special driver flags
-    /// (e.g. MySQL `CLIENT_MULTI_STATEMENTS`).
-    async fn handle_run_all(&self, sql: String) {
-        self.state.query.cancel();
-
-        let conn_id = match self.state.conn.active() {
-            Some(c) => c.id.clone(),
-            None => {
-                warn!("RunAll: no active connection");
-                let _ = self
-                    .tx_event
-                    .send(Event::QueryError(
-                        t!("error.no_active_connection").to_string(),
-                    ))
-                    .await;
-                return;
-            }
-        };
-
-        if self.is_read_only_blocked(&conn_id, &sql).await {
-            return;
-        }
-
-        let stmts: Vec<String> = wf_query::analyzer::extract_all_statements(&sql)
-            .into_iter()
-            .map(str::to_owned)
-            .collect();
-
-        if stmts.is_empty() {
-            return;
-        }
-
-        self.state.query.set_last_sql(sql.clone());
-
-        let token = CancellationToken::new();
-        self.state.query.set_cancel_token(token.clone());
-        let _ = self.tx_event.send(Event::QueryStarted).await;
-
-        let page_size = self.state.ui.page_size();
-        let db = self.db.clone(); // clone required: tokio::spawn needs 'static
-        let tx = self.tx_event.clone(); // clone required: tokio::spawn needs 'static
-        let history = self.history.clone(); // clone required: tokio::spawn needs 'static
-        let conn_id_hist = conn_id.clone(); // clone required: history record needs owned id
-
-        tokio::spawn(async move {
-            let now = Utc::now().timestamp();
-
-            for (i, stmt) in stmts.iter().enumerate() {
-                let sql_to_run = apply_limit(stmt, page_size);
-                let is_last = i == stmts.len() - 1;
-
-                match db
-                    .execute_with_cancel(&conn_id, &sql_to_run, token.clone())
-                    .await
-                {
-                    Ok(result) => {
-                        if is_last {
-                            let exec = wf_db::models::QueryExecution {
-                                id: 0,
-                                sql: stmt.clone(),
-                                duration_ms: result.execution_time_ms,
-                                success: true,
-                                error_message: None,
-                                timestamp: now,
-                                connection_id: conn_id_hist.clone(),
-                            };
-                            if let Err(e) = history.insert(&exec).await {
-                                warn!("failed to save history: {e}");
-                            }
-                            debug!("sending event: QueryFinished (run-all last stmt)");
-                            let _ = tx.send(Event::QueryFinished(result)).await;
-                        }
-                    }
-                    Err(DbError::Cancelled) => {
-                        debug!("sending event: QueryCancelled");
-                        let _ = tx.send(Event::QueryCancelled).await;
-                        return;
-                    }
-                    Err(e) => {
-                        error!(error = %e, "run-all statement failed");
-                        let exec = wf_db::models::QueryExecution {
-                            id: 0,
-                            sql: stmt.clone(),
-                            duration_ms: 0,
-                            success: false,
-                            error_message: Some(e.to_string()),
-                            timestamp: now,
-                            connection_id: conn_id_hist.clone(),
-                        };
-                        if let Err(he) = history.insert(&exec).await {
-                            warn!("failed to save history: {he}");
-                        }
-                        debug!("sending event: QueryError");
-                        let _ = tx.send(Event::QueryError(e.localized_message())).await;
-                        return;
-                    }
-                }
-            }
-        });
-    }
-
-    /// Handle an `UpdateConfig` command.
-    ///
-    /// Handles `Theme` and `PageSize` changes: updates shared state so they
-    /// survive the current session, then persists the value to `config.toml`.
-    async fn handle_update_config(&self, update: ConfigUpdate) {
-        match update {
-            ConfigUpdate::Theme(t) => {
-                self.state.ui.set_theme(t.clone());
-                if let Err(e) = self.session.save_theme(&t) {
-                    warn!(error = %e, "failed to persist theme to config");
-                }
-                let _ = self
-                    .tx_event
-                    .send(Event::StateChanged(StateEvent::ThemeChanged(t)))
-                    .await;
-            }
-            ConfigUpdate::PageSize(ps) => {
-                let n: u32 = ps.into();
-                self.state.ui.set_page_size(n as usize);
-                if let Err(e) = self.session.save_page_size(n as usize) {
-                    warn!(error = %e, "failed to persist page_size to config");
-                }
-                let _ = self.tx_event.send(Event::ConfigUpdated).await;
-            }
-            ConfigUpdate::Language(lang) => {
-                if let Err(e) = self.session.save_language(&lang) {
-                    warn!(error = %e, "failed to persist language to config");
-                }
-            }
-            ConfigUpdate::ConnectionFlags {
-                id,
-                safe_dml,
-                read_only,
-            } => {
-                if let Err(e) = self.repo.update_flags(&id, safe_dml, read_only).await {
-                    warn!(error = %e, "failed to update connection flags in repo");
-                }
-                let _ = self
-                    .tx_event
-                    .send(Event::ConnectionFlagsUpdated {
-                        id,
-                        safe_dml,
-                        read_only,
-                    })
-                    .await;
-            }
-            ConfigUpdate::ReduceMotion(value) => {
-                if let Err(e) = self.session.save_reduce_motion(value) {
-                    warn!(error = %e, "failed to persist reduce_motion to config");
-                }
-            }
-        }
-    }
-
-    /// Handle a `FetchCompletion` command.
-    ///
-    /// Looks up the active connection, calls [`CompletionService::complete`], and
-    /// sends [`Event::CompletionReady`] with the (possibly empty) candidate list.
-    /// Silently no-ops when there is no active connection.
-    async fn handle_fetch_completion(&self, sql: String, cursor_pos: usize) {
-        let conn_id = match self.state.conn.active() {
-            Some(c) => c.id.clone(),
-            None => return,
-        };
-        let items = self.completion.complete(&conn_id, &sql, cursor_pos).await;
-        let _ = self.tx_event.send(Event::CompletionReady(items)).await;
-    }
-
-    /// Handle a `FetchDdl` command.
-    ///
-    /// Fetches the DDL CREATE statement for `name` on `conn_id` and sends
-    /// [`Event::DdlLoaded`] or [`Event::DdlFetchFailed`] to the UI.
-    async fn handle_fetch_ddl(&self, tab_id: String, conn_id: String, name: String, kind: String) {
-        let db = self.db.clone(); // clone required: tokio::spawn needs 'static
-        let tx = self.tx_event.clone(); // clone required: tokio::spawn needs 'static
-        tokio::spawn(async move {
-            match db.fetch_ddl(&conn_id, &name, &kind).await {
-                Ok(ddl) => {
-                    let _ = tx.send(Event::DdlLoaded { tab_id, ddl }).await;
-                }
-                Err(e) => {
-                    let _ = tx
-                        .send(Event::DdlFetchFailed {
-                            tab_id,
-                            msg: e.localized_message(),
-                        })
-                        .await;
-                }
-            }
-        });
-    }
-
-    /// Handle a `FetchTableData` command.
-    ///
-    /// Executes `SELECT * FROM "{table_name}" LIMIT {page_size}` and sends
-    /// [`Event::TableDataLoaded`] or [`Event::TableDataFailed`] to the UI.
-    async fn handle_fetch_table_data(
-        &self,
-        tab_id: String,
-        conn_id: String,
-        table_name: String,
-        page_size: usize,
-    ) {
-        let quote = self
-            .state
-            .conn
-            .all()
-            .iter()
-            .find(|c| c.id == conn_id)
-            .map(|c| if c.db_type == DbType::MySQL { '`' } else { '"' })
-            .unwrap_or('"');
-        let escaped = table_name.replace(quote, &format!("{quote}{quote}"));
-        let sql = if page_size > 0 {
-            format!("SELECT * FROM {quote}{escaped}{quote} LIMIT {page_size}")
-        } else {
-            format!("SELECT * FROM {quote}{escaped}{quote}")
-        };
-        let db = self.db.clone(); // clone required: tokio::spawn needs 'static
-        let tx = self.tx_event.clone(); // clone required: tokio::spawn needs 'static
-        tokio::spawn(async move {
-            match db.execute(&conn_id, &sql).await {
-                Ok(result) => {
-                    let _ = tx.send(Event::TableDataLoaded { tab_id, result }).await;
-                }
-                Err(e) => {
-                    let _ = tx
-                        .send(Event::TableDataFailed {
-                            tab_id,
-                            msg: e.localized_message(),
-                        })
-                        .await;
-                }
-            }
-        });
-    }
-
-    /// Handle a `CancelQuery` command.
-    ///
-    /// Fires the stored [`CancellationToken`] (if any) and immediately sends
-    /// [`Event::QueryCancelled`] to the UI so it can reset its loading state.
-    async fn handle_cancel_query(&self) {
-        info!("handling CancelQuery command");
-        self.state.query.cancel();
-        let _ = self.tx_event.send(Event::QueryCancelled).await;
-    }
-
-    /// Returns `true` if the connection is read-only and `sql` contains a write statement.
-    ///
-    /// When `true`, sends `Event::QueryError` with a localized "blocked" message so the
-    /// caller can return early without executing the query.
-    async fn is_read_only_blocked(&self, conn_id: &str, sql: &str) -> bool {
-        let read_only = self
-            .repo
-            .find(conn_id)
-            .await
-            .ok()
-            .flatten()
-            .map(|c| c.read_only)
-            .unwrap_or(false);
-        if read_only && wf_query::analyzer::is_write_statement(sql) {
-            warn!(conn_id = %conn_id, "RunQuery blocked: connection is read-only");
-            let _ = self
-                .tx_event
-                .send(Event::QueryError(t!("error.read_only_blocked").to_string()))
-                .await;
-            return true;
-        }
-        false
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -648,10 +147,6 @@ fn apply_limit(sql: &str, limit: usize) -> String {
         sql.to_string()
     }
 }
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {
@@ -710,7 +205,7 @@ mod tests {
         }
     }
 
-    // ── apply_limit ────────────────────────────���────────────────────────��─────
+    // ── apply_limit ───────────────────────────────────────────────────────────────
 
     #[test]
     fn apply_limit_should_append_limit_to_select() {
@@ -765,7 +260,7 @@ mod tests {
         assert_eq!(apply_limit(sql, 500), sql);
     }
 
-    // ── TestConnection ──────────────────────────────────���─────────────────────
+    // ── TestConnection ────────────────────────────────────────────────────────────
 
     #[tokio::test]
     async fn test_connection_should_send_ok_and_not_add_to_state() {
@@ -929,7 +424,7 @@ mod tests {
         assert!(matches!(e2, Event::Disconnected(ref id) if id == "c2"));
     }
 
-    // ── RunQuery ──────────────────────────────────────────────────────────���───
+    // ── RunQuery ──────────────────────────────────────────────────────────────────
 
     #[tokio::test]
     async fn run_query_should_send_query_started_then_finished() {
