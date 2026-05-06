@@ -46,13 +46,34 @@ pub fn extract_all_statements(sql: &str) -> Vec<&str> {
         .collect()
 }
 
+/// Strips leading SQL line comments (`--`) and block comments (`/* … */`),
+/// including any whitespace between them, returning the first non-comment token.
+///
+/// Stops as soon as it encounters a character that is not the start of a comment.
+/// Unterminated block/line comments are treated as consuming the rest of the string.
+fn strip_leading_comments(sql: &str) -> &str {
+    let mut s = sql.trim();
+    loop {
+        if let Some(rest) = s.strip_prefix("--") {
+            // line comment: skip to the character after the next newline
+            s = rest.find('\n').map_or("", |i| rest[i + 1..].trim_start());
+        } else if let Some(rest) = s.strip_prefix("/*") {
+            // block comment: skip to the character after "*/"
+            s = rest.find("*/").map_or("", |i| rest[i + 2..].trim_start());
+        } else {
+            break;
+        }
+    }
+    s
+}
+
 /// Returns `true` if `sql` contains an UPDATE or DELETE statement with no WHERE clause.
 ///
 /// Checks all semicolon-separated statements. Intended to guard against accidental
 /// full-table modifications when `safe_dml` is enabled on a connection.
 pub fn has_dangerous_dml(sql: &str) -> bool {
     extract_all_statements(sql).iter().any(|stmt| {
-        let upper = stmt.to_uppercase();
+        let upper = strip_leading_comments(stmt).to_uppercase();
         (upper.starts_with("UPDATE ") || upper.starts_with("DELETE ")) && !upper.contains(" WHERE ")
     })
 }
@@ -66,7 +87,7 @@ pub fn is_write_statement(sql: &str) -> bool {
         "INSERT", "UPDATE", "DELETE", "CREATE", "DROP", "ALTER", "TRUNCATE",
     ];
     extract_all_statements(sql).iter().any(|stmt| {
-        let upper = stmt.to_uppercase();
+        let upper = strip_leading_comments(stmt).to_uppercase();
         WRITE_KEYWORDS.iter().any(|kw| {
             upper.starts_with(kw)
                 && upper[kw.len()..].starts_with(|c: char| !c.is_ascii_alphanumeric() && c != '_')
@@ -264,6 +285,27 @@ mod tests {
         assert!(has_dangerous_dml("DELETE FROM nowhere_table"));
     }
 
+    #[test]
+    fn has_dangerous_dml_should_detect_update_prefixed_with_block_comment() {
+        assert!(has_dangerous_dml("/* comment */ UPDATE t SET x = 1"));
+        assert!(!has_dangerous_dml(
+            "/* comment */ UPDATE t SET x = 1 WHERE id = 1"
+        ));
+    }
+
+    #[test]
+    fn has_dangerous_dml_should_detect_delete_prefixed_with_line_comment() {
+        assert!(has_dangerous_dml("-- mass delete\nDELETE FROM orders"));
+        assert!(!has_dangerous_dml(
+            "-- safe delete\nDELETE FROM orders WHERE id = 1"
+        ));
+    }
+
+    #[test]
+    fn has_dangerous_dml_should_detect_dangerous_dml_after_multiple_comments() {
+        assert!(has_dangerous_dml("/* a */ -- b\nDELETE FROM users"));
+    }
+
     // ── is_write_statement ───────────────────────────────────────────────────
 
     #[test]
@@ -325,7 +367,77 @@ mod tests {
         assert!(!is_write_statement("SELECT inserts FROM t"));
     }
 
-    // ── extract_single_table_name ───────────────────────────��────────────────
+    #[test]
+    fn is_write_statement_should_classify_delete_with_leading_comment() {
+        assert!(is_write_statement(
+            "/* comment */ DELETE FROM t WHERE id = 1"
+        ));
+    }
+
+    #[test]
+    fn is_write_statement_should_classify_drop_with_leading_block_comment() {
+        assert!(is_write_statement("/* drop */ DROP TABLE users"));
+    }
+
+    #[test]
+    fn is_write_statement_should_classify_insert_with_leading_line_comment() {
+        assert!(is_write_statement(
+            "-- insert row\nINSERT INTO t VALUES (1)"
+        ));
+    }
+
+    #[test]
+    fn is_write_statement_should_classify_write_after_multiple_comments() {
+        assert!(is_write_statement("/* a */ /* b */ TRUNCATE users"));
+        assert!(is_write_statement("-- first\n-- second\nDROP TABLE t"));
+    }
+
+    #[test]
+    fn is_write_statement_should_return_false_for_commented_out_write() {
+        // The statement after stripping leading comments is empty — not a write
+        assert!(!is_write_statement("/* DROP TABLE users */"));
+    }
+
+    // ── strip_leading_comments ────────────────────────────────────────────────
+
+    #[test]
+    fn strip_leading_comments_should_strip_block_comment() {
+        assert_eq!(strip_leading_comments("/* comment */ SELECT 1"), "SELECT 1");
+    }
+
+    #[test]
+    fn strip_leading_comments_should_strip_line_comment() {
+        assert_eq!(strip_leading_comments("-- comment\nSELECT 1"), "SELECT 1");
+    }
+
+    #[test]
+    fn strip_leading_comments_should_strip_multiple_consecutive_comments() {
+        assert_eq!(
+            strip_leading_comments("/* a */ /* b */ SELECT 1"),
+            "SELECT 1"
+        );
+        assert_eq!(strip_leading_comments("-- a\n-- b\nSELECT 1"), "SELECT 1");
+        assert_eq!(strip_leading_comments("/* a */ -- b\nSELECT 1"), "SELECT 1");
+    }
+
+    #[test]
+    fn strip_leading_comments_should_return_empty_for_only_comment() {
+        assert_eq!(strip_leading_comments("/* just a comment */"), "");
+        assert_eq!(strip_leading_comments("-- just a comment"), "");
+    }
+
+    #[test]
+    fn strip_leading_comments_should_return_input_unchanged_when_no_comment() {
+        assert_eq!(strip_leading_comments("SELECT 1"), "SELECT 1");
+        assert_eq!(strip_leading_comments("  SELECT 1  "), "SELECT 1");
+    }
+
+    #[test]
+    fn strip_leading_comments_should_handle_unterminated_block_comment() {
+        assert_eq!(strip_leading_comments("/* unterminated"), "");
+    }
+
+    // ── extract_single_table_name ─────────────────────────────────────────────
 
     #[test]
     fn extract_single_table_name_should_return_name_for_simple_select() {
@@ -438,6 +550,16 @@ mod tests {
         ) {
             let cursor = cursor.min(sql.len());
             let _ = extract_statement_at(&sql, cursor);
+        }
+
+        #[test]
+        fn is_write_statement_should_never_panic(sql in ".*") {
+            let _ = is_write_statement(&sql);
+        }
+
+        #[test]
+        fn has_dangerous_dml_should_never_panic(sql in ".*") {
+            let _ = has_dangerous_dml(&sql);
         }
     }
 }
