@@ -207,4 +207,36 @@ mod tests {
         let result = cache.load("does-not-exist").await;
         assert!(result.is_none());
     }
+
+    #[tokio::test]
+    async fn cache_store_and_load_should_roundtrip_in_memory() {
+        let cache = open_memory().await;
+        let meta = make_meta("accounts");
+
+        cache
+            .store("conn-mem", meta.clone())
+            .await
+            .expect("store should succeed");
+        let loaded = cache
+            .load("conn-mem")
+            .await
+            .expect("load should return Some");
+
+        assert_eq!(loaded.tables.len(), 1);
+        assert_eq!(loaded.tables[0].name, "accounts");
+        assert_eq!(loaded.tables[0].columns.len(), 2);
+        assert_eq!(loaded.indexes[0], "idx_id");
+    }
+
+    #[tokio::test]
+    async fn cache_preload_should_survive_empty_database() {
+        let cache = open_memory().await;
+        cache
+            .preload_from_disk()
+            .await
+            .expect("preload_from_disk should not fail on an empty database");
+        // Nothing was stored — memory map remains empty
+        let result = cache.load("any-conn").await;
+        assert!(result.is_none());
+    }
 }

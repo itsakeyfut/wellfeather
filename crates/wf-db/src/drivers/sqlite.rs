@@ -468,6 +468,18 @@ mod tests {
         assert!(ddl.to_uppercase().contains("CREATE VIEW"));
     }
 
+    // ── execute — error ──────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn execute_should_return_error_on_invalid_sql() {
+        let pool = connect("sqlite::memory:").await.unwrap();
+        let err = execute(&pool, "NOT VALID SQL").await.unwrap_err();
+        assert!(
+            matches!(err, DbError::Sqlx(_)),
+            "expected Sqlx error for invalid SQL, got {err:?}"
+        );
+    }
+
     // ── execute — timing ─────────────────────────────────────────────────────
 
     #[tokio::test]

@@ -147,4 +147,23 @@ mod tests {
         let loaded = mgr.load().expect("load should succeed");
         assert_eq!(original, loaded);
     }
+
+    #[test]
+    fn config_manager_should_roundtrip_editor_settings() {
+        use crate::models::{EditorConfig, PageSize};
+
+        let dir = tempfile::tempdir().expect("failed to create temp dir");
+        let mgr = ConfigManager::with_path(dir.path().join("config.toml"));
+
+        let original = Config {
+            editor: EditorConfig {
+                page_size: PageSize::Rows100,
+            },
+            ..Config::default()
+        };
+
+        mgr.save(&original).expect("save should succeed");
+        let loaded = mgr.load().expect("load should succeed");
+        assert_eq!(loaded.editor.page_size, PageSize::Rows100);
+    }
 }

@@ -42,4 +42,36 @@ mod tests {
         assert!(output.contains("SELECT"));
         assert!(output.contains("FROM"));
     }
+
+    #[test]
+    fn format_sql_should_indent_columns_after_select() {
+        let input = "select a, b, c from t";
+        let output = format_sql(input);
+        // sqlformat inserts a newline and indentation between SELECT and column list
+        assert!(
+            output.contains('\n'),
+            "expected formatted output to contain newlines:\n{output}"
+        );
+        assert!(output.contains('a') && output.contains('b') && output.contains('c'));
+    }
+
+    #[test]
+    fn format_sql_should_preserve_string_literal_casing() {
+        let input = "SELECT * FROM users WHERE name = 'Alice'";
+        let output = format_sql(input);
+        assert!(
+            output.contains("'Alice'"),
+            "expected string literal 'Alice' to preserve case in:\n{output}"
+        );
+    }
+
+    #[test]
+    fn format_sql_should_handle_multistatement_input() {
+        let input = "select 1; select 2";
+        let output = format_sql(input);
+        assert!(
+            output.contains("SELECT"),
+            "expected SELECT in formatted output:\n{output}"
+        );
+    }
 }
