@@ -49,3 +49,75 @@ pub enum Command {
         page_size: usize,
     },
 }
+
+impl Command {
+    /// Returns the variant name for logging.  Does **not** include any payload,
+    /// so credentials carried by `Connect` and `TestConnection` are never logged.
+    pub(crate) fn variant_name(&self) -> &'static str {
+        match self {
+            Self::Connect(..) => "Connect",
+            Self::TestConnection(..) => "TestConnection",
+            Self::Disconnect(..) => "Disconnect",
+            Self::RemoveConnection(..) => "RemoveConnection",
+            Self::RunQuery(..) => "RunQuery",
+            Self::RunAll(..) => "RunAll",
+            Self::CancelQuery => "CancelQuery",
+            Self::FetchCompletion(..) => "FetchCompletion",
+            Self::UpdateConfig(..) => "UpdateConfig",
+            Self::FetchDdl { .. } => "FetchDdl",
+            Self::FetchTableData { .. } => "FetchTableData",
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use wf_db::models::{DbConnection, DbType};
+
+    use super::Command;
+
+    fn dummy_conn() -> DbConnection {
+        DbConnection {
+            id: "test".to_string(),
+            name: "test".to_string(),
+            db_type: DbType::SQLite,
+            connection_string: Some("sqlite::memory:".to_string()),
+            host: None,
+            port: None,
+            user: None,
+            password_encrypted: None,
+            database: None,
+        }
+    }
+
+    #[test]
+    fn variant_name_should_return_connect_for_connect_command() {
+        let cmd = Command::Connect(dummy_conn(), Some("s3cret".to_string()));
+        assert_eq!(cmd.variant_name(), "Connect");
+    }
+
+    #[test]
+    fn variant_name_should_not_expose_password_in_connect() {
+        let cmd = Command::Connect(dummy_conn(), Some("s3cret".to_string()));
+        assert!(!cmd.variant_name().contains("s3cret"));
+    }
+
+    #[test]
+    fn variant_name_should_not_expose_password_in_test_connection() {
+        let cmd = Command::TestConnection(dummy_conn(), Some("s3cret".to_string()));
+        assert!(!cmd.variant_name().contains("s3cret"));
+    }
+
+    #[test]
+    fn variant_name_should_return_correct_name_for_each_variant() {
+        assert_eq!(
+            Command::Disconnect("id".to_string()).variant_name(),
+            "Disconnect"
+        );
+        assert_eq!(
+            Command::RunQuery("SELECT 1".to_string()).variant_name(),
+            "RunQuery"
+        );
+        assert_eq!(Command::CancelQuery.variant_name(), "CancelQuery");
+    }
+}

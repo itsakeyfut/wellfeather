@@ -30,21 +30,21 @@ impl DbPool {
                 let url = pg_url(conn, password);
                 let pool = PgPool::connect(&url)
                     .await
-                    .map_err(|e| DbError::ConnectionFailed(e.to_string()))?;
+                    .map_err(|e| DbError::ConnectionFailed(redact_url_password(&e.to_string())))?;
                 Ok(DbPool::Pg(pool))
             }
             DbType::MySQL => {
                 let url = my_url(conn, password);
                 let pool = MySqlPool::connect(&url)
                     .await
-                    .map_err(|e| DbError::ConnectionFailed(e.to_string()))?;
+                    .map_err(|e| DbError::ConnectionFailed(redact_url_password(&e.to_string())))?;
                 Ok(DbPool::My(pool))
             }
             DbType::SQLite => {
                 let url = sqlite_url(conn);
                 let pool = SqlitePool::connect(&url)
                     .await
-                    .map_err(|e| DbError::ConnectionFailed(e.to_string()))?;
+                    .map_err(|e| DbError::ConnectionFailed(redact_url_password(&e.to_string())))?;
                 Ok(DbPool::Sqlite(pool))
             }
         }
@@ -144,6 +144,44 @@ pub(crate) fn sqlite_url(conn: &DbConnection) -> String {
         Some(":memory:") | None => "sqlite::memory:".to_string(),
         Some(path) => format!("sqlite:{}", path),
     }
+}
+
+// ---------------------------------------------------------------------------
+// URL password redaction
+// ---------------------------------------------------------------------------
+
+/// Replace the password component in any `scheme://user:password@host` URLs
+/// found in `s` with `***`.  Handles multiple URLs in one string.
+/// URLs without a password (no `:pw@` in the authority) are left unchanged.
+pub(crate) fn redact_url_password(s: &str) -> String {
+    let mut result = String::with_capacity(s.len());
+    let mut rest = s;
+    while let Some(scheme_end) = rest.find("://") {
+        // copy everything up to and including "://"
+        result.push_str(&rest[..scheme_end + 3]);
+        rest = &rest[scheme_end + 3..];
+
+        // authority ends at the first '/' or end-of-string
+        let authority_len = rest.find('/').unwrap_or(rest.len());
+        let authority = &rest[..authority_len];
+
+        if let Some(at_pos) = authority.find('@') {
+            let user_info = &authority[..at_pos];
+            if let Some(colon_pos) = user_info.find(':') {
+                // user_info has a password — redact it
+                result.push_str(&user_info[..colon_pos + 1]); // "user:"
+                result.push_str("***");
+                result.push_str(&authority[at_pos..]); // "@host:port/..."
+                rest = &rest[authority_len..];
+                continue;
+            }
+        }
+        // No password found — copy authority verbatim
+        result.push_str(authority);
+        rest = &rest[authority_len..];
+    }
+    result.push_str(rest);
+    result
 }
 
 // ---------------------------------------------------------------------------
@@ -276,5 +314,47 @@ mod tests {
         let conn = sqlite_conn_memory();
         let pool = DbPool::connect(&conn, None).await.unwrap();
         assert_eq!(pool.kind(), DbKind::Sqlite);
+    }
+
+    // -- redact_url_password --------------------------------------------------
+
+    #[test]
+    fn redact_url_password_should_replace_password_in_pg_url() {
+        let input = "failed: postgresql://alice:s3cret@localhost:5432/db";
+        let out = redact_url_password(input);
+        assert!(!out.contains("s3cret"), "password still present: {out}");
+        assert!(out.contains("***"), "redaction marker missing: {out}");
+        assert!(
+            out.contains("alice:***@localhost"),
+            "user and host lost: {out}"
+        );
+    }
+
+    #[test]
+    fn redact_url_password_should_replace_password_in_mysql_url() {
+        let input = "error: mysql://bob:pass123@mysql.host:3306/shop";
+        let out = redact_url_password(input);
+        assert!(!out.contains("pass123"), "password still present: {out}");
+        assert!(out.contains("bob:***@"), "expected bob:***@: {out}");
+    }
+
+    #[test]
+    fn redact_url_password_should_leave_url_without_password_unchanged() {
+        let input = "error: postgresql://alice@localhost:5432/db";
+        assert_eq!(redact_url_password(input), input);
+    }
+
+    #[test]
+    fn redact_url_password_should_leave_plain_text_unchanged() {
+        let input = "connection refused: timeout after 5s";
+        assert_eq!(redact_url_password(input), input);
+    }
+
+    #[test]
+    fn redact_url_password_should_handle_multiple_urls_in_one_string() {
+        let input = "pg://u:p1@h1/db and mysql://v:p2@h2/db2";
+        let out = redact_url_password(input);
+        assert!(!out.contains("p1"), "first password still present: {out}");
+        assert!(!out.contains("p2"), "second password still present: {out}");
     }
 }
