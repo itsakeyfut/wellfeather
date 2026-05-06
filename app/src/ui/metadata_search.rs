@@ -214,3 +214,148 @@ pub(super) fn register_metadata_search_callbacks(
         });
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use wf_db::models::{ColumnInfo, TableInfo};
+
+    fn make_search_meta() -> DbMetadata {
+        DbMetadata {
+            tables: vec![
+                TableInfo {
+                    name: "users".to_string(),
+                    columns: vec![
+                        ColumnInfo {
+                            name: "id".to_string(),
+                            data_type: "INT".to_string(),
+                            nullable: false,
+                        },
+                        ColumnInfo {
+                            name: "email".to_string(),
+                            data_type: "VARCHAR(255)".to_string(),
+                            nullable: true,
+                        },
+                    ],
+                },
+                TableInfo {
+                    name: "orders".to_string(),
+                    columns: vec![ColumnInfo {
+                        name: "user_id".to_string(),
+                        data_type: "INT".to_string(),
+                        nullable: false,
+                    }],
+                },
+            ],
+            views: vec![TableInfo {
+                name: "user_summary".to_string(),
+                columns: vec![],
+            }],
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn search_metadata_should_return_tables_and_views_for_empty_query() {
+        let meta = make_search_meta();
+        let results = search_metadata("", &meta);
+        assert!(
+            results
+                .iter()
+                .any(|r| r.label == "users" && r.kind == "table")
+        );
+        assert!(
+            results
+                .iter()
+                .any(|r| r.label == "orders" && r.kind == "table")
+        );
+        assert!(
+            results
+                .iter()
+                .any(|r| r.label == "user_summary" && r.kind == "view")
+        );
+        assert!(!results.iter().any(|r| r.kind == "column"));
+    }
+
+    #[test]
+    fn search_metadata_should_return_empty_for_no_match() {
+        let meta = make_search_meta();
+        assert!(search_metadata("xyzzy", &meta).is_empty());
+    }
+
+    #[test]
+    fn search_metadata_should_be_case_insensitive() {
+        let meta = make_search_meta();
+        let results = search_metadata("USERS", &meta);
+        assert!(results.iter().any(|r| r.label == "users"));
+    }
+
+    #[test]
+    fn search_metadata_should_include_column_matches_for_non_empty_query() {
+        let meta = make_search_meta();
+        let results = search_metadata("email", &meta);
+        assert!(
+            results
+                .iter()
+                .any(|r| r.kind == "column" && r.label == "users.email")
+        );
+    }
+
+    #[test]
+    fn search_metadata_should_set_table_name_for_columns() {
+        let meta = make_search_meta();
+        let results = search_metadata("email", &meta);
+        let col = results
+            .iter()
+            .find(|r| r.label == "users.email")
+            .expect("users.email should be in results");
+        assert_eq!(col.table_name, "users");
+    }
+
+    #[test]
+    fn search_metadata_should_set_detail_to_data_type_for_columns() {
+        let meta = make_search_meta();
+        let results = search_metadata("email", &meta);
+        let col = results
+            .iter()
+            .find(|r| r.label == "users.email")
+            .expect("users.email should be in results");
+        assert_eq!(col.detail, "VARCHAR(255)");
+    }
+
+    #[test]
+    fn search_metadata_should_rank_prefix_matches_above_substring_matches() {
+        let meta = make_search_meta();
+        let results = search_metadata("user", &meta);
+        let prefix_indices: Vec<usize> = results
+            .iter()
+            .enumerate()
+            .filter(|(_, r)| r.label.to_lowercase().starts_with("user"))
+            .map(|(i, _)| i)
+            .collect();
+        let suffix_indices: Vec<usize> = results
+            .iter()
+            .enumerate()
+            .filter(|(_, r)| {
+                !r.label.to_lowercase().starts_with("user")
+                    && r.label.to_lowercase().contains("user")
+            })
+            .map(|(i, _)| i)
+            .collect();
+        if !prefix_indices.is_empty() && !suffix_indices.is_empty() {
+            assert!(prefix_indices.iter().max() < suffix_indices.iter().min());
+        }
+    }
+
+    #[test]
+    fn search_metadata_should_limit_results_to_fifty() {
+        let mut meta = DbMetadata::default();
+        for i in 0..60 {
+            meta.tables.push(TableInfo {
+                name: format!("table_{i:03}"),
+                columns: vec![],
+            });
+        }
+        assert!(search_metadata("table", &meta).len() <= 50);
+    }
+}
