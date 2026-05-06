@@ -1,22 +1,11 @@
-use std::path::PathBuf;
-
 use wf_config::models::{PageSize, Theme};
 use wf_db::models::DbConnection;
-
-/// Format for result export.
-#[derive(Debug)]
-pub enum ExportFormat {
-    Csv,
-    Json,
-}
 
 /// Granular config change sent from the UI.
 #[derive(Debug)]
 pub enum ConfigUpdate {
     Theme(Theme),
     PageSize(PageSize),
-    FontFamily(String),
-    FontSize(u32),
     Language(String),
     /// Update only safe_dml / read_only flags for an existing connection entry.
     ConnectionFlags {
@@ -41,11 +30,9 @@ pub enum Command {
     Disconnect(String),       // connection_id
     RemoveConnection(String), // connection_id — disconnect + delete from config
     RunQuery(String),         // sql
-    RunSelection(String),     // sql (selected range)
     RunAll(String),           // sql (entire editor)
     CancelQuery,
     FetchCompletion(String, usize), // sql, cursor_pos
-    ExportResult(ExportFormat, PathBuf),
     UpdateConfig(ConfigUpdate),
     /// Fetch the DDL CREATE statement for `name` (table/view/index) on `conn_id`.
     FetchDdl {

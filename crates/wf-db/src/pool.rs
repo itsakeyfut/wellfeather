@@ -2,7 +2,9 @@ use sqlx::{MySqlPool, PgPool, SqlitePool};
 
 use crate::drivers;
 use crate::error::DbError;
-use crate::models::{DbConnection, DbKind, DbMetadata, DbType, QueryResult};
+#[cfg(test)]
+use crate::models::DbKind;
+use crate::models::{DbConnection, DbMetadata, DbType, QueryResult};
 
 // ---------------------------------------------------------------------------
 // DbPool
@@ -81,6 +83,7 @@ impl DbPool {
     }
 
     /// Returns the [`DbKind`] variant that identifies which DB engine this pool targets.
+    #[cfg(test)]
     pub fn kind(&self) -> DbKind {
         match self {
             DbPool::Pg(_) => DbKind::Postgres,

@@ -737,7 +737,6 @@ impl UI {
                     Event::MetadataFetchFailed(msg) => {
                         Self::handle_metadata_fetch_failed(msg, window_weak.clone())
                     }
-                    Event::InsertText(text) => Self::handle_insert_text(text, window_weak.clone()),
                     Event::CompletionReady(items) => {
                         Self::handle_completion_ready(items, window_weak.clone())
                     }
@@ -1126,16 +1125,6 @@ impl UI {
                         .to_string()
                         .into(),
                 );
-            });
-        });
-    }
-
-    fn handle_insert_text(text: String, ww: slint::Weak<crate::AppWindow>) {
-        // clone required: invoke_from_event_loop closure must be 'static
-        let _ = slint::invoke_from_event_loop(move || {
-            with_ui(&ww, move |ui| {
-                let current = ui.get_editor_text().to_string();
-                ui.set_editor_text(append_editor_text(&current, &text).into());
             });
         });
     }
@@ -3817,19 +3806,6 @@ fn sql_has_from(sql: &str) -> bool {
         || upper.contains("\nFROM ")
         || upper.contains("\tFROM ")
         || upper.starts_with("FROM ")
-}
-
-/// Append `text` to `current` editor content with a newline separator.
-/// If `current` is empty the text is used as-is.
-/// If `current` already ends with `\n` the text is appended directly.
-fn append_editor_text(current: &str, text: &str) -> String {
-    if current.is_empty() {
-        text.to_string()
-    } else if current.ends_with('\n') {
-        format!("{}{}", current, text)
-    } else {
-        format!("{}\n{}", current, text)
-    }
 }
 
 /// Build a `DbConnection` from the current values in the connection form global,

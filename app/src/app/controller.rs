@@ -110,11 +110,10 @@ impl AppController {
                 Command::RemoveConnection(id) => this.handle_remove_connection(id).await,
                 Command::RunQuery(sql) => this.handle_run_query(sql).await,
                 Command::RunAll(sql) => this.handle_run_all(sql).await,
-                Command::RunSelection(sql) => this.handle_run_query(sql).await,
                 Command::CancelQuery => this.handle_cancel_query().await,
                 Command::UpdateConfig(update) => this.handle_update_config(update).await,
                 Command::FetchCompletion(sql, cursor_pos) => {
-                    this.handle_fetch_completion(sql, cursor_pos).await;
+                    this.handle_fetch_completion(sql, cursor_pos).await
                 }
                 Command::FetchDdl {
                     tab_id,
@@ -131,7 +130,6 @@ impl AppController {
                     this.handle_fetch_table_data(tab_id, conn_id, table_name, page_size)
                         .await
                 }
-                Command::ExportResult(_, _) => {} // handled client-side in UI layer
             }
         }
     }
@@ -509,7 +507,6 @@ impl AppController {
                     warn!(error = %e, "failed to persist reduce_motion to config");
                 }
             }
-            _ => {}
         }
     }
 

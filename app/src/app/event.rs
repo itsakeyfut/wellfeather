@@ -5,11 +5,7 @@ use wf_db::models::{DbMetadata, QueryResult};
 /// Fine-grained state transitions forwarded to the UI via `StateChanged`.
 #[derive(Debug)]
 pub enum StateEvent {
-    QueryStarted,
-    QueryFinished(QueryResult),
-    ConnectionChanged(String),
     ThemeChanged(Theme),
-    LoadingChanged(bool),
 }
 
 /// Controller → UI channel messages.
@@ -38,8 +34,6 @@ pub enum Event {
     CompletionReady(Vec<CompletionItem>),
     MetadataLoaded(String, DbMetadata), // conn_id, metadata
     MetadataFetchFailed(String),
-    /// Insert text into the SQL editor (append after existing content).
-    InsertText(String),
     ConfigUpdated,
     /// Fired after `ConfigUpdate::ConnectionFlags` is persisted.
     /// Carries the connection id and the new `read_only` value so the sidebar

@@ -386,29 +386,6 @@ fn result_to_tsv_should_produce_header_only_when_no_rows() {
     assert_eq!(tsv, "id\tname");
 }
 
-// ── append_editor_text tests ──────────────────────────────────────────────────
-
-#[test]
-fn append_editor_text_should_set_text_when_editor_is_empty() {
-    assert_eq!(append_editor_text("", "SELECT * FROM t"), "SELECT * FROM t");
-}
-
-#[test]
-fn append_editor_text_should_prepend_newline_when_content_exists() {
-    assert_eq!(
-        append_editor_text("SELECT 1", "SELECT * FROM t"),
-        "SELECT 1\nSELECT * FROM t"
-    );
-}
-
-#[test]
-fn append_editor_text_should_not_double_newline_when_content_ends_with_newline() {
-    assert_eq!(
-        append_editor_text("SELECT 1\n", "SELECT * FROM t"),
-        "SELECT 1\nSELECT * FROM t"
-    );
-}
-
 // ── compute_matches tests ─────────────────────────────────────────────────────
 
 #[test]
