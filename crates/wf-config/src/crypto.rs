@@ -93,15 +93,55 @@ pub fn load_or_create_key(dir: &Path) -> anyhow::Result<[u8; 32]> {
                 v.len()
             )
         })?;
+        #[cfg(unix)]
+        restrict_key_file_permissions(&key_path)?;
         return Ok(key);
     }
 
     let key: [u8; 32] = rand::random();
-    fs::create_dir_all(dir)
-        .with_context(|| format!("failed to create key directory {}", dir.display()))?;
-    fs::write(&key_path, key)
-        .with_context(|| format!("failed to write key file {}", key_path.display()))?;
+    #[cfg(unix)]
+    {
+        use std::io::Write as _;
+        use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
+        fs::DirBuilder::new()
+            .mode(0o700)
+            .recursive(true)
+            .create(dir)
+            .with_context(|| format!("failed to create key directory {}", dir.display()))?;
+        // Open with mode 0600 at creation time to avoid a world-readable window.
+        let mut f = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&key_path)
+            .with_context(|| format!("failed to create key file {}", key_path.display()))?;
+        f.write_all(&key)
+            .with_context(|| format!("failed to write key file {}", key_path.display()))?;
+    }
+    #[cfg(not(unix))]
+    {
+        fs::create_dir_all(dir)
+            .with_context(|| format!("failed to create key directory {}", dir.display()))?;
+        fs::write(&key_path, key)
+            .with_context(|| format!("failed to write key file {}", key_path.display()))?;
+    }
     Ok(key)
+}
+
+/// Sets the key file's Unix permissions to `0600` (owner read/write only).
+/// Skips `set_permissions` if the mode is already correct.
+#[cfg(unix)]
+fn restrict_key_file_permissions(path: &Path) -> anyhow::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    let meta = fs::metadata(path)
+        .with_context(|| format!("failed to stat key file {}", path.display()))?;
+    let mut perms = meta.permissions();
+    if perms.mode() & 0o777 != 0o600 {
+        perms.set_mode(0o600);
+        fs::set_permissions(path, perms)
+            .with_context(|| format!("failed to set permissions on {}", path.display()))?;
+    }
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -174,6 +214,81 @@ mod tests {
 
         let loaded = load_or_create_key(dir.path()).expect("should succeed");
         assert_eq!(loaded, expected);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn load_or_create_key_should_create_key_file_with_0600_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let parent = tempfile::tempdir().expect("failed to create temp dir");
+        let key_dir = parent.path().join("wellfeather"); // does not exist yet
+        let key_path = key_dir.join(".wellfeather.key");
+
+        load_or_create_key(&key_dir).expect("should succeed");
+
+        let mode = fs::metadata(&key_path)
+            .expect("key file should exist")
+            .permissions()
+            .mode();
+        assert_eq!(
+            mode & 0o777,
+            0o600,
+            "key file must be 0600, got {:o}",
+            mode & 0o777
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn load_or_create_key_should_create_key_dir_with_0700_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let parent = tempfile::tempdir().expect("failed to create temp dir");
+        let key_dir = parent.path().join("wellfeather"); // does not exist yet
+
+        load_or_create_key(&key_dir).expect("should succeed");
+
+        let mode = fs::metadata(&key_dir)
+            .expect("key dir should exist")
+            .permissions()
+            .mode();
+        assert_eq!(
+            mode & 0o777,
+            0o700,
+            "key dir must be 0700, got {:o}",
+            mode & 0o777
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn load_or_create_key_should_fix_permissions_on_existing_key_file() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().expect("failed to create temp dir");
+        let key_path = dir.path().join(".wellfeather.key");
+
+        let key: [u8; 32] = *b"known-32-byte-key-for-testing-xx";
+        fs::write(&key_path, key).expect("failed to write key file");
+
+        // Simulate a world-readable key file (0644)
+        let mut perms = fs::metadata(&key_path).unwrap().permissions();
+        perms.set_mode(0o644);
+        fs::set_permissions(&key_path, perms).unwrap();
+
+        load_or_create_key(dir.path()).expect("should succeed");
+
+        let mode = fs::metadata(&key_path)
+            .expect("key file should exist")
+            .permissions()
+            .mode();
+        assert_eq!(
+            mode & 0o777,
+            0o600,
+            "permissions must be corrected to 0600, got {:o}",
+            mode & 0o777
+        );
     }
 
     // ── proptest ──────────────────────────────────────────────────────────────
