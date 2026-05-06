@@ -93,7 +93,7 @@ impl AppController {
 
         let mut this = self;
         while let Some(cmd) = this.rx_cmd.recv().await {
-            debug!("received command: {:?}", cmd);
+            debug!("received command: {}", cmd.variant_name());
             match cmd {
                 Command::Connect(conn, pw) => this.handle_connect(conn, pw).await,
                 Command::TestConnection(conn, pw) => this.handle_test_connection(conn, pw).await,
