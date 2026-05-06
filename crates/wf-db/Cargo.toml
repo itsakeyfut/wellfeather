@@ -21,4 +21,4 @@ uuid      = { workspace = true }
 chrono    = { workspace = true }
 anyhow            = { workspace = true }
 tracing           = { workspace = true }
-percent-encoding  = "2"
+percent-encoding  = "2.3.2"
