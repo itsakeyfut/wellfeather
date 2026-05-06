@@ -43,7 +43,8 @@ impl SessionManager {
 
     /// Create a `SessionManager` backed by an arbitrary [`ConfigManager`].
     ///
-    /// Primarily used in tests to point at a temporary directory.
+    /// Used in tests to point at a temporary directory.
+    #[cfg(test)]
     pub fn with_config_manager(cm: ConfigManager) -> Self {
         Self { config_manager: cm }
     }

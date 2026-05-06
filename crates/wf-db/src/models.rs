@@ -14,6 +14,7 @@ pub enum DbType {
 }
 
 /// Internal code-level DB variant used for enum dispatch in `DbPool`.
+#[cfg(test)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DbKind {
     Postgres,
