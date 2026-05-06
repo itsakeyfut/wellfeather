@@ -9,8 +9,6 @@ mod query;
 mod snippet;
 mod tabs;
 mod tabs_state;
-#[cfg(test)]
-mod tests;
 
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
@@ -25,17 +23,6 @@ use wf_db::models::{DbMetadata, TableInfo};
 use wf_history::find_history::FindHistoryService;
 use wf_history::session::SessionService;
 use wf_query::analyzer::has_dangerous_dml;
-
-// Re-export items needed by tests.rs (use super::*) — guarded to avoid
-// unused-import warnings in non-test builds.
-#[cfg(test)]
-pub(crate) use completion::{find_prefix_start, is_terminal_expression, sql_has_from};
-#[cfg(test)]
-pub(crate) use find_replace::compute_matches;
-#[cfg(test)]
-pub(crate) use metadata_search::search_metadata;
-#[cfg(test)]
-pub(crate) use query::{cells_to_tsv, filter_rows, result_to_tsv, sort_rows};
 
 const COMPLETION_DEBOUNCE_MS: u64 = 300;
 const ERROR_TRUNCATION_CHARS: usize = 80;
@@ -588,5 +575,143 @@ impl UI {
     pub fn run(&self) -> Result<()> {
         self.window.run()?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use wf_config::models::{ConnectionConfig, DbTypeName};
+
+    fn make_conn(id: &str, name: &str) -> ConnectionConfig {
+        ConnectionConfig {
+            id: id.to_string(),
+            name: name.to_string(),
+            db_type: DbTypeName::SQLite,
+            connection_string: None,
+            host: None,
+            port: None,
+            user: None,
+            password_encrypted: None,
+            database: None,
+            safe_dml: true,
+            read_only: false,
+        }
+    }
+
+    fn make_meta(tables: &[&str]) -> DbMetadata {
+        DbMetadata {
+            tables: tables
+                .iter()
+                .map(|n| TableInfo {
+                    name: n.to_string(),
+                    columns: vec![],
+                })
+                .collect(),
+            views: vec![],
+            stored_procs: vec![],
+            indexes: vec![],
+        }
+    }
+
+    // ── build_sidebar_tree ────────────────────────────────────────────────────
+
+    #[test]
+    fn build_sidebar_tree_should_render_connection_nodes() {
+        let conns = vec![make_conn("a", "Alpha"), make_conn("b", "Beta")];
+        let nodes = build_sidebar_tree(
+            &conns,
+            "",
+            &HashMap::new(),
+            &HashSet::new(),
+            &HashMap::new(),
+        );
+        assert_eq!(nodes.len(), 2);
+        assert_eq!(nodes[0].label.as_str(), "Alpha");
+        assert_eq!(nodes[0].level, 0);
+        assert_eq!(nodes[0].node_kind.as_str(), "connection");
+        assert_eq!(nodes[1].label.as_str(), "Beta");
+    }
+
+    #[test]
+    fn build_sidebar_tree_should_show_categories_when_connection_expanded() {
+        let conns = vec![make_conn("a", "Alpha")];
+        let mut expanded = HashSet::new();
+        expanded.insert("conn:a".to_string());
+        let mut metadata = HashMap::new();
+        metadata.insert("a".to_string(), make_meta(&["users"]));
+        let nodes = build_sidebar_tree(&conns, "a", &metadata, &expanded, &HashMap::new());
+        // conn + Tables + users(visible=false) + Views + Stored Procedures + Indexes = 6 nodes
+        // Children are always emitted; visible flag drives animation.
+        assert_eq!(nodes.len(), 6);
+        assert_eq!(nodes[1].label.as_str(), "Tables");
+        assert_eq!(nodes[1].level, 1);
+        assert_eq!(nodes[1].node_kind.as_str(), "category");
+        // "users" is emitted but invisible (Tables category not expanded)
+        assert_eq!(nodes[2].label.as_str(), "users");
+        assert!(!nodes[2].visible);
+    }
+
+    #[test]
+    fn build_sidebar_tree_should_show_items_when_category_expanded() {
+        let conns = vec![make_conn("a", "Alpha")];
+        let mut expanded = HashSet::new();
+        expanded.insert("conn:a".to_string());
+        expanded.insert("cat:a:Tables".to_string());
+        let mut metadata = HashMap::new();
+        metadata.insert("a".to_string(), make_meta(&["users", "orders"]));
+        let nodes = build_sidebar_tree(&conns, "a", &metadata, &expanded, &HashMap::new());
+        // conn + Tables + users + orders + Views + Stored Procedures + Indexes = 7
+        assert_eq!(nodes.len(), 7);
+        assert_eq!(nodes[2].label.as_str(), "users");
+        assert_eq!(nodes[2].level, 2);
+        assert_eq!(nodes[2].node_kind.as_str(), "table");
+        assert_eq!(nodes[3].label.as_str(), "orders");
+    }
+
+    #[test]
+    fn build_sidebar_tree_should_hide_children_when_collapsed() {
+        let conns = vec![make_conn("a", "Alpha")];
+        let nodes = build_sidebar_tree(
+            &conns,
+            "a",
+            &HashMap::new(),
+            &HashSet::new(),
+            &HashMap::new(),
+        );
+        // No metadata → no child nodes emitted at all.
+        assert_eq!(nodes.len(), 1);
+        assert_eq!(nodes[0].level, 0);
+    }
+
+    #[test]
+    fn build_sidebar_tree_should_emit_invisible_children_for_animation() {
+        let conns = vec![make_conn("a", "Alpha")];
+        let mut metadata = HashMap::new();
+        metadata.insert("a".to_string(), make_meta(&["users"]));
+        // Connection collapsed (not in expanded)
+        let nodes = build_sidebar_tree(&conns, "a", &metadata, &HashSet::new(), &HashMap::new());
+        // Categories are emitted but invisible
+        assert!(nodes.len() > 1);
+        for node in nodes.iter().skip(1) {
+            assert!(
+                !node.visible,
+                "category should be invisible when conn collapsed"
+            );
+        }
+    }
+
+    #[test]
+    fn build_sidebar_tree_should_mark_active_connection() {
+        let conns = vec![make_conn("a", "Alpha"), make_conn("b", "Beta")];
+        let nodes = build_sidebar_tree(
+            &conns,
+            "b",
+            &HashMap::new(),
+            &HashSet::new(),
+            &HashMap::new(),
+        );
+        assert!(!nodes[0].is_active);
+        assert!(nodes[1].is_active);
     }
 }

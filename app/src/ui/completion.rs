@@ -271,3 +271,129 @@ pub(super) fn handle_completion_ready(
         });
     });
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── find_prefix_start ─────────────────────────────────────────────────────
+
+    #[test]
+    fn find_prefix_start_should_return_word_start_before_cursor() {
+        assert_eq!(find_prefix_start("SELECT sel", 10), 7);
+    }
+
+    #[test]
+    fn find_prefix_start_should_return_cursor_when_at_space() {
+        assert_eq!(find_prefix_start("SELECT ", 7), 7);
+    }
+
+    #[test]
+    fn find_prefix_start_should_return_after_dot_for_qualified_name() {
+        assert_eq!(find_prefix_start("u.em", 4), 2);
+    }
+
+    #[test]
+    fn find_prefix_start_should_return_cursor_when_no_prefix() {
+        assert_eq!(find_prefix_start("SELECT * FROM ", 14), 14);
+    }
+
+    // ── sql_has_from ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn sql_has_from_should_return_true_when_from_present() {
+        assert!(sql_has_from("SELECT id FROM users"));
+    }
+
+    #[test]
+    fn sql_has_from_should_return_false_when_no_from() {
+        assert!(!sql_has_from("SELECT id, name"));
+    }
+
+    #[test]
+    fn sql_has_from_should_return_true_for_multiline_from() {
+        assert!(sql_has_from("SELECT id\nFROM users"));
+    }
+
+    #[test]
+    fn sql_has_from_should_return_false_for_from_in_column_name() {
+        // "from" inside a word like "transform" should not match
+        assert!(!sql_has_from("SELECT transform_id"));
+    }
+
+    // ── is_terminal_expression ────────────────────────────────────────────────
+
+    #[test]
+    fn is_terminal_expression_should_return_true_for_is_not_null() {
+        assert!(is_terminal_expression(
+            "SELECT name FROM users WHERE deleted_at IS NOT NULL"
+        ));
+    }
+
+    #[test]
+    fn is_terminal_expression_should_return_true_for_is_null() {
+        assert!(is_terminal_expression("WHERE col IS NULL"));
+    }
+
+    #[test]
+    fn is_terminal_expression_should_return_true_for_true_keyword() {
+        assert!(is_terminal_expression("WHERE active = TRUE"));
+    }
+
+    #[test]
+    fn is_terminal_expression_should_return_true_for_false_keyword() {
+        assert!(is_terminal_expression("WHERE active = FALSE"));
+    }
+
+    #[test]
+    fn is_terminal_expression_should_return_true_for_asc_keyword() {
+        assert!(is_terminal_expression("ORDER BY id ASC"));
+    }
+
+    #[test]
+    fn is_terminal_expression_should_return_true_for_desc_keyword() {
+        assert!(is_terminal_expression("ORDER BY id DESC"));
+    }
+
+    #[test]
+    fn is_terminal_expression_should_return_true_for_string_literal() {
+        assert!(is_terminal_expression("WHERE name = 'alice'"));
+    }
+
+    #[test]
+    fn is_terminal_expression_should_return_true_for_integer_literal() {
+        assert!(is_terminal_expression("WHERE id = 5"));
+    }
+
+    #[test]
+    fn is_terminal_expression_should_return_true_for_limit_clause() {
+        assert!(is_terminal_expression("LIMIT 10"));
+    }
+
+    #[test]
+    fn is_terminal_expression_should_return_false_after_where_keyword() {
+        assert!(!is_terminal_expression("FROM users WHERE"));
+    }
+
+    #[test]
+    fn is_terminal_expression_should_return_false_for_table_name_position() {
+        assert!(!is_terminal_expression("SELECT * FROM users"));
+    }
+
+    #[test]
+    fn is_terminal_expression_should_return_false_for_column_name_position() {
+        assert!(!is_terminal_expression("SELECT id"));
+    }
+
+    #[test]
+    fn is_terminal_expression_should_not_match_null_suffix_in_word() {
+        // "nullify" last word is "NULLIFY" — not the keyword "NULL"
+        assert!(!is_terminal_expression("WHERE nullify"));
+    }
+
+    #[test]
+    fn is_terminal_expression_should_not_match_null_within_identifier() {
+        // "is_not_null_col" is a column name, not the keyword NULL
+        assert!(!is_terminal_expression("SELECT is_not_null_col"));
+    }
+}

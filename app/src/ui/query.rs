@@ -719,3 +719,173 @@ pub(super) fn handle_table_data_loaded(
         });
     });
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn ss(s: &str) -> slint::SharedString {
+        s.into()
+    }
+
+    fn sv(s: &str) -> Option<String> {
+        Some(s.to_string())
+    }
+
+    // ── filter_rows ───────────────────────────────────────────────────────────
+
+    #[test]
+    fn filter_rows_should_return_all_when_query_is_empty_string() {
+        let cols = vec![ss("id"), ss("name")];
+        let rows = vec![vec![sv("1"), sv("Alice")], vec![sv("2"), sv("Bob")]];
+        assert_eq!(filter_rows(&cols, &rows, "").len(), 2);
+    }
+
+    #[test]
+    fn filter_rows_should_return_all_when_query_is_whitespace() {
+        let cols = vec![ss("id"), ss("name")];
+        let rows = vec![vec![sv("1"), sv("Alice")], vec![sv("2"), sv("Bob")]];
+        assert_eq!(filter_rows(&cols, &rows, "   ").len(), 2);
+    }
+
+    #[test]
+    fn filter_rows_should_match_substring_across_all_columns() {
+        let cols = vec![ss("name"), ss("city")];
+        let rows = vec![
+            vec![sv("Alice"), sv("Tokyo")],
+            vec![sv("Bob"), sv("Osaka")],
+            vec![sv("Alice Smith"), sv("Kyoto")],
+        ];
+        let result = filter_rows(&cols, &rows, "alice");
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0][0].as_deref(), Some("Alice"));
+        assert_eq!(result[1][0].as_deref(), Some("Alice Smith"));
+    }
+
+    #[test]
+    fn filter_rows_should_match_exact_column_value() {
+        let cols = vec![ss("name"), ss("city")];
+        let rows = vec![vec![sv("Alice"), sv("Tokyo")], vec![sv("Bob"), sv("Osaka")]];
+        let result = filter_rows(&cols, &rows, "city = 'Tokyo'");
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0][1].as_deref(), Some("Tokyo"));
+    }
+
+    #[test]
+    fn filter_rows_should_return_empty_when_column_not_found() {
+        let cols = vec![ss("name")];
+        let rows = vec![vec![sv("Alice")]];
+        let result = filter_rows(&cols, &rows, "missing = 'x'");
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn filter_rows_should_not_match_null_with_eq_predicate() {
+        let cols = vec![ss("name")];
+        let rows = vec![vec![None], vec![sv("Alice")]];
+        let result = filter_rows(&cols, &rows, "name = ''");
+        // NULL != '' — only the non-null empty string row should match, but here
+        // there is none, so result is empty.
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn filter_rows_should_treat_null_as_empty_for_substring_match() {
+        let cols = vec![ss("name")];
+        let rows = vec![vec![None], vec![sv("Alice")]];
+        let result = filter_rows(&cols, &rows, "Alice");
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0][0].as_deref(), Some("Alice"));
+    }
+
+    // ── sort_rows ─────────────────────────────────────────────────────────────
+
+    #[test]
+    fn sort_rows_should_sort_strings_ascending() {
+        let mut rows = vec![vec![sv("banana")], vec![sv("apple")], vec![sv("cherry")]];
+        sort_rows(&mut rows, 0, true);
+        assert_eq!(rows[0][0].as_deref(), Some("apple"));
+        assert_eq!(rows[1][0].as_deref(), Some("banana"));
+        assert_eq!(rows[2][0].as_deref(), Some("cherry"));
+    }
+
+    #[test]
+    fn sort_rows_should_sort_strings_descending() {
+        let mut rows = vec![vec![sv("banana")], vec![sv("apple")], vec![sv("cherry")]];
+        sort_rows(&mut rows, 0, false);
+        assert_eq!(rows[0][0].as_deref(), Some("cherry"));
+        assert_eq!(rows[1][0].as_deref(), Some("banana"));
+        assert_eq!(rows[2][0].as_deref(), Some("apple"));
+    }
+
+    #[test]
+    fn sort_rows_should_sort_numerically_when_values_are_numbers() {
+        let mut rows = vec![vec![sv("10")], vec![sv("2")], vec![sv("20")]];
+        sort_rows(&mut rows, 0, true);
+        assert_eq!(rows[0][0].as_deref(), Some("2"));
+        assert_eq!(rows[1][0].as_deref(), Some("10"));
+        assert_eq!(rows[2][0].as_deref(), Some("20"));
+    }
+
+    #[test]
+    fn sort_rows_should_put_nulls_last_ascending() {
+        let mut rows = vec![vec![None], vec![sv("b")], vec![sv("a")]];
+        sort_rows(&mut rows, 0, true);
+        assert_eq!(rows[0][0].as_deref(), Some("a"));
+        assert_eq!(rows[1][0].as_deref(), Some("b"));
+        assert!(rows[2][0].is_none());
+    }
+
+    #[test]
+    fn sort_rows_should_put_nulls_last_descending() {
+        let mut rows = vec![vec![None], vec![sv("b")], vec![sv("a")]];
+        sort_rows(&mut rows, 0, false);
+        assert_eq!(rows[0][0].as_deref(), Some("b"));
+        assert_eq!(rows[1][0].as_deref(), Some("a"));
+        assert!(rows[2][0].is_none());
+    }
+
+    // ── cells_to_tsv / result_to_tsv ──────────────────────────────────────────
+
+    #[test]
+    fn cells_to_tsv_should_join_values_with_tabs() {
+        let cells = vec![sv("a"), sv("b"), sv("c")];
+        assert_eq!(cells_to_tsv(&cells), "a\tb\tc");
+    }
+
+    #[test]
+    fn cells_to_tsv_should_render_null_as_empty_string() {
+        let cells = vec![sv("a"), None, sv("c")];
+        assert_eq!(cells_to_tsv(&cells), "a\t\tc");
+    }
+
+    #[test]
+    fn cells_to_tsv_should_handle_empty_row() {
+        let cells: Vec<Option<String>> = vec![];
+        assert_eq!(cells_to_tsv(&cells), "");
+    }
+
+    #[test]
+    fn result_to_tsv_should_include_header_and_rows() {
+        let cols = vec!["id", "name"];
+        let rows = vec![vec![sv("1"), sv("Alice")], vec![sv("2"), sv("Bob")]];
+        let tsv = result_to_tsv(&cols, &rows);
+        assert_eq!(tsv, "id\tname\n1\tAlice\n2\tBob");
+    }
+
+    #[test]
+    fn result_to_tsv_should_render_null_cells_as_empty_string() {
+        let cols = vec!["id", "name"];
+        let rows = vec![vec![sv("1"), None]];
+        let tsv = result_to_tsv(&cols, &rows);
+        assert_eq!(tsv, "id\tname\n1\t");
+    }
+
+    #[test]
+    fn result_to_tsv_should_produce_header_only_when_no_rows() {
+        let cols = vec!["id", "name"];
+        let rows: Vec<Vec<Option<String>>> = vec![];
+        let tsv = result_to_tsv(&cols, &rows);
+        assert_eq!(tsv, "id\tname");
+    }
+}
