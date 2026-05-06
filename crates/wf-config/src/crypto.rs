@@ -127,10 +127,12 @@ mod tests {
         let encrypted = encrypt("my-password", TEST_KEY);
 
         // Split and tamper with one byte in the ciphertext half
-        let (nonce_b64, ct_b64) = encrypted.split_once(':').unwrap();
+        let (nonce_b64, ct_b64) = encrypted
+            .split_once(':')
+            .expect("encrypted output should have nonce:ct format");
         let mut ct_bytes = base64::engine::general_purpose::STANDARD
             .decode(ct_b64)
-            .unwrap();
+            .expect("ct_b64 should be valid Base64");
         ct_bytes[0] ^= 0xFF; // flip all bits in the first byte
         let tampered = format!(
             "{}:{}",
@@ -138,8 +140,12 @@ mod tests {
             base64::engine::general_purpose::STANDARD.encode(&ct_bytes)
         );
 
-        let result = decrypt(&tampered, TEST_KEY);
-        assert!(result.is_err(), "expected Err for tampered ciphertext");
+        let err = decrypt(&tampered, TEST_KEY)
+            .expect_err("expected decrypt to fail on tampered ciphertext");
+        assert!(
+            err.to_string().contains("GCM authentication"),
+            "expected GCM tag mismatch error, got: {err}"
+        );
     }
 
     #[test]
@@ -154,7 +160,7 @@ mod tests {
         assert_eq!(key.len(), 32);
         assert!(key_path.exists(), "key file should be created");
 
-        let stored = fs::read(&key_path).unwrap();
+        let stored = fs::read(&key_path).expect("failed to read key file");
         assert_eq!(stored, key, "stored key should match returned key");
     }
 
@@ -164,9 +170,26 @@ mod tests {
         let key_path = dir.path().join(".wellfeather.key");
 
         let expected: [u8; 32] = *b"known-32-byte-key-for-testing-xx";
-        fs::write(&key_path, expected).unwrap();
+        fs::write(&key_path, expected).expect("failed to write key file");
 
         let loaded = load_or_create_key(dir.path()).expect("should succeed");
         assert_eq!(loaded, expected);
+    }
+
+    // ── proptest ──────────────────────────────────────────────────────────────
+
+    use proptest::prelude::*;
+
+    proptest! {
+        #[test]
+        fn encrypt_decrypt_should_roundtrip_any_plaintext(
+            plaintext in ".*",
+        ) {
+            let key = [0u8; 32];
+            let ciphertext = encrypt(&plaintext, &key);
+            let decrypted = decrypt(&ciphertext, &key)
+                .expect("decrypt should succeed for valid ciphertext");
+            prop_assert_eq!(decrypted, plaintext);
+        }
     }
 }
