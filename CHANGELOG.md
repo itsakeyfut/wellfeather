@@ -8,6 +8,36 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [0.9.0] - 2026-05-07
 
+### v0.9.0 - Editor Polish & Security Hardening
+
+#### Added
+
+- SQL syntax highlighting with a color overlay in the editor (keywords, identifiers, strings, comments, operators)
+- Animation system with `reduce-motion` config option; all transitions respect the setting
+- Floating find/replace bar with search history (Ctrl+F)
+- Snippet system: save, browse, and insert reusable SQL snippets via a draggable panel
+- INSERT SQL export from query results (complements existing CSV and JSON export)
+- Metadata search palette (Ctrl+P): fuzzy-search tables, columns, and views
+- Command palette (Ctrl+K): fuzzy-search connections and built-in actions
+- Platform abstraction layer for OS directories, DPI, and native dark-mode detection
+- Distribution packaging: Windows MSIX, macOS DMG, and Linux AppImage via `cargo x package`
+- Tab key inserts spaces with configurable width (2 / 4 / 8) via Edit → Editor Preferences
+
+#### Fixed
+
+- Text-jump on Enter in the syntax-highlight overlay (stale `line-h` for one frame) (#252)
+- Password redacted from controller command log and `ConnectionFailed` error messages (#268)
+- Username and password in PostgreSQL/MySQL connection URLs are now percent-encoded (#269)
+- Key file and directory permissions restricted to owner-only on Unix (0o600 / 0o700) (#270)
+- Leading SQL comments (`--`, `/* */`) no longer bypass DML safety checks (#271, #296)
+- Completion popup stays open after Backspace clears the word prefix (#260)
+- Accepted completion item text was not syntax-highlighted until next keystroke (#301)
+- Re-connecting to an already-active connection from the command palette is now a no-op
+
+#### Changed
+
+- All SQLite databases consolidated into a single `wellfeather.db` file
+
 ## [0.8.0] - 2026-05-02
 
 ### v0.8.0 - Multi-tab Interface
