@@ -181,7 +181,9 @@ pub(super) fn register_editor_callbacks(window: &crate::AppWindow, tx_cmd: mpsc:
         let tx_cmd = tx_cmd.clone(); // clone required: callback closure needs owned tx_cmd
         let window_weak = window.as_weak(); // clone required: check_safe_dml needs window ref
         ui.on_run_query(move |sql| {
+            tracing::debug!(sql = %sql, "on_run_query called");
             if check_safe_dml(&window_weak, &sql, "query") {
+                tracing::debug!("on_run_query: blocked by safe_dml");
                 return;
             }
             send_cmd(&tx_cmd, Command::RunQuery(sql.to_string()));
@@ -192,12 +194,21 @@ pub(super) fn register_editor_callbacks(window: &crate::AppWindow, tx_cmd: mpsc:
         let window_weak = window.as_weak(); // clone required: check_safe_dml needs window ref
         ui.on_run_query_at_cursor(move |sql, cursor| {
             let stmt = wf_query::analyzer::extract_statement_at(sql.as_str(), cursor as usize);
-            if !stmt.is_empty() {
-                if check_safe_dml(&window_weak, stmt, "cursor") {
-                    return;
-                }
-                send_cmd(&tx_cmd, Command::RunQuery(stmt.to_owned()));
+            tracing::debug!(
+                sql_len = sql.len(),
+                cursor = cursor,
+                stmt = %stmt,
+                "on_run_query_at_cursor called"
+            );
+            if stmt.is_empty() {
+                tracing::warn!("on_run_query_at_cursor: stmt is empty, no command sent");
+                return;
             }
+            if check_safe_dml(&window_weak, stmt, "cursor") {
+                tracing::debug!("on_run_query_at_cursor: blocked by safe_dml");
+                return;
+            }
+            send_cmd(&tx_cmd, Command::RunQuery(stmt.to_owned()));
         });
     }
     {
@@ -218,6 +229,7 @@ pub(super) fn register_formatter_callback(
         with_ui(&window_weak, |ui| {
             let text = ui.get_editor_text().to_string();
             let formatted = wf_query::formatter::format_sql(&text);
+            tracing::debug!(input = %text, output = %formatted, "on_format_sql called");
             let spans = compute_highlight_spans(&formatted);
             ui.set_editor_text(formatted.into());
             apply_highlight_spans(&hl_model, spans);

@@ -18,6 +18,10 @@ build-release:
 run:
     cargo run -p wellfeather
 
+# Run the app with info-level logging (for debugging)
+run-debug:
+    RUST_LOG="wellfeather=info" cargo run -p wellfeather
+
 # Run the app in release mode
 run-release:
     cargo run -p wellfeather --release
