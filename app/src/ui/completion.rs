@@ -239,8 +239,12 @@ pub(super) fn register_completion_accept_callback(window: &crate::AppWindow) {
 
                 // inserted text, e.g. between the quotes in `''`).
                 let at_end = final_cursor as usize == final_text.len();
-                ui.set_editor_text(final_text.clone().into());
+                let final_shared: slint::SharedString = final_text.clone().into();
+                ui.set_editor_text(final_shared.clone());
                 ui.set_editor_cursor_target(final_cursor);
+                // set_editor_text from Rust does not fire text-edited, so the
+                // highlight overlay must be refreshed explicitly here.
+                ui.invoke_update_highlight(final_shared);
                 // Re-trigger only when the cursor is at end of inserted text AND the text
                 // does not end at a syntactically terminal expression (IS NULL, TRUE, FALSE,
                 // a string/numeric literal, ASC/DESC).  Terminal positions use a virtual
