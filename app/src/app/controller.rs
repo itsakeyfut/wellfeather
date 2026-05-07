@@ -141,7 +141,9 @@ fn apply_limit(sql: &str, limit: usize) -> String {
     }
     let trimmed = sql.trim().trim_end_matches(';').trim_end();
     let upper = trimmed.to_uppercase();
-    if upper.starts_with("SELECT") && !upper.contains(" LIMIT ") && !trimmed.contains(';') {
+    // Split on whitespace so "\nLIMIT" (formatted SQL) matches as well as " LIMIT ".
+    let has_limit = upper.split_whitespace().any(|w| w == "LIMIT");
+    if upper.starts_with("SELECT") && !has_limit && !trimmed.contains(';') {
         format!("{} LIMIT {}", trimmed, limit)
     } else {
         sql.to_string()
@@ -257,6 +259,23 @@ mod tests {
     #[test]
     fn apply_limit_should_not_apply_to_multi_statement_sql() {
         let sql = "SELECT 1; SELECT 2";
+        assert_eq!(apply_limit(sql, 500), sql);
+    }
+
+    #[test]
+    fn apply_limit_should_append_to_formatted_multiline_select() {
+        // format_sql("select name from users;") produces this output
+        let sql = "SELECT\n  name\nFROM\n  users;";
+        assert_eq!(
+            apply_limit(sql, 500),
+            "SELECT\n  name\nFROM\n  users LIMIT 500"
+        );
+    }
+
+    #[test]
+    fn apply_limit_should_not_duplicate_limit_on_formatted_sql_with_existing_limit() {
+        // If the user already wrote LIMIT on its own line, do not append another.
+        let sql = "SELECT\n  *\nFROM\n  t\nLIMIT 10";
         assert_eq!(apply_limit(sql, 500), sql);
     }
 

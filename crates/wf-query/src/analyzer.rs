@@ -1,11 +1,17 @@
-/// Returns the SQL statement that contains `cursor_pos` (byte offset).
+/// Returns the SQL statement that contains `cursor_pos` (byte offset),
+/// with leading block comments (`/* … */`) and line comments (`--`) stripped.
 ///
 /// The input is split on `;` and the segment whose byte range covers
-/// `cursor_pos` is returned, trimmed of surrounding whitespace.
+/// `cursor_pos` is returned, trimmed of surrounding whitespace and with any
+/// leading comment preamble removed.  This means a comment that acts as a
+/// header for a statement (e.g. `/* docs */\nSELECT …`) is excluded from the
+/// returned text so that the caller receives only the executable SQL.
+///
 /// A cursor positioned exactly on a `;` is considered part of the
 /// statement that precedes it.
 ///
-/// If the input has no semicolon the whole string is returned trimmed.
+/// If the input has no semicolon the whole string is returned (trimmed,
+/// comments stripped).
 pub fn extract_statement_at(sql: &str, cursor_pos: usize) -> &str {
     let mut pos: usize = 0;
     let mut last: &str = "";
@@ -23,16 +29,18 @@ pub fn extract_statement_at(sql: &str, cursor_pos: usize) -> &str {
             if cursor_pos < pos + prefix_len && segment[..prefix_len].contains('\n') {
                 return last;
             }
-            return trimmed;
+            return strip_leading_comments(trimmed);
         }
         let t = segment.trim();
-        if !t.is_empty() {
-            last = t;
+        let effective = strip_leading_comments(t);
+        if !effective.is_empty() {
+            last = effective;
         }
         pos = end + 1; // skip the ';'
     }
     // cursor_pos is past the end of the string
-    if last.is_empty() { sql.trim() } else { last }
+    let fallback = if last.is_empty() { sql.trim() } else { last };
+    strip_leading_comments(fallback)
 }
 
 /// Splits `sql` on semicolons and returns all non-empty, trimmed statements.
@@ -229,6 +237,94 @@ mod tests {
         let sql = "SELECT 1;\nSELECT 2;\n";
         assert_eq!(extract_statement_at(sql, 19), "SELECT 2");
         assert_eq!(extract_statement_at(sql, 20), "SELECT 2");
+    }
+
+    #[test]
+    fn extract_statement_at_should_handle_formatted_multiline_single_statement() {
+        // format_sql("select name from users;") produces this layout
+        let sql = "SELECT\n  name\nFROM\n  users;";
+        // Any cursor position inside the statement should return it (stripped)
+        assert_eq!(
+            extract_statement_at(sql, 0),
+            "SELECT\n  name\nFROM\n  users"
+        );
+        assert_eq!(
+            extract_statement_at(sql, 6),
+            "SELECT\n  name\nFROM\n  users"
+        );
+        assert_eq!(
+            extract_statement_at(sql, 13),
+            "SELECT\n  name\nFROM\n  users"
+        );
+        // Cursor on the semicolon or past the end
+        assert_eq!(
+            extract_statement_at(sql, 26),
+            "SELECT\n  name\nFROM\n  users"
+        );
+        assert_eq!(
+            extract_statement_at(sql, 27),
+            "SELECT\n  name\nFROM\n  users"
+        );
+    }
+
+    #[test]
+    fn extract_statement_at_should_handle_formatted_multiline_multi_statement() {
+        // Two formatted statements: "SELECT\n  1;\nSELECT\n  2;"
+        //  positions:              0-9=first stmt, 10=';', 11='\n', 12-21=second stmt, 22=';'
+        let sql = "SELECT\n  1;\nSELECT\n  2;";
+        // Cursor inside first statement
+        assert_eq!(extract_statement_at(sql, 0), "SELECT\n  1");
+        // Cursor on the semicolon — belongs to first
+        assert_eq!(extract_statement_at(sql, 10), "SELECT\n  1");
+        // Cursor on the '\n' after the semicolon — visually end-of-line, belongs to first
+        assert_eq!(extract_statement_at(sql, 11), "SELECT\n  1");
+        // Cursor at 'S' of the second SELECT
+        assert_eq!(extract_statement_at(sql, 12), "SELECT\n  2");
+        // Cursor inside second statement
+        assert_eq!(extract_statement_at(sql, 19), "SELECT\n  2");
+    }
+
+    #[test]
+    fn extract_statement_at_should_strip_block_comment_header() {
+        // Comment block + formatted SELECT in the same `;`-delimited segment
+        let sql = "/*\n Code Snippets\n e.g. select\n*/\n-- Fetch user info\nSELECT\n  first_name\nFROM\n  staffs;\nselect first_name from staffs;";
+        // Cursor at byte 0 (inside comment) → returns the SELECT without the comment
+        let result = extract_statement_at(sql, 0);
+        assert_eq!(
+            result, "SELECT\n  first_name\nFROM\n  staffs",
+            "cursor=0: {result:?}"
+        );
+        // Cursor at byte 53 (newline after "-- Fetch user info") → same
+        let result = extract_statement_at(sql, 53);
+        assert_eq!(
+            result, "SELECT\n  first_name\nFROM\n  staffs",
+            "cursor=53: {result:?}"
+        );
+        // Cursor at byte 89 (start of second statement) → single-line statement
+        let result = extract_statement_at(sql, 89);
+        assert_eq!(
+            result, "select first_name from staffs",
+            "cursor=89: {result:?}"
+        );
+    }
+
+    #[test]
+    fn extract_statement_at_should_strip_line_comment_header() {
+        let sql = "-- Get user\nSELECT id FROM users;";
+        assert_eq!(extract_statement_at(sql, 0), "SELECT id FROM users");
+        assert_eq!(extract_statement_at(sql, 11), "SELECT id FROM users");
+        assert_eq!(extract_statement_at(sql, 12), "SELECT id FROM users");
+    }
+
+    #[test]
+    fn extract_statement_at_should_handle_comment_only_segment() {
+        // Segment 0 = "/* header only */" (comment only → stripped → empty)
+        // Segment 1 = "\nSELECT 1"
+        let sql = "/* header only */;\nSELECT 1;";
+        // Cursor inside the comment → comment stripped → empty → return ""
+        assert_eq!(extract_statement_at(sql, 0), "");
+        // Cursor at 'S' of SELECT 1 (byte 20) → return "SELECT 1"
+        assert_eq!(extract_statement_at(sql, 20), "SELECT 1");
     }
 
     // ── has_dangerous_dml ────────────────────────────────────────────────────
