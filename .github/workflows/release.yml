@@ -66,7 +66,14 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update -q
-          sudo apt-get install -y imagemagick
+          sudo apt-get install -y \
+            imagemagick \
+            libfontconfig-dev \
+            libxkbcommon-dev \
+            libegl-dev \
+            libwayland-dev \
+            libxcb1-dev \
+            libx11-dev
           wget -q -O /tmp/appimagetool \
             https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage
           chmod +x /tmp/appimagetool
