@@ -112,6 +112,20 @@ impl SessionManager {
         Ok(())
     }
 
+    /// Persist `width` as `[editor].tab_width` in `config.toml`.
+    pub fn save_tab_width(&self, width: u32) -> anyhow::Result<()> {
+        let mut config = self
+            .config_manager
+            .load()
+            .context("failed to load config for tab_width save")?;
+        config.editor.tab_width = width;
+        self.config_manager
+            .save(&config)
+            .context("failed to save tab_width")?;
+        info!(tab_width = width, "tab_width saved");
+        Ok(())
+    }
+
     /// Persist `reduce_motion` as `[appearance].reduce_motion` in `config.toml`.
     pub fn save_reduce_motion(&self, value: bool) -> anyhow::Result<()> {
         let mut config = self
@@ -182,6 +196,20 @@ mod tests {
     use wf_config::manager::ConfigManager;
 
     use super::SessionManager;
+
+    #[test]
+    fn save_tab_width_should_persist_to_config() {
+        let dir = tempdir().unwrap();
+        let sm = SessionManager::with_config_manager(ConfigManager::with_path(
+            dir.path().join("config.toml"),
+        ));
+        sm.save_tab_width(4).unwrap();
+
+        let cfg = ConfigManager::with_path(dir.path().join("config.toml"))
+            .load()
+            .unwrap();
+        assert_eq!(cfg.editor.tab_width, 4);
+    }
 
     #[test]
     fn save_page_size_should_persist_to_config() {

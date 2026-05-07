@@ -23,6 +23,7 @@ export component MenuBar inherits Rectangle {
     callback set-language(string);
     callback add-snippet();
     callback show-snippets();
+    callback open-editor-prefs();
     in property <string> editor-text;
     in property <string> language: "en";
     in property <bool>   has-active-connection: false;
@@ -109,13 +110,13 @@ export component MenuBar inherits Rectangle {
             edit-popup := PopupWindow {
                 x: 0;
                 y: root.height;
-                width:  180px;
-                height: Layout.height-menu-item;
+                width:  220px;
+                height: 2 * Layout.height-menu-item + 1px;
                 close-policy: PopupClosePolicy.close-on-click;
 
                 Rectangle {
-                    width:  180px;
-                    height: Layout.height-menu-item;
+                    width:  220px;
+                    height: 2 * Layout.height-menu-item + 1px;
                     background:    Colors.surface0;
                     border-radius: Layout.radius-md;
                     border-width:  1px;
@@ -127,6 +128,11 @@ export component MenuBar inherits Rectangle {
                     VerticalLayout {
                         spacing: 0;
                         MenuItem { text: @tr("Toggle Theme"); clicked => { root.toggle-theme(); } }
+                        Rectangle { height: 1px; background: Colors.surface1; }
+                        MenuItem {
+                            text: @tr("Editor Preferences\u{2026}");
+                            clicked => { root.open-editor-prefs(); }
+                        }
                     }
                 }
             }

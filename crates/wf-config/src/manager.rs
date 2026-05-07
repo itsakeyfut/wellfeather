@@ -158,6 +158,7 @@ mod tests {
         let original = Config {
             editor: EditorConfig {
                 page_size: PageSize::Rows100,
+                tab_width: 2,
             },
             ..Config::default()
         };

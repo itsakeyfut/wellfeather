@@ -96,10 +96,20 @@ impl Default for AppearanceConfig {
 // EditorConfig  [editor]
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct EditorConfig {
     pub page_size: PageSize,
+    pub tab_width: u32,
+}
+
+impl Default for EditorConfig {
+    fn default() -> Self {
+        Self {
+            page_size: PageSize::default(),
+            tab_width: 2,
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -195,6 +205,7 @@ mod tests {
         assert_eq!(cfg.appearance.font_size, 14);
         assert!(!cfg.appearance.reduce_motion);
         assert_eq!(cfg.editor.page_size, PageSize::Rows500);
+        assert_eq!(cfg.editor.tab_width, 2);
         assert_eq!(cfg.session.last_query, None);
         assert_eq!(cfg.ui.language, "en");
     }
@@ -210,6 +221,7 @@ reduce_motion = true
 
 [editor]
 page_size = 1000
+tab_width = 4
 
 [session]
 last_query = "SELECT * FROM users"
@@ -223,6 +235,7 @@ language = "ja"
         assert_eq!(cfg.appearance.font_family, "Fira Code");
         assert_eq!(cfg.appearance.font_size, 16);
         assert_eq!(cfg.editor.page_size, PageSize::Rows1000);
+        assert_eq!(cfg.editor.tab_width, 4);
         assert_eq!(
             cfg.session.last_query,
             Some("SELECT * FROM users".to_string())
@@ -273,6 +286,7 @@ language = "ja"
             },
             editor: EditorConfig {
                 page_size: PageSize::Rows100,
+                tab_width: 4,
             },
             session: SessionConfig {
                 last_query: Some("SELECT 1".to_string()),
