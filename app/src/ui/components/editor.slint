@@ -107,6 +107,11 @@ export component Editor inherits Rectangle {
     /// Fired when Esc is pressed while the find bar is open and editor has focus.
     callback close-find-bar();
 
+    /// Number of spaces to insert when Tab is pressed. Forwarded from UiState.
+    in property <int> tab-width: 2;
+    /// Fired when plain Tab is pressed; Rust inserts spaces and updates editor-text + cursor.
+    callback tab-key-pressed(int);  // cursor-position-byte-offset
+
     /// Byte offsets of the current find-bar match highlight (-1 = clear selection).
     in-out property <int> find-sel-start: -1;
     in-out property <int> find-sel-end:   -1;
@@ -478,6 +483,13 @@ export component Editor inherits Rectangle {
                         // Close popup; let event bubble to root key-pressed for tab switching.
                         root.completion-visible = false;
                         EventResult.reject
+                    } else if (event.text == Key.Tab
+                            && !event.modifiers.shift
+                            && !event.modifiers.control
+                            && !event.modifiers.alt) {
+                        root.completion-visible = false;
+                        root.tab-key-pressed(inner-input.cursor-position-byte-offset);
+                        EventResult.accept
                     } else {
                         // Close popup immediately on characters that end a SQL token
                         // (statement terminator, space, comma, parentheses).  This
@@ -597,6 +609,12 @@ export component Editor inherits Rectangle {
                         && root.find-bar-open
                         && !root.completion-visible) {
                     root.close-find-bar();
+                    EventResult.accept
+                } else if (event.text == Key.Tab
+                        && !event.modifiers.shift
+                        && !event.modifiers.control
+                        && !event.modifiers.alt) {
+                    root.tab-key-pressed(inner-input.cursor-position-byte-offset);
                     EventResult.accept
                 } else {
                     EventResult.reject

@@ -167,6 +167,51 @@ pub(super) fn register_language_callback(window: &crate::AppWindow, tx_cmd: mpsc
     });
 }
 
+// ── Editor preferences callbacks ──────────────────────────────────────────────
+
+pub(super) fn register_editor_prefs_callbacks(
+    window: &crate::AppWindow,
+    tx_cmd: mpsc::Sender<Command>,
+) {
+    let ui = window.global::<crate::UiState>();
+
+    // Tab key: insert spaces at cursor, then update editor text + cursor target.
+    // Runs on the UI thread (same as format_sql); text is committed before the
+    // cursor target change so set-selection-offsets validates against the new text.
+    let window_weak = window.as_weak(); // clone required: on_tab_key_pressed closure
+    ui.on_tab_key_pressed(move |cursor| {
+        let Some(window) = window_weak.upgrade() else {
+            return;
+        };
+        let ui = window.global::<crate::UiState>();
+        let text = ui.get_editor_text().to_string();
+        let tab_width = (ui.get_tab_width() as usize).max(1);
+        let cursor = cursor as usize;
+
+        if cursor > text.len() || !text.is_char_boundary(cursor) {
+            return;
+        }
+
+        let spaces = " ".repeat(tab_width);
+        let mut new_text = text;
+        new_text.insert_str(cursor, &spaces);
+        let new_cursor = (cursor + tab_width) as i32;
+
+        let shared: slint::SharedString = new_text.into();
+        ui.set_editor_text(shared.clone());
+        ui.set_editor_cursor_target(new_cursor);
+        ui.invoke_update_highlight(shared);
+    });
+
+    let tx_cmd = tx_cmd.clone(); // clone required: on_set_tab_width closure
+    ui.on_set_tab_width(move |width| {
+        send_cmd(
+            &tx_cmd,
+            Command::UpdateConfig(ConfigUpdate::TabWidth(width as u32)),
+        );
+    });
+}
+
 // ── Syntax highlight callback ─────────────────────────────────────────────────
 
 pub(super) fn register_highlight_callbacks(

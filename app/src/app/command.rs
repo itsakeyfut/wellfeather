@@ -14,6 +14,7 @@ pub enum ConfigUpdate {
         read_only: bool,
     },
     ReduceMotion(bool),
+    TabWidth(u32),
 }
 
 /// UI → Controller channel messages.

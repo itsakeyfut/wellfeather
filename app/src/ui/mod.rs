@@ -457,6 +457,7 @@ impl UI {
         ui_global.set_font_family(config.appearance.font_family.into());
         ui_global.set_font_size(config.appearance.font_size as i32);
         ui_global.set_reduce_motion(config.appearance.reduce_motion);
+        ui_global.set_tab_width(config.editor.tab_width as i32);
         // Apply locale after the Slint component exists — select_bundled_translation
         // requires a live component and is a no-op if called before one is created.
         let lang = &config.ui.language;
@@ -530,6 +531,7 @@ impl UI {
             tx_cmd.clone(),
             enc_key,
         );
+        appearance::register_editor_prefs_callbacks(&window, tx_cmd.clone());
         appearance::register_highlight_callbacks(&window, hl_model.clone());
 
         // Highlight the editor text that was already set from session / tab restore.

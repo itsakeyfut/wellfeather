@@ -1,0 +1,109 @@
+import { Colors, Typography, Layout } from "../../theme.slint";
+import { ActionButton, ModalOverlay } from "../common.slint";
+
+export component EditorPrefsDialog inherits ModalOverlay {
+    callback cancel-clicked;
+    callback apply-clicked(int);
+
+    in-out property <int> tab-width: 2;
+
+    VerticalLayout {
+        padding: Layout.padding-2xl;
+        spacing: Layout.spacing-2xl;
+        alignment: start;
+
+        Text {
+            text: @tr("Editor Preferences");
+            color: Colors.text;
+            font-size: Typography.size-xl;
+            font-weight: 700;
+        }
+
+        // Tab-width selector row
+        HorizontalLayout {
+            spacing: Layout.spacing-lg;
+            alignment: start;
+
+            Text {
+                text: @tr("Tab Width");
+                color: Colors.subtext1;
+                font-size: Typography.size-base;
+                vertical-alignment: center;
+                width: 90px;
+            }
+
+            // Three segmented buttons: 2 / 4 / 8
+            HorizontalLayout {
+                spacing: Layout.spacing-sm;
+
+                tw2 := Rectangle {
+                    width: 44px;
+                    height: 28px;
+                    border-radius: 4px;
+                    border-width: 1px;
+                    border-color: root.tab-width == 2 ? Colors.blue : Colors.surface2;
+                    background: root.tab-width == 2 ? Colors.blue : Colors.surface1;
+                    Text {
+                        text: "2";
+                        color: root.tab-width == 2 ? Colors.base : Colors.text;
+                        font-size: Typography.size-base;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                    TouchArea { clicked => { root.tab-width = 2; } }
+                }
+
+                tw4 := Rectangle {
+                    width: 44px;
+                    height: 28px;
+                    border-radius: 4px;
+                    border-width: 1px;
+                    border-color: root.tab-width == 4 ? Colors.blue : Colors.surface2;
+                    background: root.tab-width == 4 ? Colors.blue : Colors.surface1;
+                    Text {
+                        text: "4";
+                        color: root.tab-width == 4 ? Colors.base : Colors.text;
+                        font-size: Typography.size-base;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                    TouchArea { clicked => { root.tab-width = 4; } }
+                }
+
+                tw8 := Rectangle {
+                    width: 44px;
+                    height: 28px;
+                    border-radius: 4px;
+                    border-width: 1px;
+                    border-color: root.tab-width == 8 ? Colors.blue : Colors.surface2;
+                    background: root.tab-width == 8 ? Colors.blue : Colors.surface1;
+                    Text {
+                        text: "8";
+                        color: root.tab-width == 8 ? Colors.base : Colors.text;
+                        font-size: Typography.size-base;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                    TouchArea { clicked => { root.tab-width = 8; } }
+                }
+            }
+        }
+
+        HorizontalLayout {
+            spacing: Layout.spacing-lg;
+            alignment: end;
+            ActionButton {
+                width: 80px;
+                text: @tr("Cancel");
+                clicked => { root.cancel-clicked(); }
+            }
+            ActionButton {
+                width: 80px;
+                text: @tr("Apply");
+                bg: Colors.blue;
+                fg: Colors.base;
+                clicked => { root.apply-clicked(root.tab-width); }
+            }
+        }
+    }
+}

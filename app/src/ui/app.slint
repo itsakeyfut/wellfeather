@@ -30,6 +30,7 @@ import { SnippetEditDialog }     from "components/snippet_edit_dialog.slint";
 import { SnippetBar }            from "components/snippet_bar.slint";
 import { MetadataSearch }        from "components/metadata_search.slint";
 import { CommandPalette }        from "components/command_palette.slint";
+import { EditorPrefsDialog }     from "components/dialogs/editor_prefs_dialog.slint";
 
 // UiState is defined here (root file) so that Slint generates Rust bindings for it.
 // Sub-components that need global state receive properties bound from UiState below.
@@ -270,6 +271,16 @@ export global UiState {
     /// Switch locale; Rust calls select_bundled_translation + set_locale and persists.
     callback set-language(string);
 
+    // ── Editor preferences ────────────────────────────────────────────────────
+    /// Number of spaces inserted when Tab is pressed. Persisted in config.toml.
+    in-out property <int> tab-width: 2;
+    /// Persist a new tab-width; Rust sends Command::UpdateConfig.
+    callback set-tab-width(int);
+    /// Open the editor-preferences dialog.
+    in-out property <bool> show-editor-prefs: false;
+    /// Fired when plain Tab is pressed; Rust inserts spaces and updates editor-text + cursor.
+    callback tab-key-pressed(int);  // cursor-position-byte-offset
+
     // ── UI → Controller callbacks ─────────────────────────────────────────────
     callback run-query(string);
     /// Ctrl+Enter from the editor: carries full text + cursor position so Rust
@@ -480,6 +491,10 @@ export component AppWindow inherits Window {
     private property <bool> _bk-edit-open:  UiState.show-snippet-edit;
     changed _bk-edit-open => { if (_bk-edit-open) { _bk-edit-alive = true; } }
 
+    private property <bool> _editor-prefs-alive: false;
+    private property <bool> _editor-prefs-open:  UiState.show-editor-prefs;
+    changed _editor-prefs-open => { if (_editor-prefs-open) { _editor-prefs-alive = true; } }
+
     // ── Root key-intercept FocusScope ─────────────────────────────────────────
     // Global shortcuts live in key-pressed (bubble phase) so they fire regardless
     // of which inner FocusScope — editor, table-view, sidebar, result — has focus.
@@ -504,7 +519,8 @@ export component AppWindow inherits Window {
                     || UiState.show-snippet-list
                     || UiState.show-snippet-edit
                     || UiState.show-metadata-search
-                    || UiState.show-command-palette) {
+                    || UiState.show-command-palette
+                    || UiState.show-editor-prefs) {
                 EventResult.reject
             } else if (event.modifiers.control
                     && !event.modifiers.shift
@@ -662,8 +678,9 @@ export component AppWindow inherits Window {
             run-all(sql)   => { UiState.run-all(sql); }
             cancel-query   => { UiState.cancel-query(); }
             set-language(lang) => { UiState.set-language(lang); }
-            add-snippet   => { UiState.open-snippet-save(editor-inst.anchor-pos, editor-inst.cursor-pos); }
-            show-snippets => { UiState.show-snippet-list = true; }
+            add-snippet      => { UiState.open-snippet-save(editor-inst.anchor-pos, editor-inst.cursor-pos); }
+            show-snippets    => { UiState.show-snippet-list = true; }
+            open-editor-prefs => { UiState.show-editor-prefs = true; }
         }
 
         // ── Tab bar (above the editor only) ──────────────────────────────────
@@ -769,6 +786,8 @@ export component AppWindow inherits Window {
                     UiState.find-sel-start = -1;
                     UiState.find-sel-end = -1;
                 }
+                tab-width: UiState.tab-width;
+                tab-key-pressed(cursor) => { UiState.tab-key-pressed(cursor); }
                 open-snippet-save(a, c) => { UiState.open-snippet-save(a, c); }
                 focus-sidebar => { root.focused-pane = 0; sidebar-inst.grab-focus(); }
                 focus-result  => {
@@ -1273,6 +1292,20 @@ export component AppWindow inherits Window {
             insert-sql(sql)  => { UiState.load-snippet-sql(sql, editor-inst.cursor-pos); }
             execute-sql(sql) => { UiState.execute-snippet-sql(sql); }
             close => { UiState.show-snippet-bar = false; }
+        }
+
+        // ── Editor preferences dialog ─────────────────────────────────────────
+        if _editor-prefs-alive: EditorPrefsDialog {
+            x: 0; y: 0;
+            width: root.width; height: root.height;
+            show:      UiState.show-editor-prefs;
+            tab-width: UiState.tab-width;
+            cancel-clicked => { UiState.show-editor-prefs = false; }
+            apply-clicked(w) => {
+                UiState.set-tab-width(w);
+                UiState.show-editor-prefs = false;
+            }
+            exited => { _editor-prefs-alive = false; }
         }
 
         // ── Metadata search palette (Ctrl+P) ──────────────────────────────────

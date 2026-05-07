@@ -59,6 +59,11 @@ impl AppController {
                     warn!(error = %e, "failed to persist reduce_motion to config");
                 }
             }
+            ConfigUpdate::TabWidth(width) => {
+                if let Err(e) = self.session.save_tab_width(width) {
+                    warn!(error = %e, "failed to persist tab_width to config");
+                }
+            }
         }
     }
 }
