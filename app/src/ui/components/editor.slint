@@ -340,11 +340,8 @@ export component Editor inherits Rectangle {
         }
     }
 
-    // Derive line height directly from TextInput's actual rendered height divided
-    // by line count.  This eliminates drift caused by fractional font metrics
-    // that accumulate across many lines.
-    property <length> line-h: inner-input.preferred-height > 0px
-        ? inner-input.preferred-height / root.line-count
+    property <length> line-h: line-h-ruler.preferred-height > 0px
+        ? line-h-ruler.preferred-height / 10
         : root.font-size-px * 1px + 5px;
 
     // Effective visible height — clamped to at least 80 px so auto-scroll has
@@ -370,6 +367,20 @@ export component Editor inherits Rectangle {
     property <length> char-w: char-ruler.preferred-width > 0px
         ? char-ruler.preferred-width / 30
         : root.font-size-px * 0.6px;
+
+    // ── Line height measurement ───────────────────────────────────────────────
+    // 10-line ruler: preferred-height depends only on font metrics, never on
+    // editor content. This avoids the one-frame stale value that occurs when
+    // line-count updates synchronously on text change but inner-input.preferred-height
+    // waits for the layout pass — previously causing a visible jump on Enter.
+    // Slint uses uniform line spacing, so preferred-height(10) / 10 ==
+    // preferred-height(N) / N for any N; there is no accumulated drift.
+    line-h-ruler := Text {
+        visible: false;
+        text: "M\nM\nM\nM\nM\nM\nM\nM\nM\nM";
+        font-family: root.font-family;
+        font-size: root.font-size-px * 1px;
+    }
 
     // ── Current-line highlight ───────────────────────────────────────────────
     // Rendered first (= behind all other content).

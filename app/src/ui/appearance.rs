@@ -26,6 +26,13 @@ pub(super) fn compute_highlight_spans(sql: &str) -> Vec<crate::HighlightSpan> {
 
 /// Update a persistent highlight VecModel in-place to avoid destroying and
 /// recreating all overlay Text elements on every keystroke.
+///
+/// The model grows monotonically — rows are never removed. Excess rows (when
+/// span count decreases) are overwritten with a sentinel span whose `text` is
+/// empty and therefore renders nothing. This replaces `model.remove()` calls,
+/// which send `row_removed` notifications that can cause Text elements to be
+/// destroyed and recreated in a separate compositing step from the TextInput
+/// cursor-position update, producing a one-frame visual misalignment.
 pub(super) fn apply_highlight_spans(
     model: &Rc<slint::VecModel<crate::HighlightSpan>>,
     spans: Vec<crate::HighlightSpan>,
@@ -38,8 +45,16 @@ pub(super) fn apply_highlight_spans(
     for span in spans.into_iter().skip(n) {
         model.push(span);
     }
-    while model.row_count() > m {
-        model.remove(model.row_count() - 1);
+    // Clear excess rows with a sentinel rather than removing them.
+    // kind=4 is the gap-fill (identifier) value; empty text renders nothing.
+    let sentinel = crate::HighlightSpan {
+        line: 0,
+        col: 0,
+        text: "".into(),
+        kind: 4,
+    };
+    for i in m..n {
+        model.set_row_data(i, sentinel.clone());
     }
 }
 
