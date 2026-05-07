@@ -23,14 +23,14 @@ jobs:
       - name: Install ImageMagick
         run: choco install imagemagick -y --no-progress
 
-      - name: Build MSIX package
+      - name: Build ZIP package
         run: cargo x package --platform windows
 
-      - name: Upload MSIX artifact
+      - name: Upload Windows artifact
         uses: actions/upload-artifact@v4
         with:
           name: wellfeather-windows
-          path: packaging/output/*.msix
+          path: packaging/output/*.zip
 
   build-macos:
     runs-on: macos-latest
@@ -43,14 +43,14 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
-      - name: Build DMG package
+      - name: Build ZIP package
         run: cargo x package --platform macos
 
-      - name: Upload DMG artifact
+      - name: Upload macOS artifact
         uses: actions/upload-artifact@v4
         with:
           name: wellfeather-macos
-          path: packaging/output/*.dmg
+          path: packaging/output/*.zip
 
   build-linux:
     runs-on: ubuntu-latest
@@ -113,8 +113,8 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            artifacts/wellfeather-windows/*.msix
-            artifacts/wellfeather-macos/*.dmg
+            artifacts/wellfeather-windows/*.zip
+            artifacts/wellfeather-macos/*.zip
             artifacts/wellfeather-linux/*.AppImage
           draft: false
           generate_release_notes: false

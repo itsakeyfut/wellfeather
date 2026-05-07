@@ -1,15 +1,18 @@
 use anyhow::{Context, Result};
 use colored::Colorize;
+use std::fs::File;
+use std::io::{Read, Write};
 use std::path::Path;
 use std::process::Command;
+use zip::write::SimpleFileOptions;
 
 use super::{
     build_release_binary, inject_version, prepare_dirs, print_output, workspace_version,
     PackageConfig,
 };
 
-pub fn build_dmg(config: &PackageConfig) -> Result<()> {
-    println!("{}", "=== macOS DMG Package ===".bold().blue());
+pub fn build_zip(config: &PackageConfig) -> Result<()> {
+    println!("{}", "=== macOS ZIP Package ===".bold().blue());
 
     build_release_binary()?;
 
@@ -24,13 +27,11 @@ pub fn build_dmg(config: &PackageConfig) -> Result<()> {
     std::fs::create_dir_all(&macos_dir).context("cannot create .app/Contents/MacOS")?;
     std::fs::create_dir_all(&resources_dir).context("cannot create .app/Contents/Resources")?;
 
-    // Inject version into Info.plist template
     let plist_template = std::fs::read_to_string("packaging/macos/Info.plist")
         .context("cannot read packaging/macos/Info.plist")?;
     let plist = inject_version(&plist_template, &version);
     std::fs::write(contents.join("Info.plist"), plist).context("cannot write Info.plist")?;
 
-    // Copy the binary
     let bin_src = Path::new("target").join("release").join("wellfeather");
     anyhow::ensure!(
         bin_src.exists(),
@@ -41,7 +42,6 @@ pub fn build_dmg(config: &PackageConfig) -> Result<()> {
     std::fs::copy(&bin_src, &bin_dest).context("cannot copy wellfeather binary")?;
     set_executable(&bin_dest)?;
 
-    // Convert icon.png → AppIcon.icns
     let icon_src = Path::new("app").join("assets").join("icon.png");
     let icns_path = resources_dir.join("AppIcon.icns");
     generate_icns(&icon_src, &icns_path)?;
@@ -55,48 +55,10 @@ pub fn build_dmg(config: &PackageConfig) -> Result<()> {
         codesign_app(&app_dir, cert)?;
     }
 
-    // Create staging dir with .app + /Applications symlink for drag-install UX
-    let staging = temp.join("staging");
-    std::fs::create_dir_all(&staging).context("cannot create staging dir")?;
-
-    // On macOS, create a symlink; on other OSes (cross-build CI) skip it
-    #[cfg(unix)]
-    {
-        let app_staging = staging.join("wellfeather.app");
-        // Copy (not move) so temp stays intact for re-runs
-        copy_dir_all(&app_dir, &app_staging)?;
-        let applications_link = staging.join("Applications");
-        if applications_link.exists() {
-            std::fs::remove_file(&applications_link)
-                .context("cannot remove old Applications symlink")?;
-        }
-        std::os::unix::fs::symlink("/Applications", &applications_link)
-            .context("cannot create /Applications symlink")?;
-    }
-    #[cfg(not(unix))]
-    {
-        let app_staging = staging.join("wellfeather.app");
-        copy_dir_all(&app_dir, &app_staging)?;
-        println!(
-            "  {} /Applications symlink skipped (not on macOS/Unix)",
-            "note:".yellow().bold()
-        );
-    }
-
-    // Build DMG
-    let output_dir = Path::new("packaging").join("output");
-    let dmg_name = format!("wellfeather-{version}-macos.dmg");
-    let dmg_path = output_dir.join(&dmg_name);
-    create_dmg(&staging, &dmg_path)?;
-
-    // Optional DMG signing
-    if config.sign {
-        let cert = config.certificate_name.as_deref().unwrap();
-        codesign_dmg(&dmg_path, cert)?;
-    }
-
     // Optional notarization
     if config.notarize {
+        let dmg_path = temp.join("sign_target.dmg");
+        create_dmg_for_notarize(&app_dir, &dmg_path)?;
         notarize(
             &dmg_path,
             config.apple_id.as_deref().unwrap(),
@@ -104,10 +66,58 @@ pub fn build_dmg(config: &PackageConfig) -> Result<()> {
         )?;
     }
 
-    print_output(&dmg_path)
+    // Zip the .app bundle
+    let output_dir = Path::new("packaging").join("output");
+    std::fs::create_dir_all(&output_dir).context("cannot create packaging/output/")?;
+    let zip_name = format!("wellfeather-{version}-macos.zip");
+    let zip_path = output_dir.join(&zip_name);
+
+    println!("  Creating ZIP archive...");
+    let zip_file =
+        File::create(&zip_path).with_context(|| format!("cannot create {}", zip_path.display()))?;
+    let mut zip = zip::ZipWriter::new(zip_file);
+    add_dir_to_zip(&mut zip, &app_dir, "wellfeather.app")?;
+    zip.finish().context("cannot finalise zip")?;
+
+    print_output(&zip_path)
 }
 
-/// Convert app/assets/icon.png to AppIcon.icns via sips + iconutil.
+/// Recursively add a directory tree into a ZipWriter.
+fn add_dir_to_zip(zip: &mut zip::ZipWriter<File>, dir: &Path, prefix: &str) -> Result<()> {
+    for entry in
+        std::fs::read_dir(dir).with_context(|| format!("cannot read dir {}", dir.display()))?
+    {
+        let entry = entry?;
+        let path = entry.path();
+        let name = entry.file_name();
+        let zip_path = format!("{}/{}", prefix, name.to_string_lossy());
+
+        if path.is_dir() {
+            add_dir_to_zip(zip, &path, &zip_path)?;
+        } else {
+            let options =
+                SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+            // Preserve executable bit for the binary
+            #[cfg(unix)]
+            let options = {
+                use std::os::unix::fs::PermissionsExt;
+                let mode = std::fs::metadata(&path)?.permissions().mode();
+                options.unix_permissions(mode)
+            };
+            zip.start_file(&zip_path, options)
+                .with_context(|| format!("cannot add {zip_path} to zip"))?;
+            let mut buf = Vec::new();
+            File::open(&path)
+                .with_context(|| format!("cannot open {}", path.display()))?
+                .read_to_end(&mut buf)
+                .with_context(|| format!("cannot read {}", path.display()))?;
+            zip.write_all(&buf)
+                .with_context(|| format!("cannot write {zip_path} to zip"))?;
+        }
+    }
+    Ok(())
+}
+
 fn generate_icns(icon_src: &Path, icns_dest: &Path) -> Result<()> {
     if !icon_src.exists() {
         anyhow::bail!(
@@ -120,7 +130,6 @@ fn generate_icns(icon_src: &Path, icns_dest: &Path) -> Result<()> {
     let iconset = icns_dest.parent().unwrap().join("AppIcon.iconset");
     std::fs::create_dir_all(&iconset).context("cannot create iconset dir")?;
 
-    // Required sizes for macOS iconset
     let sizes: &[(u32, &str)] = &[
         (16, "icon_16x16.png"),
         (32, "icon_16x16@2x.png"),
@@ -182,23 +191,10 @@ fn codesign_app(app_dir: &Path, cert: &str) -> Result<()> {
     Ok(())
 }
 
-fn codesign_dmg(dmg: &Path, cert: &str) -> Result<()> {
-    println!("  Signing DMG...");
-    let status = Command::new("codesign")
-        .args(["--sign", cert, dmg.to_str().unwrap()])
-        .status()
-        .context("failed to run codesign for DMG")?;
-    anyhow::ensure!(status.success(), "codesign failed for DMG");
-    Ok(())
-}
-
-fn create_dmg(staging: &Path, dmg_path: &Path) -> Result<()> {
-    // Remove existing DMG so hdiutil -ov can overwrite
+fn create_dmg_for_notarize(app_dir: &Path, dmg_path: &Path) -> Result<()> {
     if dmg_path.exists() {
-        std::fs::remove_file(dmg_path).context("cannot remove existing DMG")?;
+        std::fs::remove_file(dmg_path).context("cannot remove existing temp DMG")?;
     }
-
-    println!("  Creating DMG with hdiutil...");
     let status = Command::new("hdiutil")
         .args([
             "create",
@@ -209,7 +205,7 @@ fn create_dmg(staging: &Path, dmg_path: &Path) -> Result<()> {
             "-volname",
             "wellfeather",
             "-srcfolder",
-            staging.to_str().unwrap(),
+            app_dir.to_str().unwrap(),
             "-ov",
             "-format",
             "UDZO",
@@ -247,7 +243,8 @@ fn notarize(dmg: &Path, apple_id: &str, team_id: &str) -> Result<()> {
     Ok(())
 }
 
-/// Recursively copy a directory tree.
+/// Recursively copy a directory tree (kept for potential future use).
+#[allow(dead_code)]
 fn copy_dir_all(src: &Path, dst: &Path) -> Result<()> {
     std::fs::create_dir_all(dst).with_context(|| format!("cannot create {}", dst.display()))?;
     for entry in

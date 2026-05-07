@@ -57,12 +57,12 @@ pub fn run_package(config: &PackageConfig) -> Result<()> {
     );
 
     match platform {
-        "windows" => windows::build_msix(config)?,
-        "macos" => macos::build_dmg(config)?,
+        "windows" => windows::build_zip(config)?,
+        "macos" => macos::build_zip(config)?,
         "linux" => linux::build_appimage(config)?,
         "all" => {
-            windows::build_msix(config)?;
-            macos::build_dmg(config)?;
+            windows::build_zip(config)?;
+            macos::build_zip(config)?;
             linux::build_appimage(config)?;
         }
         other => anyhow::bail!("Unknown platform: {other}. Use: windows, macos, linux, or all"),
