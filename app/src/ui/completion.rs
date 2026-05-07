@@ -84,8 +84,22 @@ pub(super) fn register_completion_callbacks(
     {
         let debounce = debounce.clone(); // clone required: on_fetch_completion closure
         let tx_cmd = tx_cmd.clone(); // clone required: on_fetch_completion closure
+        let window_weak = window.as_weak(); // clone required: prefix-check close path
         ui.on_fetch_completion(move |sql, cursor_pos| {
             *debounce.borrow_mut() = None; // drop previous timer → cancels it
+
+            let s = sql.as_str();
+            let pos = (cursor_pos as usize).min(s.len());
+
+            // Close the popup immediately when there is no word prefix before
+            // the cursor — covers Backspace-to-empty, space, semicolon, etc.
+            // Without this, the debounce would fire and NextClause candidates
+            // (WHERE / GROUP BY …) would reopen the popup 300 ms later.
+            if find_prefix_start(s, pos) == pos {
+                with_ui(&window_weak, |ui| ui.set_completion_visible(false));
+                return;
+            }
+
             let tx = tx_cmd.clone(); // clone required: Timer callback
             let sql = sql.to_string();
             let timer = slint::Timer::default();
@@ -296,6 +310,25 @@ mod tests {
     #[test]
     fn find_prefix_start_should_return_cursor_when_no_prefix() {
         assert_eq!(find_prefix_start("SELECT * FROM ", 14), 14);
+    }
+
+    #[test]
+    fn find_prefix_start_should_return_cursor_after_semicolon() {
+        // Backspace removes trailing space: cursor lands right after `;` — no prefix.
+        let sql = "select name from users;";
+        assert_eq!(find_prefix_start(sql, sql.len()), sql.len());
+    }
+
+    #[test]
+    fn find_prefix_start_should_return_cursor_after_comma() {
+        // Cursor right after comma — no word prefix, popup should close.
+        assert_eq!(find_prefix_start("SELECT id,", 10), 10);
+    }
+
+    #[test]
+    fn find_prefix_start_should_return_word_start_when_prefix_non_empty() {
+        // Backspace shrinks "wher" → "whe" — prefix is still non-empty, popup stays.
+        assert_eq!(find_prefix_start("SELECT * FROM users WHERE whe", 29), 26);
     }
 
     // ── sql_has_from ──────────────────────────────────────────────────────────
