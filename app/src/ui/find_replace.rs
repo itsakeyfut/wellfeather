@@ -7,6 +7,15 @@ use wf_history::find_history::FindHistoryService;
 
 use super::{FindState, HistorySnapshot, SharedHistorySnapshot};
 
+/// Maximum byte length of a user-supplied regex pattern.
+/// Patterns longer than this are rejected before compilation to prevent
+/// O(n²) compile-time spikes on deeply nested repetitions.
+const MAX_PATTERN_LEN: usize = 512;
+
+/// Maximum compiled automaton size (bytes).
+/// Bounds memory and time during regex compilation for complex patterns.
+const MAX_REGEX_SIZE: usize = 512 * 1024; // 512 KB
+
 /// Returns all (start_byte, end_byte) positions where `query` matches in `text`.
 pub(crate) fn compute_matches(
     text: &str,
@@ -15,6 +24,10 @@ pub(crate) fn compute_matches(
     use_regex: bool,
 ) -> Vec<(usize, usize)> {
     if query.is_empty() {
+        return vec![];
+    }
+    // Reject patterns that are too long before attempting compilation.
+    if use_regex && query.len() > MAX_PATTERN_LEN {
         return vec![];
     }
     let pattern = if use_regex {
@@ -31,7 +44,10 @@ pub(crate) fn compute_matches(
             format!("(?i){escaped}")
         }
     };
-    match regex::Regex::new(&pattern) {
+    match regex::RegexBuilder::new(&pattern)
+        .size_limit(MAX_REGEX_SIZE)
+        .build()
+    {
         Ok(re) => re.find_iter(text).map(|m| (m.start(), m.end())).collect(),
         Err(_) => vec![],
     }
@@ -587,5 +603,37 @@ mod tests {
     #[test]
     fn compute_matches_should_return_empty_for_no_match() {
         assert!(compute_matches("hello", "xyz", false, false).is_empty());
+    }
+
+    #[test]
+    fn compute_matches_should_reject_regex_pattern_exceeding_max_length() {
+        let long_pattern = "a".repeat(MAX_PATTERN_LEN + 1);
+        assert!(
+            compute_matches("aaaa", &long_pattern, false, true).is_empty(),
+            "pattern longer than MAX_PATTERN_LEN must be rejected"
+        );
+    }
+
+    #[test]
+    fn compute_matches_should_accept_literal_query_exceeding_max_length() {
+        // Length cap applies to regex mode only; literal search is always safe.
+        let long_literal = "a".repeat(MAX_PATTERN_LEN + 1);
+        // No match expected, but it must not return empty due to the length guard.
+        // Use a text that contains the pattern to verify it actually runs.
+        let text = "a".repeat(MAX_PATTERN_LEN + 1);
+        let m = compute_matches(&text, &long_literal, true, false);
+        assert_eq!(m, vec![(0, MAX_PATTERN_LEN + 1)]);
+    }
+
+    #[test]
+    fn compute_matches_should_not_freeze_on_pathological_regex_pattern() {
+        // (a+)+ against a long string of 'a's would cause catastrophic backtracking
+        // in backtracking engines, but the regex crate is linear-time and MAX_PATTERN_LEN
+        // ensures the pattern is rejected before compilation if it exceeds the limit.
+        // This pattern is short enough to pass the length check, but the linear-time
+        // engine guarantees it completes in reasonable time.
+        let text = "a".repeat(1000) + "b";
+        let m = compute_matches(&text, "(a+)+b", false, true);
+        assert_eq!(m.len(), 1);
     }
 }
