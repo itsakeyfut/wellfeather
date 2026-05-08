@@ -11,70 +11,79 @@ body:
         Thank you for reporting a bug! Please provide detailed information to help us understand and fix the issue.
 
   - type: textarea
-    id: summary
+    id: problem
     attributes:
-      label: Summary
-      description: A concise description of the bug in 1-2 sentences.
-      placeholder: wellfeather panics when connecting to a PostgreSQL database with a malformed connection string instead of showing an error.
+      label: Problem
+      description: |
+        Describe the bug in detail. Include relevant code snippets, struct definitions, or API surfaces
+        that demonstrate the missing or broken behavior.
+      placeholder: |
+        `CompletionService` does not debounce correctly when the SQL editor contains
+        a multi-statement query. Completions fire on every keystroke instead of waiting
+        for the configured interval:
+
+        ```rust
+        // crates/wf-completion/src/service.rs — debounce timer (abridged)
+        pub struct CompletionService {
+            debounce_ms: u64,
+            // timer resets on text change but not on cursor movement
+        }
+        ```
+
+        Observed: the completion popup appears immediately after each keystroke when
+        editing the second statement in `SELECT 1; SELECT |` (cursor after the pipe).
+        Expected: completions fire after `debounce_ms` of inactivity regardless of
+        cursor position within the document.
     validations:
       required: true
 
   - type: textarea
-    id: current_behavior
+    id: desired_behaviour
     attributes:
-      label: Current Behavior
-      description: What is currently happening?
+      label: Desired Behaviour
+      description: What should happen instead? Describe the correct API, behavior, or output.
       placeholder: |
-        Clicking "Connect" with an invalid host causes the application to crash
-        instead of displaying an error message in the connection dialog.
+        `CompletionService` debounce timer should reset on every keystroke and cursor
+        movement, firing only after the configured interval of inactivity.
+        The popup should not appear mid-keystroke when typing rapidly.
     validations:
       required: true
 
   - type: textarea
-    id: expected_behavior
+    id: fix
     attributes:
-      label: Expected Behavior
-      description: What should happen instead?
+      label: Fix
+      description: |
+        Proposed implementation — file paths, code changes, and steps.
+        Leave blank if you are unsure how to fix it.
       placeholder: |
-        The connection dialog should display an inline error message
-        (e.g. "Failed to connect: invalid host") and remain open.
-    validations:
-      required: true
+        ### Step 1 — Reset debounce on cursor movement
+
+        ```rust
+        // crates/wf-completion/src/service.rs
+        pub fn on_cursor_moved(&mut self) {
+            self.reset_debounce();
+        }
+        ```
+
+        ### Step 2 — Add unit test
+
+        ```rust
+        // crates/wf-completion/tests/debounce.rs
+        #[test]
+        fn debounce_resets_on_cursor_move_should_not_fire_immediately() { … }
+        ```
 
   - type: textarea
-    id: steps
+    id: acceptance_criteria
     attributes:
-      label: Steps to Reproduce
-      description: Minimal steps or configuration to reproduce the bug.
+      label: Acceptance Criteria
+      description: Conditions that must hold for this bug to be considered fixed.
       placeholder: |
-        1. Open wellfeather
-        2. Click "Add Connection"
-        3. Enter host: `not-a-valid-host%%`, port: 5432
-        4. Click "Connect" → app crashes
-
-        Or: `RUST_LOG=debug just run` and observe the output.
-    validations:
-      required: true
-
-  - type: textarea
-    id: error_output
-    attributes:
-      label: Error Output / Backtrace
-      description: Include any error messages, panics, or backtraces (`RUST_BACKTRACE=1`).
-      placeholder: |
-        thread 'main' panicked at 'called `Option::unwrap()` on a `None` value', app/src/ui/connection.rs:87
-        stack backtrace:
-           0: rust_begin_unwind
-           1: wellfeather::ui::connection::handle_connect
-           ...
-      render: shell
-
-  - type: input
-    id: app_version
-    attributes:
-      label: wellfeather Version
-      description: Which version of wellfeather are you using? (`wellfeather --version` or from the title bar)
-      placeholder: "0.2.0"
+        - [ ] Completion does not fire during rapid keystrokes within `debounce_ms`.
+        - [ ] Debounce resets on cursor movement as well as text changes.
+        - [ ] Unit test `debounce_resets_on_cursor_move_should_not_fire_immediately` passes.
+        - [ ] `just ci` passes.
     validations:
       required: true
 
@@ -82,25 +91,24 @@ body:
     id: environment
     attributes:
       label: Environment
-      description: Provide your environment information.
+      description: wellfeather version, OS, Rust toolchain, and DB type if relevant.
       placeholder: |
+        - wellfeather: 0.9.1 (`wellfeather --version` or title bar)
         - OS: Windows 11 / macOS 15 / Ubuntu 24.04
-        - Rust: rustc 1.87.0 (output of `rustc --version`)
+        - Rust: rustc 1.87.0 (`rustc --version`)
         - DB type: PostgreSQL 17 / MySQL 8.4 / SQLite 3.47
-        - Architecture: x86_64 / aarch64
       render: markdown
-    validations:
-      required: true
 
   - type: textarea
     id: additional_context
     attributes:
       label: Additional Context
-      description: Any other context that might be helpful (config snippets, related issues, workarounds).
+      description: Error output, backtraces (`RUST_BACKTRACE=1`), related issues, or workarounds.
       placeholder: |
-        - Only reproducible with PostgreSQL; MySQL connects fine
-        - Workaround: editing config.toml directly avoids the crash
-        - Related to issue #123
+        - Only reproducible when the editor contains multiple semicolon-separated statements
+        - `RUST_LOG=wf_completion=debug just run` shows timer resets being skipped
+        - Workaround: move cursor to the first statement before triggering completion
+        - Related: #43 (completion popup UI)
 
   - type: checkboxes
     id: checklist
@@ -109,7 +117,7 @@ body:
       options:
         - label: I have searched existing issues to ensure this is not a duplicate
           required: true
-        - label: I have provided steps to reproduce the bug
+        - label: I have provided enough detail to reproduce or understand the problem
           required: true
         - label: I have tested on the latest release
           required: false
