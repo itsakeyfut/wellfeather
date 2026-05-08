@@ -6,7 +6,7 @@ use aes_gcm::{
 };
 use anyhow::Context as _;
 use base64::{Engine as _, engine::general_purpose::STANDARD as B64};
-use zeroize::{Zeroize, Zeroizing};
+use zeroize::Zeroizing;
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
@@ -68,13 +68,15 @@ pub fn decrypt(ciphertext: &str, key: &[u8; 32]) -> anyhow::Result<Zeroizing<Str
     let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(key));
     let nonce = Nonce::from_slice(&nonce_bytes);
 
-    let mut plaintext_bytes = cipher
-        .decrypt(nonce, ct_bytes.as_slice())
-        .map_err(|_| anyhow::anyhow!("decryption failed: GCM authentication tag mismatch"))?;
+    // Zeroizing<Vec<u8>> ensures bytes are zeroed on drop in both success and error paths.
+    let plaintext_bytes = Zeroizing::new(
+        cipher
+            .decrypt(nonce, ct_bytes.as_slice())
+            .map_err(|_| anyhow::anyhow!("decryption failed: GCM authentication tag mismatch"))?,
+    );
 
-    let s = String::from_utf8(plaintext_bytes.clone())
+    let s = String::from_utf8((*plaintext_bytes).clone())
         .context("decrypted bytes are not valid UTF-8")?;
-    plaintext_bytes.zeroize();
     Ok(Zeroizing::new(s))
 }
 
