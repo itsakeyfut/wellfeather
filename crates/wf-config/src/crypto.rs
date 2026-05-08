@@ -6,6 +6,7 @@ use aes_gcm::{
 };
 use anyhow::Context as _;
 use base64::{Engine as _, engine::general_purpose::STANDARD as B64};
+use zeroize::{Zeroize, Zeroizing};
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
@@ -35,6 +36,9 @@ pub fn encrypt(plaintext: &str, key: &[u8; 32]) -> String {
 
 /// Decrypts a `"<nonce>:<ciphertext>"` Base64 string produced by [`encrypt`].
 ///
+/// The returned `Zeroizing<String>` zeroes the plaintext bytes from heap memory
+/// when dropped, preventing passwords from lingering in process memory.
+///
 /// # Errors
 ///
 /// Returns `Err` if:
@@ -43,7 +47,7 @@ pub fn encrypt(plaintext: &str, key: &[u8; 32]) -> String {
 /// - The nonce is not exactly 12 bytes
 /// - The GCM authentication tag does not match (tampered or corrupt data)
 /// - The decrypted bytes are not valid UTF-8
-pub fn decrypt(ciphertext: &str, key: &[u8; 32]) -> anyhow::Result<String> {
+pub fn decrypt(ciphertext: &str, key: &[u8; 32]) -> anyhow::Result<Zeroizing<String>> {
     let (nonce_b64, ct_b64) = ciphertext
         .split_once(':')
         .ok_or_else(|| anyhow::anyhow!("invalid ciphertext format: expected '<nonce>:<ct>'"))?;
@@ -64,11 +68,14 @@ pub fn decrypt(ciphertext: &str, key: &[u8; 32]) -> anyhow::Result<String> {
     let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(key));
     let nonce = Nonce::from_slice(&nonce_bytes);
 
-    let plaintext_bytes = cipher
+    let mut plaintext_bytes = cipher
         .decrypt(nonce, ct_bytes.as_slice())
         .map_err(|_| anyhow::anyhow!("decryption failed: GCM authentication tag mismatch"))?;
 
-    String::from_utf8(plaintext_bytes).context("decrypted bytes are not valid UTF-8")
+    let s = String::from_utf8(plaintext_bytes.clone())
+        .context("decrypted bytes are not valid UTF-8")?;
+    plaintext_bytes.zeroize();
+    Ok(Zeroizing::new(s))
 }
 
 /// Loads the application encryption key from `dir/.wellfeather.key`.
@@ -159,7 +166,7 @@ mod tests {
         let plaintext = "super-secret-password-123!";
         let encrypted = encrypt(plaintext, TEST_KEY);
         let decrypted = decrypt(&encrypted, TEST_KEY).expect("decrypt should succeed");
-        assert_eq!(decrypted, plaintext);
+        assert_eq!(decrypted.as_str(), plaintext);
     }
 
     #[test]
@@ -304,7 +311,7 @@ mod tests {
             let ciphertext = encrypt(&plaintext, &key);
             let decrypted = decrypt(&ciphertext, &key)
                 .expect("decrypt should succeed for valid ciphertext");
-            prop_assert_eq!(decrypted, plaintext);
+            prop_assert_eq!(decrypted.as_str(), plaintext.as_str());
         }
     }
 }

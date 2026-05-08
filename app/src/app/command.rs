@@ -1,5 +1,6 @@
 use wf_config::models::{PageSize, Theme};
 use wf_db::models::DbConnection;
+use zeroize::Zeroizing;
 
 /// Granular config change sent from the UI.
 #[derive(Debug)]
@@ -22,12 +23,12 @@ pub enum ConfigUpdate {
 pub enum Command {
     /// Connect to a database. The second field carries the plaintext password
     /// (decrypted by the caller); `wf-db` must not depend on `wf-config::crypto`.
-    /// Password encryption is wired in T028.
-    Connect(DbConnection, Option<String>),
+    /// Wrapped in `Zeroizing` so the plaintext is scrubbed from heap on drop.
+    Connect(DbConnection, Option<Zeroizing<String>>),
     /// Test a connection without persisting it to state or the sidebar.
     /// On success sends [`Event::TestConnectionOk`]; on failure sends
     /// [`Event::TestConnectionFailed`].
-    TestConnection(DbConnection, Option<String>),
+    TestConnection(DbConnection, Option<Zeroizing<String>>),
     Disconnect(String),       // connection_id
     RemoveConnection(String), // connection_id — disconnect + delete from config
     RunQuery(String),         // sql
@@ -74,6 +75,7 @@ impl Command {
 #[cfg(test)]
 mod tests {
     use wf_db::models::{DbConnection, DbType};
+    use zeroize::Zeroizing;
 
     use super::Command;
 
@@ -93,19 +95,19 @@ mod tests {
 
     #[test]
     fn variant_name_should_return_connect_for_connect_command() {
-        let cmd = Command::Connect(dummy_conn(), Some("s3cret".to_string()));
+        let cmd = Command::Connect(dummy_conn(), Some(Zeroizing::new("s3cret".to_string())));
         assert_eq!(cmd.variant_name(), "Connect");
     }
 
     #[test]
     fn variant_name_should_not_expose_password_in_connect() {
-        let cmd = Command::Connect(dummy_conn(), Some("s3cret".to_string()));
+        let cmd = Command::Connect(dummy_conn(), Some(Zeroizing::new("s3cret".to_string())));
         assert!(!cmd.variant_name().contains("s3cret"));
     }
 
     #[test]
     fn variant_name_should_not_expose_password_in_test_connection() {
-        let cmd = Command::TestConnection(dummy_conn(), Some("s3cret".to_string()));
+        let cmd = Command::TestConnection(dummy_conn(), Some(Zeroizing::new("s3cret".to_string())));
         assert!(!cmd.variant_name().contains("s3cret"));
     }
 
