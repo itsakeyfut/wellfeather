@@ -32,7 +32,10 @@ pub(super) fn db_type_label_config(dt: &DbTypeName) -> &'static str {
 /// The plaintext password is also AES-256-GCM encrypted with `enc_key` and stored in
 /// `DbConnection.password_encrypted` so the session manager can persist it and
 /// `main.rs` can decrypt it on the next startup for auto-reconnect.
-fn build_conn_from_form(ui: &crate::UiState, enc_key: &[u8; 32]) -> (DbConnection, Option<String>) {
+fn build_conn_from_form(
+    ui: &crate::UiState,
+    enc_key: &[u8; 32],
+) -> (DbConnection, Option<zeroize::Zeroizing<String>>) {
     let db_type = match ui.get_form_db_type() {
         0 => DbType::PostgreSQL,
         1 => DbType::MySQL,
@@ -48,7 +51,7 @@ fn build_conn_from_form(ui: &crate::UiState, enc_key: &[u8; 32]) -> (DbConnectio
     let password = if is_conn_string {
         None
     } else {
-        opt(ui.get_form_password())
+        opt(ui.get_form_password()).map(zeroize::Zeroizing::new)
     };
 
     // Encrypt the plaintext password for safe storage in config.toml.
@@ -307,11 +310,13 @@ pub(super) fn register_sidebar_callbacks(
             let safe_dml = conn_cfg.safe_dml;
             let read_only = conn_cfg.read_only;
 
-            // Decrypt stored password (only present for individual-field connections).
-            let stored_password = conn
+            // Decrypt stored password for pre-filling the UI form. Convert to plain
+            // String at this point since it flows directly into SharedString UI fields.
+            let stored_password: String = conn
                 .password_encrypted
                 .as_ref()
                 .and_then(|enc| crypto::decrypt(enc, &enc_key).ok())
+                .map(|z| z.as_str().to_owned())
                 .unwrap_or_default();
 
             let is_conn_string = conn.connection_string.is_some();

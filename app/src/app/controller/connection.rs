@@ -1,15 +1,24 @@
 use tracing::{info, warn};
 use wf_db::models::DbConnection;
+use zeroize::Zeroizing;
 
 use crate::app::{LocalizedMessage, event::Event, session::db_to_config_conn};
 
 use super::AppController;
 
 impl AppController {
-    pub(super) async fn handle_connect(&self, conn: DbConnection, password: Option<String>) {
+    pub(super) async fn handle_connect(
+        &self,
+        conn: DbConnection,
+        password: Option<Zeroizing<String>>,
+    ) {
         let id = conn.id.clone();
         info!(conn_id = %id, "handling Connect command");
-        match self.db.connect(&conn, password.as_deref()).await {
+        match self
+            .db
+            .connect(&conn, password.as_ref().map(|z| z.as_str()))
+            .await
+        {
             Ok(()) => {
                 let conn_cfg = db_to_config_conn(&conn);
                 if let Err(e) = self.repo.upsert(&conn_cfg).await {
@@ -74,11 +83,15 @@ impl AppController {
     pub(super) async fn handle_test_connection(
         &self,
         conn: DbConnection,
-        password: Option<String>,
+        password: Option<Zeroizing<String>>,
     ) {
         let id = conn.id.clone();
         info!(conn_id = %id, "handling TestConnection command");
-        match self.db.connect(&conn, password.as_deref()).await {
+        match self
+            .db
+            .connect(&conn, password.as_ref().map(|z| z.as_str()))
+            .await
+        {
             Ok(()) => {
                 self.db.disconnect(&id);
                 info!(conn_id = %id, "test connection succeeded");
