@@ -8,89 +8,58 @@ body:
   - type: markdown
     attributes:
       value: |
-        Thank you for suggesting a feature! Please provide enough information to help us evaluate and prioritize it.
+        Thank you for suggesting a feature! Please provide enough detail to evaluate and implement it.
 
   - type: textarea
     id: summary
     attributes:
       label: Summary
       description: A concise description of the feature in 1-2 sentences.
-      placeholder: Add keyboard shortcut to duplicate the current editor tab with its query text preserved.
+      placeholder: Add a read-only schema browser panel showing tables, columns, and indexes for the active connection.
     validations:
       required: true
 
   - type: textarea
-    id: motivation
+    id: design_notes
     attributes:
-      label: Motivation
-      description: What problem does this solve? Who benefits from it?
+      label: Design Notes
+      description: |
+        Architecture considerations, relevant file paths, APIs to investigate, or implementation constraints.
+        Use `> **Note**:` for anything that requires investigation before implementation.
       placeholder: |
-        When iterating on a query, I often want to run a variation without losing the original.
-        Currently I have to manually copy the text, open a new tab, and paste.
+        Files: `app/ui/schema_browser.slint`, `app/src/controller/schema.rs`, `crates/wf-db/src/schema.rs`
 
-        Target user: developers who run frequent ad-hoc queries against multiple databases.
+        - `wf-db` already exposes `DbService::fetch_schema()` — reuse this for the browser.
+        - Toggle via a `Command` sent through `tx_cmd`; result returned as `Event::SchemaLoaded`.
+        - Use `Rc<VecModel<TableItem>>` for the Slint list binding; convert `SchemaTable` domain types first.
+
+        > **Note**: Investigate Slint `TreeView` or nested `ListView` for hierarchical table → column display.
+        > Check whether `fetch_schema()` returns column metadata (type, nullable) needed for the detail pane.
+
+  - type: textarea
+    id: requirements
+    attributes:
+      label: Requirements
+      description: Implementation checklist. Each line becomes a trackable task on the issue.
+      placeholder: |
+        - [ ] Schema browser panel can be toggled open/closed (keyboard shortcut or toolbar)
+        - [ ] Lists all tables for the active connection, grouped by schema
+        - [ ] Expanding a table shows column names, types, and nullable flags
+        - [ ] Selecting a table inserts its name at the cursor in the SQL editor
+        - [ ] Panel refreshes on `Event::ConnectionChanged`
+        - [ ] Unit tests verify `wf-db` schema fetch returns expected metadata for SQLite
     validations:
       required: true
 
   - type: textarea
-    id: detailed_description
+    id: related
     attributes:
-      label: Detailed Description
-      description: Describe the desired behavior, UI interaction, and any edge cases to consider.
+      label: Related
+      description: Dependencies, related issues, or prior art.
       placeholder: |
-        A "Duplicate Tab" action (e.g. Ctrl+Shift+D or via the command palette):
-        - Opens a new tab with the same query text as the active tab
-        - Does not copy the result — only the editor content
-        - New tab is focused immediately
-        - Works when there is only one tab (duplicates into a second)
-    validations:
-      required: true
-
-  - type: textarea
-    id: alternatives
-    attributes:
-      label: Alternatives Considered
-      description: What other approaches have you tried or considered?
-      placeholder: |
-        - Manually copying text to a new tab: works but is tedious
-        - Session restore (T075): saves query text on close but not for mid-session branching
-
-  - type: textarea
-    id: references
-    attributes:
-      label: References
-      description: Links to related issues, similar tools, or prior art.
-      placeholder: |
-        - Related issue: #60 (multi-tab UI)
-        - Similar behavior in: TablePlus, DataGrip
-
-  - type: dropdown
-    id: priority
-    attributes:
-      label: Priority
-      description: How important is this feature to you?
-      options:
-        - Low - Nice to have
-        - Medium - Would improve my workflow
-        - High - Blocking my use case
-      default: 0
-    validations:
-      required: true
-
-  - type: dropdown
-    id: target_area
-    attributes:
-      label: Target Area
-      description: Which part of the codebase is most relevant?
-      options:
-        - app (UI / Controller / Command / Event)
-        - wf-db (database drivers, connection pool)
-        - wf-config (configuration, encryption)
-        - wf-query (SQL analyzer, formatter, export)
-        - wf-completion (SQL completion engine)
-        - wf-history (query history)
-        - Unknown
-      default: 6
+        Depends on: #12 (DbService schema API)
+        Related: #43 (completion popup — shares schema metadata source)
+        Prior art: TablePlus schema panel, DataGrip database tree
 
   - type: checkboxes
     id: contribution
@@ -100,8 +69,6 @@ body:
         - label: I am willing to help implement this feature
           required: false
         - label: I can provide test cases or sample SQL
-          required: false
-        - label: I can help with documentation
           required: false
 
   - type: checkboxes
