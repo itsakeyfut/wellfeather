@@ -13,6 +13,9 @@ pub enum DbError {
     #[error("query cancelled")]
     Cancelled,
 
+    #[error("invalid configuration: {0}")]
+    InvalidConfig(String),
+
     #[error(transparent)]
     Sqlx(#[from] sqlx::Error),
 }

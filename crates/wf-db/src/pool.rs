@@ -42,7 +42,7 @@ impl DbPool {
                 Ok(DbPool::My(pool))
             }
             DbType::SQLite => {
-                let url = sqlite_url(conn);
+                let url = sqlite_url(conn)?;
                 let pool = SqlitePool::connect(&url)
                     .await
                     .map_err(|e| DbError::ConnectionFailed(redact_url_password(&e.to_string())))?;
@@ -160,14 +160,29 @@ pub(crate) fn my_url(conn: &DbConnection, password: Option<&str>) -> String {
 
 /// Build a SQLite connection URL from `conn`.
 /// Returns `conn.connection_string` unchanged if present.
-/// Treats `":memory:"` and `None` as an in-process SQLite database.
-pub(crate) fn sqlite_url(conn: &DbConnection) -> String {
+/// `None` database maps to an in-process SQLite database.
+///
+/// Rejects paths that start with `:` or `file:` (special SQLite URI forms)
+/// and paths that contain `..` components (path traversal).
+pub(crate) fn sqlite_url(conn: &DbConnection) -> Result<String, DbError> {
     if let Some(url) = &conn.connection_string {
-        return url.clone();
+        return Ok(url.clone());
     }
     match conn.database.as_deref() {
-        Some(":memory:") | None => "sqlite::memory:".to_string(),
-        Some(path) => format!("sqlite:{}", path),
+        None => Ok("sqlite::memory:".to_string()),
+        Some(path) => {
+            if path.starts_with(':') || path.starts_with("file:") {
+                return Err(DbError::InvalidConfig(
+                    "SQLite path must be a file path, not a special URI".into(),
+                ));
+            }
+            if path.split(['/', '\\']).any(|c| c == "..") {
+                return Err(DbError::InvalidConfig(
+                    "SQLite path must not contain '..'".into(),
+                ));
+            }
+            Ok(format!("sqlite:{}", path))
+        }
     }
 }
 
@@ -364,14 +379,54 @@ mod tests {
     #[test]
     fn sqlite_url_should_return_memory_url_when_database_is_none() {
         let conn = sqlite_conn_fields_memory();
-        assert_eq!(sqlite_url(&conn), "sqlite::memory:");
+        assert_eq!(sqlite_url(&conn).unwrap(), "sqlite::memory:");
     }
 
     #[test]
     fn sqlite_url_should_use_database_field_as_path() {
         let mut conn = sqlite_conn_fields_memory();
         conn.database = Some("mydb.sqlite".to_string());
-        assert_eq!(sqlite_url(&conn), "sqlite:mydb.sqlite");
+        assert_eq!(sqlite_url(&conn).unwrap(), "sqlite:mydb.sqlite");
+    }
+
+    #[test]
+    fn sqlite_url_should_reject_parent_dir_traversal() {
+        let mut conn = sqlite_conn_fields_memory();
+        conn.database = Some("../../sensitive.db".to_string());
+        assert!(
+            matches!(sqlite_url(&conn), Err(DbError::InvalidConfig(_))),
+            "expected InvalidConfig for path traversal"
+        );
+    }
+
+    #[test]
+    fn sqlite_url_should_reject_colon_prefix() {
+        let mut conn = sqlite_conn_fields_memory();
+        conn.database = Some(":memory:".to_string());
+        assert!(
+            matches!(sqlite_url(&conn), Err(DbError::InvalidConfig(_))),
+            "expected InvalidConfig for :memory: prefix"
+        );
+    }
+
+    #[test]
+    fn sqlite_url_should_reject_file_uri_prefix() {
+        let mut conn = sqlite_conn_fields_memory();
+        conn.database = Some("file:path.db?mode=memory".to_string());
+        assert!(
+            matches!(sqlite_url(&conn), Err(DbError::InvalidConfig(_))),
+            "expected InvalidConfig for file: prefix"
+        );
+    }
+
+    #[test]
+    fn sqlite_url_should_accept_absolute_path() {
+        let mut conn = sqlite_conn_fields_memory();
+        conn.database = Some("/home/user/data/mydb.sqlite".to_string());
+        assert_eq!(
+            sqlite_url(&conn).unwrap(),
+            "sqlite:/home/user/data/mydb.sqlite"
+        );
     }
 
     // -- Integration tests (require SQLite runtime) ------------------------
