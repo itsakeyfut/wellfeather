@@ -1,6 +1,22 @@
+use std::borrow::Cow;
 use std::path::Path;
 
 const UTF8_BOM: &[u8] = b"\xef\xbb\xbf";
+
+/// Prefixes formula-trigger characters with a tab so spreadsheet applications
+/// treat the cell as literal text rather than executing a formula.
+///
+/// Excel, LibreOffice Calc, and Google Sheets all treat cells starting with
+/// `=`, `+`, `-`, or `@` as formula expressions. A leading tab disables that.
+/// Cells already starting with `\t` or `\r` are also prefixed to prevent
+/// misinterpretation by parsers that strip leading whitespace.
+fn sanitize_cell(s: &str) -> Cow<'_, str> {
+    if matches!(s.chars().next(), Some('=' | '+' | '-' | '@' | '\t' | '\r')) {
+        Cow::Owned(format!("\t{s}"))
+    } else {
+        Cow::Borrowed(s)
+    }
+}
 
 /// Serialise `columns` + `rows` to UTF-8 BOM CSV bytes.
 /// NULL cells become empty strings.  Used by [`export_csv`] and in unit tests.
@@ -12,9 +28,12 @@ pub fn result_to_csv_bytes(columns: &[String], rows: &[Vec<Option<String>>]) -> 
         // SAFETY: writing to Vec<u8> is infallible; the only error path in csv::Writer is I/O failure, which cannot occur for an in-memory buffer.
         wtr.write_record(columns).unwrap();
         for row in rows {
-            let cells: Vec<&str> = row.iter().map(|c| c.as_deref().unwrap_or("")).collect();
+            let cells: Vec<Cow<str>> = row
+                .iter()
+                .map(|c| sanitize_cell(c.as_deref().unwrap_or("")))
+                .collect();
             // SAFETY: same as above — writing to Vec<u8> is infallible.
-            wtr.write_record(&cells).unwrap();
+            wtr.write_record(cells.iter().map(|c| c.as_ref())).unwrap();
         }
         // SAFETY: flushing a Vec<u8>-backed writer is infallible.
         wtr.flush().unwrap();
@@ -273,6 +292,30 @@ mod tests {
         let text =
             std::str::from_utf8(&bytes[3..]).expect("CSV bytes should be valid UTF-8 after BOM");
         assert!(text.contains("\"a,b\""), "comma not escaped: {text}");
+    }
+
+    #[test]
+    fn result_to_csv_bytes_should_sanitize_formula_injection_prefix() {
+        let cols = vec!["v".to_string()];
+        // Use payloads without " to avoid CSV double-quote escaping in the assertion.
+        // The sanitization goal is the same: strip formula execution, preserve the text.
+        let formula_payloads = ["=1+1", "+cmd|' /C calc'!A0", "-2+3", "@SUM(A1)"];
+        for payload in &formula_payloads {
+            let rows = vec![vec![Some(payload.to_string())]];
+            let bytes = result_to_csv_bytes(&cols, &rows);
+            let text = std::str::from_utf8(&bytes[3..])
+                .expect("CSV bytes should be valid UTF-8 after BOM");
+            // Tab prefix must be present so the spreadsheet treats it as literal text.
+            assert!(
+                text.contains(&format!("\t{payload}")),
+                "formula payload not prefixed with tab: {payload}\nCSV: {text}"
+            );
+            // The original value must still be recoverable from the field.
+            assert!(
+                text.contains(payload),
+                "sanitized value should still contain original text: {payload}\nCSV: {text}"
+            );
+        }
     }
 
     // ── proptest ──────────────────────────────────────────────────────────────
