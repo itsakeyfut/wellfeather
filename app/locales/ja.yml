@@ -13,5 +13,6 @@ error:
   db_connect_failed: "接続に失敗しました: %{reason}"
   query_failed: "クエリエラー: %{reason}"
   query_cancelled: "クエリをキャンセルしました"
+  invalid_config: "設定が無効です: %{reason}"
   db_error: "データベースエラー: %{reason}"
   read_only_blocked: "読み取り専用接続のため実行できません"
