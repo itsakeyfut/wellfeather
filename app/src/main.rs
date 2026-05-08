@@ -121,6 +121,26 @@ fn main() -> anyhow::Result<()> {
             .await
     })?;
 
+    // Restrict the database files to owner-read-write (0600) on Unix.
+    // The file is created with the process umask (typically 0644, world-readable)
+    // but contains sensitive data: query history, session SQL, and connection metadata.
+    // WAL companion files (-wal, -shm) are restricted if they already exist.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        for suffix in &["", "-wal", "-shm"] {
+            let path = config_dir.join(format!("wellfeather.db{suffix}"));
+            if path.exists() {
+                let mut perms = std::fs::metadata(&path)
+                    .with_context(|| format!("failed to stat {}", path.display()))?
+                    .permissions();
+                perms.set_mode(0o600);
+                std::fs::set_permissions(&path, perms)
+                    .with_context(|| format!("failed to set permissions on {}", path.display()))?;
+            }
+        }
+    }
+
     // Initialise all services from the shared pool (Composition Root).
     let repo: Arc<ConnectionRepository> =
         Arc::new(runtime.block_on(ConnectionRepository::new(pool.clone()))?);
