@@ -18,6 +18,18 @@ pub enum DbError {
 
     #[error(transparent)]
     Sqlx(#[from] sqlx::Error),
+
+    #[error("SSH tunnel failed: {0}")]
+    SshTunnelFailed(String),
+
+    #[error("SSH host key rejected: server key not trusted")]
+    SshHostKeyRejected,
+
+    #[error("SSH fingerprint mismatch: expected {expected}, got {actual}")]
+    SshFingerprintMismatch { expected: String, actual: String },
+
+    #[error("failed to write known-hosts file: {0}")]
+    KnownHostsWrite(String),
 }
 
 // ---------------------------------------------------------------------------

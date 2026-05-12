@@ -90,6 +90,7 @@ mod tests {
             user: None,
             password_encrypted: None,
             database: None,
+            ssh: None,
         }
     }
 

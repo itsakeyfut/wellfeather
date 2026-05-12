@@ -6,6 +6,7 @@ use tokio_util::sync::CancellationToken;
 use crate::error::DbError;
 use crate::models::{DbConnection, DbMetadata, QueryResult};
 use crate::pool::DbPool;
+use crate::tunnel::SshTunnel;
 
 // ---------------------------------------------------------------------------
 // DbService
@@ -17,6 +18,7 @@ use crate::pool::DbPool;
 #[derive(Clone, Default)]
 pub struct DbService {
     pools: Arc<RwLock<HashMap<String, DbPool>>>,
+    tunnels: Arc<RwLock<HashMap<String, SshTunnel>>>,
 }
 
 impl DbService {
@@ -49,12 +51,29 @@ impl DbService {
         Ok(())
     }
 
+    /// Store an SSH tunnel for `conn_id`.
+    ///
+    /// If a tunnel already exists for this id it is replaced (and the old
+    /// forwarding task is aborted via `SshTunnel`'s `Drop` impl).
+    pub fn store_tunnel(&self, conn_id: String, tunnel: SshTunnel) {
+        self.tunnels
+            .write()
+            .unwrap_or_else(|p| p.into_inner())
+            .insert(conn_id, tunnel);
+    }
+
     /// Disconnect from the database identified by `conn_id`.
     ///
     /// Removing the pool from the map drops it, which closes all underlying
-    /// connections held by the pool. If `conn_id` is not found, this is a no-op.
+    /// connections held by the pool.  Any SSH tunnel for this id is also
+    /// dropped, aborting the forwarding task.  If `conn_id` is not found,
+    /// this is a no-op.
     pub fn disconnect(&self, conn_id: &str) {
         self.pools
+            .write()
+            .unwrap_or_else(|p| p.into_inner())
+            .remove(conn_id);
+        self.tunnels
             .write()
             .unwrap_or_else(|p| p.into_inner())
             .remove(conn_id);
@@ -159,6 +178,7 @@ mod tests {
             user: None,
             password_encrypted: None,
             database: None,
+            ssh: None,
         }
     }
 

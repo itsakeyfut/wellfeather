@@ -1,3 +1,4 @@
+use tokio::sync::oneshot;
 use wf_completion::CompletionItem;
 use wf_config::models::{ConnectionConfig, Theme};
 use wf_db::models::{DbMetadata, QueryResult};
@@ -42,6 +43,13 @@ pub enum Event {
         id: String,
         read_only: bool,
         safe_dml: bool,
+    },
+    /// Controller paused a connect attempt awaiting host-key approval.
+    /// The UI shows a fingerprint dialog; sending `true` to `approval_tx` proceeds,
+    /// `false` aborts the connection.
+    SshFingerprintRequired {
+        fingerprint: String,
+        approval_tx: oneshot::Sender<bool>,
     },
     StateChanged(StateEvent),
     DdlLoaded {

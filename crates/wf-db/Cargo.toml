@@ -22,3 +22,8 @@ chrono    = { workspace = true }
 anyhow            = { workspace = true }
 tracing           = { workspace = true }
 percent-encoding  = "2.3.2"
+russh             = { version = "0.60.2", default-features = false, features = ["ring", "flate2", "rsa"] }
+toml              = "1"
+
+[dev-dependencies]
+tempfile = "3.27.0"

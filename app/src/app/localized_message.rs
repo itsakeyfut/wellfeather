@@ -13,6 +13,15 @@ impl LocalizedMessage for DbError {
             DbError::Cancelled => t!("error.query_cancelled").to_string(),
             DbError::InvalidConfig(s) => t!("error.invalid_config", reason = s).to_string(),
             DbError::Sqlx(e) => t!("error.db_error", reason = e.to_string()).to_string(),
+            DbError::SshTunnelFailed(s) => t!("error.ssh_tunnel_failed", reason = s).to_string(),
+            DbError::SshHostKeyRejected => t!("error.ssh_host_key_rejected").to_string(),
+            DbError::SshFingerprintMismatch { expected, actual } => t!(
+                "error.ssh_fingerprint_mismatch",
+                expected = expected,
+                actual = actual
+            )
+            .to_string(),
+            DbError::KnownHostsWrite(s) => t!("error.ssh_tunnel_failed", reason = s).to_string(),
         }
     }
 }

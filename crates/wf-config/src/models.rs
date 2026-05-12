@@ -141,6 +141,18 @@ impl Default for UiConfig {
 }
 
 // ---------------------------------------------------------------------------
+// SshAuthMethod
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum SshAuthMethod {
+    #[default]
+    Password,
+    PrivateKey,
+}
+
+// ---------------------------------------------------------------------------
 // ConnectionConfig  [[connections]]
 // ---------------------------------------------------------------------------
 
@@ -170,6 +182,25 @@ pub struct ConnectionConfig {
     /// When true, write statements (INSERT/UPDATE/DELETE/DDL) are blocked before execution.
     #[serde(default)]
     pub read_only: bool,
+    // ── SSH Tunnel ────────────────────────────────────────────────────────────
+    #[serde(default)]
+    pub ssh_enabled: bool,
+    #[serde(default)]
+    pub ssh_host: Option<String>,
+    #[serde(default)]
+    pub ssh_port: Option<u16>,
+    #[serde(default)]
+    pub ssh_user: Option<String>,
+    #[serde(default)]
+    pub ssh_auth_method: SshAuthMethod,
+    /// AES-256-GCM encrypted SSH password
+    #[serde(default)]
+    pub ssh_password_encrypted: Option<String>,
+    #[serde(default)]
+    pub ssh_key_path: Option<String>,
+    /// AES-256-GCM encrypted SSH private-key passphrase
+    #[serde(default)]
+    pub ssh_passphrase_encrypted: Option<String>,
 }
 
 fn default_safe_dml() -> bool {
@@ -273,6 +304,62 @@ language = "ja"
         // Round-trip: integer 500 → PageSize::Rows500
         let back: Wrapper = toml::from_str(&s).expect("failed to deserialize");
         assert_eq!(back.page_size, PageSize::Rows500);
+    }
+
+    #[test]
+    fn ssh_config_defaults_should_be_false_and_none() {
+        let toml = r#"
+            id = "c1"
+            name = "c1"
+            db_type = "sqlite"
+        "#;
+        let cc: ConnectionConfig = toml::from_str(toml).expect("should parse with SSH defaults");
+        assert!(!cc.ssh_enabled);
+        assert_eq!(cc.ssh_host, None);
+        assert_eq!(cc.ssh_port, None);
+        assert_eq!(cc.ssh_user, None);
+        assert_eq!(cc.ssh_auth_method, SshAuthMethod::Password);
+        assert_eq!(cc.ssh_password_encrypted, None);
+        assert_eq!(cc.ssh_key_path, None);
+        assert_eq!(cc.ssh_passphrase_encrypted, None);
+    }
+
+    #[test]
+    fn ssh_config_fields_should_round_trip_through_toml() {
+        let original = ConnectionConfig {
+            id: "ssh-test".into(),
+            name: "SSH Test".into(),
+            db_type: DbTypeName::PostgreSQL,
+            connection_string: None,
+            host: Some("db.internal".into()),
+            port: Some(5432),
+            user: Some("admin".into()),
+            password_encrypted: None,
+            database: Some("mydb".into()),
+            safe_dml: true,
+            read_only: false,
+            ssh_enabled: true,
+            ssh_host: Some("bastion.example.com".into()),
+            ssh_port: Some(22),
+            ssh_user: Some("ec2-user".into()),
+            ssh_auth_method: SshAuthMethod::PrivateKey,
+            ssh_password_encrypted: None,
+            ssh_key_path: Some("/home/user/.ssh/id_rsa".into()),
+            ssh_passphrase_encrypted: Some("enc:abc123".into()),
+        };
+
+        let serialized = toml::to_string(&original).expect("failed to serialize");
+        let deserialized: ConnectionConfig =
+            toml::from_str(&serialized).expect("failed to deserialize");
+
+        assert_eq!(original, deserialized);
+        assert!(deserialized.ssh_enabled);
+        assert_eq!(
+            deserialized.ssh_host.as_deref(),
+            Some("bastion.example.com")
+        );
+        assert_eq!(deserialized.ssh_port, Some(22));
+        assert_eq!(deserialized.ssh_auth_method, SshAuthMethod::PrivateKey);
     }
 
     #[test]

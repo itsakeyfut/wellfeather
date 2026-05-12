@@ -16,3 +16,7 @@ error:
   invalid_config: "Invalid configuration: %{reason}"
   db_error: "Database error: %{reason}"
   read_only_blocked: "Blocked: connection is read-only"
+  ssh_tunnel_failed: "SSH tunnel failed: %{reason}"
+  ssh_host_key_rejected: "SSH host key was not accepted"
+  ssh_fingerprint_mismatch: "SSH host key mismatch — expected: %{expected}, got: %{actual}"
+  ssh_conn_string_unsupported: "SSH tunnel is not supported with connection string mode. Switch to Individual Fields."
