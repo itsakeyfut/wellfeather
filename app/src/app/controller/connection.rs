@@ -1,5 +1,12 @@
+use tokio::sync::oneshot;
 use tracing::{info, warn};
-use wf_db::models::DbConnection;
+use wf_config::crypto;
+use wf_db::{
+    models::DbConnection,
+    tunnel::{
+        KnownHostStatus, check_known_host, connect_tunnel, probe_fingerprint, save_known_host,
+    },
+};
 use zeroize::Zeroizing;
 
 use crate::app::{LocalizedMessage, event::Event, session::db_to_config_conn};
@@ -9,11 +16,111 @@ use super::AppController;
 impl AppController {
     pub(super) async fn handle_connect(
         &self,
-        conn: DbConnection,
+        mut conn: DbConnection,
         password: Option<Zeroizing<String>>,
     ) {
         let id = conn.id.clone();
         info!(conn_id = %id, "handling Connect command");
+
+        // ── SSH tunnel setup ──────────────────────────────────────────────────
+        if let Some(ssh_cfg) = &conn.ssh {
+            let known_hosts_path = self.config_dir.join("known_hosts.toml");
+
+            // Phase 1: probe fingerprint
+            let fingerprint = match probe_fingerprint(&ssh_cfg.host, ssh_cfg.port).await {
+                Ok(fp) => fp,
+                Err(e) => {
+                    warn!(conn_id = %id, error = %e, "SSH fingerprint probe failed");
+                    let _ = self
+                        .tx_event
+                        .send(Event::ConnectError(e.localized_message()))
+                        .await;
+                    return;
+                }
+            };
+
+            // Phase 2: check known hosts
+            let status =
+                check_known_host(&ssh_cfg.host, ssh_cfg.port, &fingerprint, &known_hosts_path);
+            match status {
+                KnownHostStatus::Trusted => {
+                    info!(conn_id = %id, "SSH host key trusted");
+                }
+                KnownHostStatus::Mismatch { expected, actual } => {
+                    warn!(conn_id = %id, %expected, %actual, "SSH host key mismatch");
+                    let err = wf_db::error::DbError::SshFingerprintMismatch { expected, actual };
+                    let _ = self
+                        .tx_event
+                        .send(Event::ConnectError(err.localized_message()))
+                        .await;
+                    return;
+                }
+                KnownHostStatus::Unknown => {
+                    // Ask the user to approve
+                    let (approval_tx, approval_rx) = oneshot::channel::<bool>();
+                    let _ = self
+                        .tx_event
+                        .send(Event::SshFingerprintRequired {
+                            fingerprint: fingerprint.clone(),
+                            approval_tx,
+                        })
+                        .await;
+
+                    let approved = approval_rx.await.unwrap_or(false);
+                    if !approved {
+                        info!(conn_id = %id, "SSH host key rejected by user");
+                        return;
+                    }
+                    // Persist trust
+                    if let Err(e) = save_known_host(
+                        &ssh_cfg.host,
+                        ssh_cfg.port,
+                        &fingerprint,
+                        &known_hosts_path,
+                    ) {
+                        warn!(conn_id = %id, error = %e, "failed to save known host");
+                    }
+                }
+            }
+
+            // Phase 3: decrypt SSH credentials and establish tunnel
+            let ssh_password = ssh_cfg
+                .ssh_password_encrypted
+                .as_deref()
+                .and_then(|enc| crypto::decrypt(enc, &self.enc_key).ok());
+            let ssh_passphrase = ssh_cfg
+                .ssh_passphrase_encrypted
+                .as_deref()
+                .and_then(|enc| crypto::decrypt(enc, &self.enc_key).ok());
+
+            let tunnel = match connect_tunnel(
+                ssh_cfg,
+                ssh_password.as_deref().map(|z| z.as_str()),
+                ssh_passphrase.as_deref().map(|z| z.as_str()),
+                &fingerprint,
+            )
+            .await
+            {
+                Ok(t) => t,
+                Err(e) => {
+                    warn!(conn_id = %id, error = %e, "SSH tunnel connect failed");
+                    let _ = self
+                        .tx_event
+                        .send(Event::ConnectError(e.localized_message()))
+                        .await;
+                    return;
+                }
+            };
+
+            let local_port = tunnel.local_port;
+            // Store tunnel before mutating conn so lifetime is tied to DbService
+            self.db.store_tunnel(id.clone(), tunnel);
+
+            // Route DB connection through the local tunnel endpoint
+            conn.host = Some("127.0.0.1".to_string());
+            conn.port = Some(local_port);
+        }
+
         match self
             .db
             .connect(&conn, password.as_ref().map(|z| z.as_str()))

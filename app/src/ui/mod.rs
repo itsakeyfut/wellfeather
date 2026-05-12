@@ -397,6 +397,12 @@ impl UI {
         // handler on QueryFinished, read by the filter callbacks on the UI thread.
         let original_data: SharedOriginalData = Arc::new(Mutex::new(None));
 
+        // Shared slot for the SSH fingerprint approval oneshot sender.
+        // Written by the async event handler when a new fingerprint needs user approval;
+        // consumed by the approve/reject UI callbacks on the Slint thread.
+        let fp_approval_tx: Arc<Mutex<Option<tokio::sync::oneshot::Sender<bool>>>> =
+            Arc::new(Mutex::new(None));
+
         // Restore or create tab state. Track whether tabs were loaded from DB
         // so we can fall back to last_query on first launch.
         let handle = tokio::runtime::Handle::current();
@@ -425,7 +431,12 @@ impl UI {
             enc_key,
             Rc::clone(&tabs_state),
         );
-        connection::register_connection_form_callbacks(&window, tx_cmd.clone(), enc_key);
+        connection::register_connection_form_callbacks(
+            &window,
+            tx_cmd.clone(),
+            enc_key,
+            Arc::clone(&fp_approval_tx),
+        );
         query::register_editor_callbacks(&window, tx_cmd.clone());
         completion::register_completion_callbacks(&window, tx_cmd.clone());
         completion::register_completion_accept_callback(&window);
@@ -569,6 +580,7 @@ impl UI {
             Arc::clone(&sidebar_state),
             Arc::clone(&original_data),
             Arc::clone(&snippet_repo),
+            Arc::clone(&fp_approval_tx),
         );
 
         Ok(Self { window })
@@ -598,6 +610,14 @@ mod tests {
             database: None,
             safe_dml: true,
             read_only: false,
+            ssh_enabled: false,
+            ssh_host: None,
+            ssh_port: None,
+            ssh_user: None,
+            ssh_auth_method: wf_config::models::SshAuthMethod::Password,
+            ssh_password_encrypted: None,
+            ssh_key_path: None,
+            ssh_passphrase_encrypted: None,
         }
     }
 

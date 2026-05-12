@@ -2,10 +2,11 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
+use rust_i18n::t;
 use slint::{ComponentHandle, Model as _};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 use wf_config::{crypto, models::DbTypeName};
-use wf_db::models::{DbConnection, DbType};
+use wf_db::models::{DbConnection, DbType, SshAuth, SshTunnelConfig};
 
 use crate::app::{
     command::{Command, ConfigUpdate},
@@ -24,6 +25,18 @@ pub(super) fn db_type_label_config(dt: &DbTypeName) -> &'static str {
         DbTypeName::MySQL => "MySQL",
         DbTypeName::SQLite => "SQLite",
     }
+}
+
+/// Returns a localized error string when the form state is invalid, or `None` when valid.
+///
+/// Currently catches: connection string mode + SSH host both set (remote_host would be empty).
+fn validate_form(ui: &crate::UiState) -> Option<String> {
+    let is_conn_string = ui.get_form_tab_index() == 0;
+    let ssh_host_set = !ui.get_form_ssh_host().is_empty();
+    if is_conn_string && ssh_host_set {
+        return Some(t!("error.ssh_conn_string_unsupported").to_string());
+    }
+    None
 }
 
 /// Build a `DbConnection` from the current values in the connection form global,
@@ -66,6 +79,53 @@ fn build_conn_from_form(
         edit_id
     };
 
+    // SSH is active when SSH Host is filled in; `opt` returns None for empty strings.
+    let ssh = opt(ui.get_form_ssh_host()).map(|host| {
+        let auth = if ui.get_form_ssh_auth_method() == 1 {
+            SshAuth::PrivateKey {
+                key_path: ui.get_form_ssh_key_path().to_string(),
+            }
+        } else {
+            SshAuth::Password
+        };
+
+        let ssh_password_raw = opt(ui.get_form_ssh_password()).map(zeroize::Zeroizing::new);
+        let ssh_password_encrypted = ssh_password_raw
+            .as_deref()
+            .map(|p| crypto::encrypt(p, enc_key));
+
+        let ssh_passphrase_raw = opt(ui.get_form_ssh_passphrase()).map(zeroize::Zeroizing::new);
+        let ssh_passphrase_encrypted = ssh_passphrase_raw
+            .as_deref()
+            .map(|p| crypto::encrypt(p, enc_key));
+
+        SshTunnelConfig {
+            host,
+            port: ui
+                .get_form_ssh_port()
+                .to_string()
+                .parse::<u16>()
+                .unwrap_or(22),
+            user: ui.get_form_ssh_user().to_string(),
+            auth,
+            remote_host: if is_conn_string {
+                String::new()
+            } else {
+                opt(ui.get_form_host()).unwrap_or_default()
+            },
+            remote_port: if is_conn_string {
+                5432
+            } else {
+                ui.get_form_port()
+                    .to_string()
+                    .parse::<u16>()
+                    .unwrap_or(5432)
+            },
+            ssh_password_encrypted,
+            ssh_passphrase_encrypted,
+        }
+    });
+
     let conn = DbConnection {
         id,
         name: ui.get_form_name().to_string(),
@@ -96,6 +156,7 @@ fn build_conn_from_form(
         } else {
             opt(ui.get_form_database())
         },
+        ssh,
     };
 
     (conn, password)
@@ -286,6 +347,15 @@ pub(super) fn register_sidebar_callbacks(
                 ui.set_form_edit_id("".into());
                 ui.set_form_safe_dml(true);
                 ui.set_form_read_only(false);
+                // Reset SSH tunnel fields
+                ui.set_form_section(0);
+                ui.set_form_ssh_host("".into());
+                ui.set_form_ssh_port("22".into());
+                ui.set_form_ssh_user("".into());
+                ui.set_form_ssh_auth_method(0);
+                ui.set_form_ssh_password("".into());
+                ui.set_form_ssh_key_path("".into());
+                ui.set_form_ssh_passphrase("".into());
                 ui.set_show_connection_form(true);
             });
         });
@@ -353,6 +423,58 @@ pub(super) fn register_sidebar_callbacks(
                 )
             };
 
+            // Decrypt SSH credentials for pre-filling the form.
+            let (
+                ssh_host,
+                ssh_port,
+                ssh_user,
+                ssh_auth_method,
+                ssh_password,
+                ssh_key_path,
+                ssh_passphrase,
+            ) = match &conn.ssh {
+                Some(ssh_cfg) => {
+                    let pw = ssh_cfg
+                        .ssh_password_encrypted
+                        .as_ref()
+                        .and_then(|enc| crypto::decrypt(enc, &enc_key).ok())
+                        .map(|z| z.as_str().to_owned())
+                        .unwrap_or_default();
+                    let pp = ssh_cfg
+                        .ssh_passphrase_encrypted
+                        .as_ref()
+                        .and_then(|enc| crypto::decrypt(enc, &enc_key).ok())
+                        .map(|z| z.as_str().to_owned())
+                        .unwrap_or_default();
+                    let auth_idx = match &ssh_cfg.auth {
+                        SshAuth::PrivateKey { .. } => 1,
+                        SshAuth::Password => 0,
+                    };
+                    let key_path = match &ssh_cfg.auth {
+                        SshAuth::PrivateKey { key_path } => key_path.clone(),
+                        SshAuth::Password => String::new(),
+                    };
+                    (
+                        ssh_cfg.host.clone(),
+                        ssh_cfg.port,
+                        ssh_cfg.user.clone(),
+                        auth_idx,
+                        pw,
+                        key_path,
+                        pp,
+                    )
+                }
+                None => (
+                    String::new(),
+                    22u16,
+                    String::new(),
+                    0i32,
+                    String::new(),
+                    String::new(),
+                    String::new(),
+                ),
+            };
+
             with_ui(&window_weak, move |ui| {
                 ui.set_form_edit_id(conn.id.clone().into());
                 ui.set_form_name(conn.name.clone().into());
@@ -369,6 +491,15 @@ pub(super) fn register_sidebar_callbacks(
                 ui.set_form_test_ok(false);
                 ui.set_form_safe_dml(safe_dml);
                 ui.set_form_read_only(read_only);
+                // SSH tunnel fields
+                ui.set_form_section(0);
+                ui.set_form_ssh_host(ssh_host.into());
+                ui.set_form_ssh_port(ssh_port.to_string().into());
+                ui.set_form_ssh_user(ssh_user.into());
+                ui.set_form_ssh_auth_method(ssh_auth_method);
+                ui.set_form_ssh_password(ssh_password.into());
+                ui.set_form_ssh_key_path(ssh_key_path.into());
+                ui.set_form_ssh_passphrase(ssh_passphrase.into());
                 ui.set_show_test_result_popup(false);
                 ui.set_show_add_confirm_popup(false);
                 ui.set_show_connection_form(true);
@@ -617,6 +748,7 @@ pub(super) fn register_connection_form_callbacks(
     window: &crate::AppWindow,
     tx_cmd: mpsc::Sender<Command>,
     enc_key: [u8; 32],
+    fp_approval_tx: Arc<Mutex<Option<oneshot::Sender<bool>>>>,
 ) {
     let ui_state = window.global::<crate::UiState>();
 
@@ -641,6 +773,10 @@ pub(super) fn register_connection_form_callbacks(
         let tx_cmd = tx_cmd.clone();
         ui_state.on_test_connection(move || {
             with_ui(&window_weak, |ui| {
+                if let Some(err) = validate_form(ui) {
+                    ui.set_form_status(err.into());
+                    return;
+                }
                 ui.set_form_testing(true);
                 ui.set_form_status("".into());
                 ui.set_form_test_ok(false);
@@ -657,6 +793,10 @@ pub(super) fn register_connection_form_callbacks(
         let tx_cmd = tx_cmd.clone();
         ui_state.on_add_connection(move || {
             with_ui(&window_weak, |ui| {
+                if let Some(err) = validate_form(ui) {
+                    ui.set_form_status(err.into());
+                    return;
+                }
                 if ui.get_form_test_ok() {
                     ui.set_form_testing(true);
                     let (conn, password) = build_conn_from_form(ui, &enc_key);
@@ -686,6 +826,10 @@ pub(super) fn register_connection_form_callbacks(
         let tx_cmd = tx_cmd.clone();
         ui_state.on_confirm_add_connection(move || {
             with_ui(&window_weak, |ui| {
+                if let Some(err) = validate_form(ui) {
+                    ui.set_form_status(err.into());
+                    return;
+                }
                 ui.set_show_add_confirm_popup(false);
                 ui.set_form_testing(true);
                 let (conn, password) = build_conn_from_form(ui, &enc_key);
@@ -734,6 +878,62 @@ pub(super) fn register_connection_form_callbacks(
                     ui.set_show_connection_form(false);
                 }
             });
+        });
+    }
+
+    // browse-ssh-key-file: open a file picker and set form-ssh-key-path.
+    {
+        let window_weak = window.as_weak();
+        ui_state.on_browse_ssh_key_file(move || {
+            let window_weak = window_weak.clone(); // clone required: async move
+            tokio::spawn(async move {
+                if let Some(file) = rfd::AsyncFileDialog::new()
+                    .add_filter("Private key", &["pem", "key", "ppk", ""])
+                    .pick_file()
+                    .await
+                {
+                    let path = file.path().to_string_lossy().into_owned();
+                    slint::invoke_from_event_loop(move || {
+                        if let Some(w) = window_weak.upgrade() {
+                            w.global::<crate::UiState>()
+                                .set_form_ssh_key_path(path.into());
+                        }
+                    })
+                    .ok();
+                }
+            });
+        });
+    }
+
+    // approve-ssh-fingerprint: user approved the unknown host key.
+    {
+        let fp_approval_tx = Arc::clone(&fp_approval_tx); // clone required: callback closure
+        let window_weak = window.as_weak();
+        ui_state.on_approve_ssh_fingerprint(move || {
+            if let Some(tx) = fp_approval_tx
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .take()
+            {
+                let _ = tx.send(true);
+            }
+            with_ui(&window_weak, |ui| ui.set_show_ssh_fingerprint_dialog(false));
+        });
+    }
+
+    // reject-ssh-fingerprint: user rejected the unknown host key.
+    {
+        let fp_approval_tx = Arc::clone(&fp_approval_tx); // clone required: callback closure
+        let window_weak = window.as_weak();
+        ui_state.on_reject_ssh_fingerprint(move || {
+            if let Some(tx) = fp_approval_tx
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .take()
+            {
+                let _ = tx.send(false);
+            }
+            with_ui(&window_weak, |ui| ui.set_show_ssh_fingerprint_dialog(false));
         });
     }
 }

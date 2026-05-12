@@ -244,6 +244,7 @@ mod tests {
             user: Some("alice".to_string()),
             password_encrypted: None,
             database: Some("mydb".to_string()),
+            ssh: None,
         }
     }
 
@@ -258,6 +259,7 @@ mod tests {
             user: Some("bob".to_string()),
             password_encrypted: None,
             database: Some("shop".to_string()),
+            ssh: None,
         }
     }
 
@@ -272,6 +274,7 @@ mod tests {
             user: None,
             password_encrypted: None,
             database: None,
+            ssh: None,
         }
     }
 
@@ -286,6 +289,7 @@ mod tests {
             user: None,
             password_encrypted: None,
             database: None, // None → :memory:
+            ssh: None,
         }
     }
 

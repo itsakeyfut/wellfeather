@@ -1,0 +1,81 @@
+import { Colors, Typography, Layout, Icons } from "../../theme.slint";
+import { ActionButton, ModalOverlay } from "../common.slint";
+
+export component FingerprintDialog inherits ModalOverlay {
+    in property <string> fingerprint;
+    callback approve();
+    callback reject();
+
+    VerticalLayout {
+        padding: Layout.padding-2xl;
+        spacing: Layout.spacing-xl;
+        alignment: start;
+
+        // Warning icon + title
+        HorizontalLayout {
+            alignment: center;
+            spacing: Layout.spacing-md;
+            Image {
+                width: Layout.icon-xl;
+                source: Icons.alert-error;
+                colorize: Colors.yellow;
+                image-fit: contain;
+            }
+            Text {
+                text: @tr("Unknown SSH Host Key");
+                color: Colors.text;
+                font-size: Typography.size-xl;
+                font-weight: 700;
+                vertical-alignment: center;
+            }
+        }
+
+        Text {
+            text: @tr("The server presented a host key that has not been seen before. Verify the fingerprint below matches what your server administrator provided, then click Approve to trust it.");
+            color: Colors.subtext0;
+            font-size: Typography.size-base;
+            wrap: word-wrap;
+        }
+
+        // Fingerprint display
+        Rectangle {
+            background: Colors.mantle;
+            border-radius: Layout.radius-md;
+            height: Layout.height-row * 1.5;
+
+            HorizontalLayout {
+                padding-left:  Layout.padding-lg;
+                padding-right: Layout.padding-lg;
+
+                Text {
+                    text: root.fingerprint;
+                    color: Colors.green;
+                    font-size: Typography.size-base;
+                    vertical-alignment: center;
+                    overflow: elide;
+                    horizontal-stretch: 1;
+                }
+            }
+        }
+
+        // Buttons
+        HorizontalLayout {
+            spacing: Layout.spacing-lg;
+            alignment: end;
+
+            ActionButton {
+                width: 90px;
+                text: @tr("Reject");
+                clicked => { root.reject(); }
+            }
+
+            ActionButton {
+                width: 90px;
+                text: @tr("Approve");
+                bg: Colors.green;
+                fg: Colors.base;
+                clicked => { root.approve(); }
+            }
+        }
+    }
+}

@@ -13,6 +13,8 @@ export component StatusBar inherits Rectangle {
     /// Query lifecycle status string pushed from Rust (status-message in UiState).
     /// Examples: "Running…"  |  "42 ms  ·  128 rows"  |  "Cancelled"  |  "Error: …"
     in property <string> query-status;
+    /// When true, a green "SSH" badge is shown next to the connection text.
+    in property <bool> ssh-active: false;
 
     HorizontalLayout {
         padding-left:  Layout.padding-md;
@@ -25,6 +27,21 @@ export component StatusBar inherits Rectangle {
             font-size: Typography.size-base;
             vertical-alignment: center;
             horizontal-stretch: 1;
+        }
+
+        // SSH badge
+        if root.ssh-active: Rectangle {
+            width: 34px;
+            height: 16px;
+            background: Colors.green;
+            border-radius: 3px;
+            Text {
+                text: "SSH";
+                color: Colors.base;
+                font-size: Typography.size-sm;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
         }
 
         Text {

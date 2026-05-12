@@ -171,6 +171,8 @@ fn main() -> anyhow::Result<()> {
         repo,
         history_svc,
         metadata_cache,
+        config_dir.clone(),
+        enc_key,
     );
     tokio::spawn(controller.run());
 

@@ -31,6 +31,7 @@ import { SnippetBar }            from "components/snippet_bar.slint";
 import { MetadataSearch }        from "components/metadata_search.slint";
 import { CommandPalette }        from "components/command_palette.slint";
 import { EditorPrefsDialog }     from "components/dialogs/editor_prefs_dialog.slint";
+import { FingerprintDialog }    from "components/dialogs/fingerprint_dialog.slint";
 
 // UiState is defined here (root file) so that Slint generates Rust bindings for it.
 // Sub-components that need global state receive properties bound from UiState below.
@@ -141,6 +142,25 @@ export global UiState {
     in-out property <bool>   form-testing:     false;
     in-out property <bool>   form-safe-dml:    true;
     in-out property <bool>   form-read-only:   false;
+    // ── SSH Tunnel form ───────────────────────────────────────────────────────
+    /// 0 = General, 1 = SSH Tunnel
+    in-out property <int>    form-section:          0;
+    in-out property <string> form-ssh-host:         "";
+    in-out property <string> form-ssh-port:         "22";
+    in-out property <string> form-ssh-user:         "";
+    /// 0 = Password, 1 = Private Key
+    in-out property <int>    form-ssh-auth-method:  0;
+    in-out property <string> form-ssh-password:     "";
+    in-out property <string> form-ssh-key-path:     "";
+    in-out property <string> form-ssh-passphrase:   "";
+    callback browse-ssh-key-file();
+    // ── SSH fingerprint dialog ────────────────────────────────────────────────
+    in-out property <bool>   show-ssh-fingerprint-dialog: false;
+    in-out property <string> ssh-fingerprint-text:        "";
+    callback approve-ssh-fingerprint();
+    callback reject-ssh-fingerprint();
+    // ── SSH active status ─────────────────────────────────────────────────────
+    in-out property <bool>   ssh-active: false;
 
     // ── Connection test / add state ───────────────────────────────────────────
     /// True after a successful Test Connection; reset when form is opened.
@@ -495,6 +515,10 @@ export component AppWindow inherits Window {
     private property <bool> _editor-prefs-open:  UiState.show-editor-prefs;
     changed _editor-prefs-open => { if (_editor-prefs-open) { _editor-prefs-alive = true; } }
 
+    private property <bool> _fp-dialog-alive: false;
+    private property <bool> _fp-dialog-open:  UiState.show-ssh-fingerprint-dialog;
+    changed _fp-dialog-open => { if (_fp-dialog-open) { _fp-dialog-alive = true; } }
+
     // ── Root key-intercept FocusScope ─────────────────────────────────────────
     // Global shortcuts live in key-pressed (bubble phase) so they fire regardless
     // of which inner FocusScope — editor, table-view, sidebar, result — has focus.
@@ -520,7 +544,8 @@ export component AppWindow inherits Window {
                     || UiState.show-snippet-edit
                     || UiState.show-metadata-search
                     || UiState.show-command-palette
-                    || UiState.show-editor-prefs) {
+                    || UiState.show-editor-prefs
+                    || UiState.show-ssh-fingerprint-dialog) {
                 EventResult.reject
             } else if (event.modifiers.control
                     && !event.modifiers.shift
@@ -1053,6 +1078,7 @@ export component AppWindow inherits Window {
             height: 24px;
             connection-text: UiState.status-connection;
             query-status:    UiState.status-message;
+            ssh-active:      UiState.ssh-active;
         }
 
         // ── Inner edge lines ──────────────────────────────────────────────────
@@ -1128,6 +1154,15 @@ export component AppWindow inherits Window {
                 testing     <=> UiState.form-testing;
                 safe-dml    <=> UiState.form-safe-dml;
                 read-only   <=> UiState.form-read-only;
+                form-section      <=> UiState.form-section;
+                ssh-host          <=> UiState.form-ssh-host;
+                ssh-port          <=> UiState.form-ssh-port;
+                ssh-user          <=> UiState.form-ssh-user;
+                ssh-auth-method   <=> UiState.form-ssh-auth-method;
+                ssh-password      <=> UiState.form-ssh-password;
+                ssh-key-path      <=> UiState.form-ssh-key-path;
+                ssh-passphrase    <=> UiState.form-ssh-passphrase;
+                browse-ssh-key-file => { UiState.browse-ssh-key-file(); }
 
                 is-edit: UiState.form-edit-id != "";
                 cancel => { UiState.close-connection-form(); }
@@ -1306,6 +1341,17 @@ export component AppWindow inherits Window {
                 UiState.show-editor-prefs = false;
             }
             exited => { _editor-prefs-alive = false; }
+        }
+
+        // ── SSH fingerprint approval dialog ──────────────────────────────────
+        if _fp-dialog-alive: FingerprintDialog {
+            x: 0; y: 0;
+            width: root.width; height: root.height;
+            show:        UiState.show-ssh-fingerprint-dialog;
+            fingerprint: UiState.ssh-fingerprint-text;
+            approve => { UiState.approve-ssh-fingerprint(); }
+            reject  => { UiState.reject-ssh-fingerprint(); }
+            exited  => { _fp-dialog-alive = false; }
         }
 
         // ── Metadata search palette (Ctrl+P) ──────────────────────────────────

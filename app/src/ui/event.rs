@@ -26,6 +26,7 @@ pub(super) fn spawn_event_handler(
     sidebar_state: Arc<Mutex<SidebarUiState>>,
     original_data: SharedOriginalData,
     snippet_repo: Arc<SnippetRepository>,
+    fp_approval_tx: Arc<Mutex<Option<tokio::sync::oneshot::Sender<bool>>>>,
 ) {
     let window_weak = window.as_weak();
     tokio::spawn(async move {
@@ -38,11 +39,17 @@ pub(super) fn spawn_event_handler(
                     read_only,
                 } => {
                     let conn_id = id.clone();
+                    let ssh_active = connections
+                        .iter()
+                        .find(|c| c.id == id)
+                        .map(|c| c.ssh_enabled)
+                        .unwrap_or(false);
                     handle_connected(
                         id,
                         connections,
                         safe_dml,
                         read_only,
+                        ssh_active,
                         window_weak.clone(),
                         Arc::clone(&sidebar_state),
                     );
@@ -114,6 +121,20 @@ pub(super) fn spawn_event_handler(
                     state.clone(),
                     Arc::clone(&sidebar_state),
                 ),
+                Event::SshFingerprintRequired {
+                    fingerprint,
+                    approval_tx,
+                } => {
+                    // Store the sender so the approve/reject callbacks can consume it.
+                    *fp_approval_tx.lock().unwrap_or_else(|p| p.into_inner()) = Some(approval_tx);
+                    let ww = window_weak.clone();
+                    let _ = slint::invoke_from_event_loop(move || {
+                        with_ui(&ww, move |ui| {
+                            ui.set_ssh_fingerprint_text(fingerprint.into());
+                            ui.set_show_ssh_fingerprint_dialog(true);
+                        });
+                    });
+                }
                 _ => {}
             }
         }
@@ -127,6 +148,7 @@ fn handle_connected(
     connections: Vec<ConnectionConfig>,
     safe_dml: bool,
     read_only: bool,
+    ssh_active: bool,
     ww: slint::Weak<crate::AppWindow>,
     sidebar_state: Arc<Mutex<SidebarUiState>>,
 ) {
@@ -170,6 +192,7 @@ fn handle_connected(
             ui.set_active_connection_id(id.into());
             ui.set_conn_safe_dml(safe_dml);
             ui.set_conn_read_only(read_only);
+            ui.set_ssh_active(ssh_active);
             ui.set_show_connection_form(false);
             // Reopen the DB manager if the form was launched from within it.
             if ui.get_reopen_db_manager_on_form_close() {
@@ -344,6 +367,7 @@ fn handle_disconnected(id: String, ww: slint::Weak<crate::AppWindow>) {
         with_ui(&ww, move |ui| {
             ui.set_status_message(t!("status.disconnected", id = id).to_string().into());
             ui.set_status_connection(t!("status.not_connected").to_string().into());
+            ui.set_ssh_active(false);
         });
     });
 }

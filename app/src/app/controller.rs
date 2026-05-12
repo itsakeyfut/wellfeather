@@ -18,6 +18,7 @@ mod connection;
 mod metadata;
 mod query;
 
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use tokio::sync::mpsc;
@@ -47,6 +48,10 @@ pub struct AppController {
     completion: CompletionService,
     rx_cmd: mpsc::Receiver<Command>,
     tx_event: mpsc::Sender<Event>,
+    /// App config directory — used for the known-hosts file.
+    pub(crate) config_dir: PathBuf,
+    /// Encryption key for decrypting SSH credentials.
+    pub(crate) enc_key: [u8; 32],
 }
 
 impl AppController {
@@ -56,6 +61,7 @@ impl AppController {
     /// All services are expected to be fully initialised (schema migrations run)
     /// before being passed in. The shared `SqlitePool` backing them is managed by
     /// the caller (`main.rs`).
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         state: SharedState,
         db: DbService,
@@ -63,6 +69,8 @@ impl AppController {
         repo: Arc<ConnectionRepository>,
         history: HistoryService,
         metadata_cache: MetadataCache,
+        config_dir: PathBuf,
+        enc_key: [u8; 32],
     ) -> (Self, mpsc::Sender<Command>, mpsc::Receiver<Event>) {
         let (tx_cmd, rx_cmd) = mpsc::channel(CMD_CHANNEL_CAPACITY);
         let (tx_event, rx_event) = mpsc::channel(CMD_CHANNEL_CAPACITY);
@@ -78,6 +86,8 @@ impl AppController {
                 completion,
                 rx_cmd,
                 tx_event,
+                config_dir,
+                enc_key,
             },
             tx_cmd,
             rx_event,
@@ -204,6 +214,7 @@ mod tests {
             user: None,
             password_encrypted: None,
             database: None,
+            ssh: None,
         }
     }
 
@@ -292,6 +303,8 @@ mod tests {
             test_repo().await,
             test_history().await,
             test_metadata_cache().await,
+            tempdir().unwrap().keep(),
+            [0u8; 32],
         );
 
         tx_cmd
@@ -318,6 +331,8 @@ mod tests {
             test_repo().await,
             test_history().await,
             test_metadata_cache().await,
+            tempdir().unwrap().keep(),
+            [0u8; 32],
         );
 
         let bad = DbConnection {
@@ -330,6 +345,7 @@ mod tests {
             user: None,
             password_encrypted: None,
             database: None,
+            ssh: None,
         };
         tx_cmd
             .send(Command::TestConnection(bad, None))
@@ -358,6 +374,8 @@ mod tests {
             test_repo().await,
             test_history().await,
             test_metadata_cache().await,
+            tempdir().unwrap().keep(),
+            [0u8; 32],
         );
 
         tx_cmd
@@ -384,6 +402,8 @@ mod tests {
             test_repo().await,
             test_history().await,
             test_metadata_cache().await,
+            tempdir().unwrap().keep(),
+            [0u8; 32],
         );
 
         let bad = DbConnection {
@@ -396,6 +416,7 @@ mod tests {
             user: None,
             password_encrypted: None,
             database: None,
+            ssh: None,
         };
         tx_cmd.send(Command::Connect(bad, None)).await.unwrap();
         drop(tx_cmd);
@@ -417,6 +438,8 @@ mod tests {
             test_repo().await,
             test_history().await,
             test_metadata_cache().await,
+            tempdir().unwrap().keep(),
+            [0u8; 32],
         );
 
         tx_cmd
@@ -456,6 +479,8 @@ mod tests {
             test_repo().await,
             test_history().await,
             test_metadata_cache().await,
+            tempdir().unwrap().keep(),
+            [0u8; 32],
         );
 
         tx_cmd
@@ -499,6 +524,8 @@ mod tests {
             test_repo().await,
             test_history().await,
             test_metadata_cache().await,
+            tempdir().unwrap().keep(),
+            [0u8; 32],
         );
 
         tx_cmd
@@ -524,6 +551,8 @@ mod tests {
             test_repo().await,
             test_history().await,
             test_metadata_cache().await,
+            tempdir().unwrap().keep(),
+            [0u8; 32],
         );
 
         tx_cmd.send(Command::CancelQuery).await.unwrap();
@@ -546,6 +575,8 @@ mod tests {
             test_repo().await,
             test_history().await,
             test_metadata_cache().await,
+            tempdir().unwrap().keep(),
+            [0u8; 32],
         );
 
         tx_cmd
@@ -579,6 +610,8 @@ mod tests {
             test_repo().await,
             test_history().await,
             test_metadata_cache().await,
+            tempdir().unwrap().keep(),
+            [0u8; 32],
         );
 
         tx_cmd

@@ -193,6 +193,27 @@ component CheckRow inherits Rectangle {
     }
 }
 
+// ── Helper: SSH auth toggle button ────────────────────────────────────────────
+
+component AuthToggleButton inherits Rectangle {
+    in property <string> label-text;
+    in property <bool>   active;
+    callback clicked;
+
+    background: active ? Colors.blue : Colors.surface1;
+    border-radius: Layout.radius-md;
+    height: Layout.height-btn-sm;
+    horizontal-stretch: 1;
+    Text {
+        text: label-text;
+        color: active ? Colors.base : Colors.subtext0;
+        font-size: Typography.size-base;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+    TouchArea { clicked => { root.clicked(); } }
+}
+
 // ── Connection form ───────────────────────────────────────────────────────────
 
 export component ConnectionForm inherits Rectangle {
@@ -211,6 +232,17 @@ export component ConnectionForm inherits Rectangle {
     in-out property <bool>   testing:     false;
     in-out property <bool>   safe-dml:    true;
     in-out property <bool>   read-only:   false;
+    // ── Section (0=General, 1=SSH Tunnel) ─────────────────────────────────
+    in-out property <int>    form-section:      0;
+    in-out property <string> ssh-host:          "";
+    in-out property <string> ssh-port:          "22";
+    in-out property <string> ssh-user:          "";
+    /// 0 = Password, 1 = Private Key
+    in-out property <int>    ssh-auth-method:   0;
+    in-out property <string> ssh-password:      "";
+    in-out property <string> ssh-key-path:      "";
+    in-out property <string> ssh-passphrase:    "";
+    callback browse-ssh-key-file();
     /// Set to true after a successful Test Connection; resets to false when the
     /// form is opened or a new test is started.  Used to decide whether Add
     /// shows a confirmation dialog.
@@ -255,174 +287,274 @@ export component ConnectionForm inherits Rectangle {
             label-text: @tr("Name");
             placeholder: @tr("My Database");
             value <=> root.name;
-            move-focus(d) => {
-                if (d > 0) {
-                    if (root.tab-index == 0) { conn-string-input.focus(); }
-                    else { host-field.grab-focus(); }
+            // Forward Tab/Down to the section content; no focus target exposed since
+            // the conn-string and host fields are inside conditional if-blocks.
+            move-focus(_d) => {}
+        }
+
+        // Section tab bar (General / SSH Tunnel)
+        HorizontalLayout {
+            TabButton {
+                label-text: @tr("General");
+                active: root.form-section == 0;
+                clicked => { root.form-section = 0; }
+            }
+            TabButton {
+                label-text: @tr("SSH Tunnel");
+                active: root.form-section == 1;
+                clicked => { root.form-section = 1; }
+            }
+        }
+
+        // ── General section ───────────────────────────────────────────────────
+        if root.form-section == 0: VerticalLayout {
+            spacing: Layout.spacing-xl;
+
+            // DB type selector
+            HorizontalLayout {
+                spacing: Layout.spacing-md;
+                DbTypeButton {
+                    label-text: "PostgreSQL";
+                    icon: Icons.brand-postgresql;
+                    active: root.db-type == 0;
+                    ui-font: root.ui-font;
+                    clicked => { root.db-type = 0; }
                 }
-                // d < 0: Name is the first field — do nothing.
+                DbTypeButton {
+                    label-text: "MySQL";
+                    icon: Icons.brand-mysql;
+                    active: root.db-type == 1;
+                    ui-font: root.ui-font;
+                    clicked => { root.db-type = 1; }
+                }
+                DbTypeButton {
+                    label-text: "SQLite";
+                    icon: Icons.brand-sqlite;
+                    active: root.db-type == 2;
+                    ui-font: root.ui-font;
+                    clicked => { root.db-type = 2; }
+                }
             }
-        }
 
-        // DB type selector
-        HorizontalLayout {
-            spacing: Layout.spacing-md;
-            DbTypeButton {
-                label-text: "PostgreSQL";
-                icon: Icons.brand-postgresql;
-                active: root.db-type == 0;
-                ui-font: root.ui-font;
-                clicked => { root.db-type = 0; }
+            // DB tab bar (Connection String / Individual Fields)
+            HorizontalLayout {
+                TabButton {
+                    label-text: @tr("Connection String");
+                    active: root.tab-index == 0;
+                    clicked => { root.tab-index = 0; }
+                }
+                TabButton {
+                    label-text: @tr("Individual Fields");
+                    active: root.tab-index == 1;
+                    clicked => { root.tab-index = 1; }
+                }
             }
-            DbTypeButton {
-                label-text: "MySQL";
-                icon: Icons.brand-mysql;
-                active: root.db-type == 1;
-                ui-font: root.ui-font;
-                clicked => { root.db-type = 1; }
-            }
-            DbTypeButton {
-                label-text: "SQLite";
-                icon: Icons.brand-sqlite;
-                active: root.db-type == 2;
-                ui-font: root.ui-font;
-                clicked => { root.db-type = 2; }
-            }
-        }
 
-        // Tab bar
-        HorizontalLayout {
-            TabButton {
-                label-text: @tr("Connection String");
-                active: root.tab-index == 0;
-                clicked => { root.tab-index = 0; }
-            }
-            TabButton {
-                label-text: @tr("Individual Fields");
-                active: root.tab-index == 1;
-                clicked => { root.tab-index = 1; }
-            }
-        }
+            // Spacer
+            Rectangle { vertical-stretch: 1; }
 
-        // Spacer — pushes tab content + status + buttons toward the bottom of the dialog.
-        Rectangle { vertical-stretch: 1; }
-
-        // ── Tab content (single panel for both tabs) ─────────────────────────
-        // Using one panel instead of two eliminates the phantom 10px spacing that
-        // a 0-height sibling would introduce, moving the conn-string input lower.
-        // Height always equals the Individual Fields preferred height so the flex
-        // spacer above distributes equally for both tabs.
-        Rectangle {
-            height: fields-layout.preferred-height;
-            clip: true;
-
-            // Connection String tab — input pinned to the bottom of the panel,
-            // aligned with the Database field in the Individual Fields tab.
+            // Tab content
             Rectangle {
-                visible: root.tab-index == 0;
-                background: Colors.base;
-                border-radius: Layout.radius-md;
-                width: parent.width;
-                height: Layout.height-row;
-                y: parent.height - Layout.height-row;
+                height: fields-layout.preferred-height;
+                clip: true;
 
-                if root.conn-string == "": Text {
-                    x: Layout.padding-input;
-                    y: 0;
-                    width: parent.width - Layout.padding-input * 2;
+                Rectangle {
+                    visible: root.tab-index == 0;
+                    background: Colors.base;
+                    border-radius: Layout.radius-md;
+                    width: parent.width;
                     height: Layout.height-row;
-                    text: "postgres://user:pass@host:5432/db";
-                    color: Colors.surface2;
-                    vertical-alignment: center;
+                    y: parent.height - Layout.height-row;
+
+                    if root.conn-string == "": Text {
+                        x: Layout.padding-input;
+                        y: 0;
+                        width: parent.width - Layout.padding-input * 2;
+                        height: Layout.height-row;
+                        text: "postgres://user:pass@host:5432/db";
+                        color: Colors.surface2;
+                        vertical-alignment: center;
+                    }
+                    conn-string-input := TextInput {
+                        x: Layout.padding-input;
+                        y: 0;
+                        width: parent.width - Layout.padding-input * 2;
+                        height: Layout.height-row;
+                        vertical-alignment: center;
+                        text <=> root.conn-string;
+                        color: Colors.text;
+                        key-pressed(event) => {
+                            if (event.text == Key.UpArrow
+                                    || (event.text == Key.Tab && event.modifiers.shift)) {
+                                name-field.grab-focus();
+                                EventResult.accept
+                            } else if (event.text == Key.Escape) {
+                                root.cancel();
+                                EventResult.accept
+                            } else {
+                                EventResult.reject
+                            }
+                        }
+                    }
                 }
-                conn-string-input := TextInput {
-                    x: Layout.padding-input;
-                    y: 0;
-                    width: parent.width - Layout.padding-input * 2;
-                    height: Layout.height-row;
-                    vertical-alignment: center;
-                    text <=> root.conn-string;
-                    color: Colors.text;
-                    key-pressed(event) => {
-                        if (event.text == Key.UpArrow
-                                || (event.text == Key.Tab && event.modifiers.shift)) {
-                            name-field.grab-focus();
-                            EventResult.accept
-                        } else if (event.text == Key.Escape) {
-                            root.cancel();
-                            EventResult.accept
-                        } else {
-                            EventResult.reject
+
+                fields-layout := VerticalLayout {
+                    visible: root.tab-index == 1;
+                    spacing: Layout.spacing-md;
+
+                    host-field := FieldRow {
+                        label-text: @tr("Host");
+                        placeholder: "localhost";
+                        value <=> root.host;
+                        move-focus(d) => {
+                            if (d > 0) { port-field.grab-focus(); }
+                            else { name-field.grab-focus(); }
+                        }
+                    }
+                    port-field := FieldRow {
+                        label-text: @tr("Port");
+                        placeholder: "5432";
+                        value <=> root.port;
+                        move-focus(d) => {
+                            if (d > 0) { user-field.grab-focus(); }
+                            else { host-field.grab-focus(); }
+                        }
+                    }
+                    user-field := FieldRow {
+                        label-text: @tr("User");
+                        placeholder: @tr("username");
+                        value <=> root.user;
+                        move-focus(d) => {
+                            if (d > 0) { pass-field.grab-focus(); }
+                            else { port-field.grab-focus(); }
+                        }
+                    }
+                    pass-field := FieldRow {
+                        label-text: @tr("Password");
+                        value <=> root.password;
+                        is-password: true;
+                        move-focus(d) => {
+                            if (d > 0) { db-field.grab-focus(); }
+                            else { user-field.grab-focus(); }
+                        }
+                    }
+                    db-field := FieldRow {
+                        label-text: @tr("Database");
+                        placeholder: @tr("database name");
+                        value <=> root.database;
+                        move-focus(d) => {
+                            if (d < 0) { pass-field.grab-focus(); }
                         }
                     }
                 }
             }
 
-            // Individual Fields tab
-            fields-layout := VerticalLayout {
-                visible: root.tab-index == 1;
-                spacing: Layout.spacing-md;
-
-                host-field := FieldRow {
-                    label-text: @tr("Host");
-                    placeholder: "localhost";
-                    value <=> root.host;
-                    move-focus(d) => {
-                        if (d > 0) { port-field.grab-focus(); }
-                        else { name-field.grab-focus(); }
-                    }
+            // Connection behaviour flags
+            HorizontalLayout {
+                spacing: Layout.spacing-2xl;
+                CheckRow {
+                    label-text: @tr("Safe DML");
+                    hint-text: @tr("(confirm UPDATE/DELETE without WHERE)");
+                    checked <=> root.safe-dml;
                 }
-                port-field := FieldRow {
-                    label-text: @tr("Port");
-                    placeholder: "5432";
-                    value <=> root.port;
-                    move-focus(d) => {
-                        if (d > 0) { user-field.grab-focus(); }
-                        else { host-field.grab-focus(); }
-                    }
-                }
-                user-field := FieldRow {
-                    label-text: @tr("User");
-                    placeholder: @tr("username");
-                    value <=> root.user;
-                    move-focus(d) => {
-                        if (d > 0) { pass-field.grab-focus(); }
-                        else { port-field.grab-focus(); }
-                    }
-                }
-                pass-field := FieldRow {
-                    label-text: @tr("Password");
-                    value <=> root.password;
-                    is-password: true;
-                    move-focus(d) => {
-                        if (d > 0) { db-field.grab-focus(); }
-                        else { user-field.grab-focus(); }
-                    }
-                }
-                db-field := FieldRow {
-                    label-text: @tr("Database");
-                    placeholder: @tr("database name");
-                    value <=> root.database;
-                    move-focus(d) => {
-                        if (d < 0) { pass-field.grab-focus(); }
-                    }
+                CheckRow {
+                    label-text: @tr("Read-only");
+                    hint-text: @tr("(block all write statements)");
+                    checked <=> root.read-only;
                 }
             }
         }
 
-        // Connection behaviour flags
-        HorizontalLayout {
-            spacing: Layout.spacing-2xl;
-            CheckRow {
-                label-text: @tr("Safe DML");
-                hint-text: @tr("(confirm UPDATE/DELETE without WHERE)");
-                checked <=> root.safe-dml;
+        // ── SSH Tunnel section ────────────────────────────────────────────────
+        if root.form-section == 1: VerticalLayout {
+            spacing: Layout.spacing-md;
+
+            // SSH Host + Port
+            HorizontalLayout {
+                spacing: Layout.spacing-md;
+                FieldRow {
+                    label-text: @tr("SSH Host");
+                    placeholder: "bastion.example.com";
+                    value <=> root.ssh-host;
+                    horizontal-stretch: 3;
+                    move-focus(_d) => {}
+                }
+                FieldRow {
+                    label-text: @tr("Port");
+                    placeholder: "22";
+                    value <=> root.ssh-port;
+                    horizontal-stretch: 1;
+                    move-focus(_d) => {}
+                }
             }
-            CheckRow {
-                label-text: @tr("Read-only");
-                hint-text: @tr("(block all write statements)");
-                checked <=> root.read-only;
+
+            // SSH User
+            FieldRow {
+                label-text: @tr("SSH User");
+                placeholder: @tr("username");
+                value <=> root.ssh-user;
+                move-focus(_d) => {}
             }
+
+            // Auth method toggle
+            HorizontalLayout {
+                spacing: 0px;
+                Text {
+                    text: @tr("Auth");
+                    color: Colors.subtext0;
+                    width: 80px;
+                    vertical-alignment: center;
+                }
+                HorizontalLayout {
+                    spacing: Layout.spacing-sm;
+                    AuthToggleButton {
+                        label-text: @tr("Password");
+                        active: root.ssh-auth-method == 0;
+                        clicked => { root.ssh-auth-method = 0; }
+                    }
+                    AuthToggleButton {
+                        label-text: @tr("Private Key");
+                        active: root.ssh-auth-method == 1;
+                        clicked => { root.ssh-auth-method = 1; }
+                    }
+                }
+            }
+
+            // Password (visible when auth = Password)
+            if root.ssh-auth-method == 0: FieldRow {
+                label-text: @tr("Password");
+                value <=> root.ssh-password;
+                is-password: true;
+                move-focus(_d) => {}
+            }
+
+            // Key path + Browse (visible when auth = Private Key)
+            if root.ssh-auth-method == 1: HorizontalLayout {
+                spacing: Layout.spacing-md;
+                FieldRow {
+                    label-text: @tr("Key Path");
+                    placeholder: @tr("~/.ssh/id_rsa");
+                    value <=> root.ssh-key-path;
+                    horizontal-stretch: 1;
+                    move-focus(_d) => {}
+                }
+                ActionButton {
+                    width: 80px;
+                    text: @tr("Browse\u{2026}");
+                    clicked => { root.browse-ssh-key-file(); }
+                }
+            }
+
+            // Passphrase (visible when auth = Private Key)
+            if root.ssh-auth-method == 1: FieldRow {
+                label-text: @tr("Passphrase");
+                value <=> root.ssh-passphrase;
+                is-password: true;
+                move-focus(_d) => {}
+            }
+
+            // Spacer to push buttons down
+            Rectangle { vertical-stretch: 1; }
         }
 
         // Status message (shown only when not empty)

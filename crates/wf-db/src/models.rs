@@ -23,6 +23,37 @@ pub enum DbKind {
 }
 
 // ---------------------------------------------------------------------------
+// SSH tunnel types
+// ---------------------------------------------------------------------------
+
+/// Authentication method for an SSH tunnel.
+#[derive(Debug, Clone)]
+pub enum SshAuth {
+    /// Authenticate with a password (plaintext passed at connect time).
+    Password,
+    /// Authenticate with a private key file.
+    PrivateKey { key_path: String },
+}
+
+/// Configuration for an SSH tunnel that proxies the database connection.
+#[derive(Debug, Clone)]
+pub struct SshTunnelConfig {
+    pub host: String,
+    /// SSH server port (typically 22).
+    pub port: u16,
+    pub user: String,
+    pub auth: SshAuth,
+    /// Remote hostname the SSH server should forward to (usually the DB host).
+    pub remote_host: String,
+    /// Remote port to forward to (the DB port).
+    pub remote_port: u16,
+    /// AES-256-GCM encrypted SSH password (for `SshAuth::Password`).
+    pub ssh_password_encrypted: Option<String>,
+    /// AES-256-GCM encrypted SSH key passphrase (for `SshAuth::PrivateKey`).
+    pub ssh_passphrase_encrypted: Option<String>,
+}
+
+// ---------------------------------------------------------------------------
 // DbConnection
 // ---------------------------------------------------------------------------
 
@@ -47,6 +78,9 @@ pub struct DbConnection {
     /// AES-256-GCM encrypted password (see `wf-config::crypto`).
     pub password_encrypted: Option<String>,
     pub database: Option<String>,
+    /// Optional SSH tunnel configuration. When present, the controller
+    /// establishes a port-forward tunnel before connecting to the database.
+    pub ssh: Option<SshTunnelConfig>,
 }
 
 // ---------------------------------------------------------------------------

@@ -5,22 +5,42 @@ use crate::models::{ConnectionConfig, DbTypeName};
 
 const CREATE_TABLE: &str = "
     CREATE TABLE IF NOT EXISTS connections (
-        id                 TEXT    PRIMARY KEY,
-        name               TEXT    NOT NULL,
-        db_type            TEXT    NOT NULL,
-        connection_string  TEXT,
-        host               TEXT,
-        port               INTEGER,
-        user_name          TEXT,
-        password_encrypted TEXT,
-        database_name      TEXT,
-        safe_dml           INTEGER NOT NULL DEFAULT 1,
-        read_only          INTEGER NOT NULL DEFAULT 0,
-        sort_order         INTEGER NOT NULL DEFAULT 0,
-        created_at         INTEGER NOT NULL DEFAULT (unixepoch()),
-        last_used_at       INTEGER
+        id                       TEXT    PRIMARY KEY,
+        name                     TEXT    NOT NULL,
+        db_type                  TEXT    NOT NULL,
+        connection_string        TEXT,
+        host                     TEXT,
+        port                     INTEGER,
+        user_name                TEXT,
+        password_encrypted       TEXT,
+        database_name            TEXT,
+        safe_dml                 INTEGER NOT NULL DEFAULT 1,
+        read_only                INTEGER NOT NULL DEFAULT 0,
+        sort_order               INTEGER NOT NULL DEFAULT 0,
+        created_at               INTEGER NOT NULL DEFAULT (unixepoch()),
+        last_used_at             INTEGER,
+        ssh_enabled              INTEGER NOT NULL DEFAULT 0,
+        ssh_host                 TEXT,
+        ssh_port                 INTEGER,
+        ssh_user                 TEXT,
+        ssh_auth_method          TEXT    NOT NULL DEFAULT 'password',
+        ssh_password_encrypted   TEXT,
+        ssh_key_path             TEXT,
+        ssh_passphrase_encrypted TEXT
     )
 ";
+
+/// Migrations for existing databases that were created before SSH columns were added.
+const MIGRATE_SSH_COLUMNS: &[&str] = &[
+    "ALTER TABLE connections ADD COLUMN ssh_enabled              INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE connections ADD COLUMN ssh_host                 TEXT",
+    "ALTER TABLE connections ADD COLUMN ssh_port                 INTEGER",
+    "ALTER TABLE connections ADD COLUMN ssh_user                 TEXT",
+    "ALTER TABLE connections ADD COLUMN ssh_auth_method          TEXT NOT NULL DEFAULT 'password'",
+    "ALTER TABLE connections ADD COLUMN ssh_password_encrypted   TEXT",
+    "ALTER TABLE connections ADD COLUMN ssh_key_path             TEXT",
+    "ALTER TABLE connections ADD COLUMN ssh_passphrase_encrypted TEXT",
+];
 
 /// Persists [`ConnectionConfig`] records to SQLite.
 ///
@@ -37,6 +57,11 @@ impl ConnectionRepository {
             .execute(&pool)
             .await
             .context("failed to migrate connections table")?;
+        // Best-effort: add SSH columns to existing databases. Errors are ignored
+        // because the column may already exist (SQLite has no IF NOT EXISTS for ALTER).
+        for stmt in MIGRATE_SSH_COLUMNS {
+            let _ = sqlx::query(stmt).execute(&pool).await;
+        }
         Ok(Self { pool })
     }
 
@@ -50,7 +75,9 @@ impl ConnectionRepository {
     pub async fn all(&self) -> anyhow::Result<Vec<ConnectionConfig>> {
         let rows = sqlx::query(
             "SELECT id, name, db_type, connection_string, host, port, user_name,
-                    password_encrypted, database_name, safe_dml, read_only
+                    password_encrypted, database_name, safe_dml, read_only,
+                    ssh_enabled, ssh_host, ssh_port, ssh_user, ssh_auth_method,
+                    ssh_password_encrypted, ssh_key_path, ssh_passphrase_encrypted
              FROM connections ORDER BY sort_order ASC, created_at ASC",
         )
         .fetch_all(&self.pool)
@@ -62,7 +89,9 @@ impl ConnectionRepository {
     pub async fn find(&self, id: &str) -> anyhow::Result<Option<ConnectionConfig>> {
         let row = sqlx::query(
             "SELECT id, name, db_type, connection_string, host, port, user_name,
-                    password_encrypted, database_name, safe_dml, read_only
+                    password_encrypted, database_name, safe_dml, read_only,
+                    ssh_enabled, ssh_host, ssh_port, ssh_user, ssh_auth_method,
+                    ssh_password_encrypted, ssh_key_path, ssh_passphrase_encrypted
              FROM connections WHERE id = ?",
         )
         .bind(id)
@@ -82,20 +111,34 @@ impl ConnectionRepository {
     }
 
     async fn upsert_with_order(&self, cc: &ConnectionConfig, order: i64) -> anyhow::Result<()> {
+        let ssh_auth_str = match cc.ssh_auth_method {
+            crate::models::SshAuthMethod::Password => "password",
+            crate::models::SshAuthMethod::PrivateKey => "private_key",
+        };
         sqlx::query(
             "INSERT INTO connections
              (id, name, db_type, connection_string, host, port, user_name,
-              password_encrypted, database_name, safe_dml, read_only, sort_order)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              password_encrypted, database_name, safe_dml, read_only, sort_order,
+              ssh_enabled, ssh_host, ssh_port, ssh_user, ssh_auth_method,
+              ssh_password_encrypted, ssh_key_path, ssh_passphrase_encrypted)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
              ON CONFLICT(id) DO UPDATE SET
-               name               = excluded.name,
-               db_type            = excluded.db_type,
-               connection_string  = excluded.connection_string,
-               host               = excluded.host,
-               port               = excluded.port,
-               user_name          = excluded.user_name,
-               password_encrypted = excluded.password_encrypted,
-               database_name      = excluded.database_name",
+               name                     = excluded.name,
+               db_type                  = excluded.db_type,
+               connection_string        = excluded.connection_string,
+               host                     = excluded.host,
+               port                     = excluded.port,
+               user_name                = excluded.user_name,
+               password_encrypted       = excluded.password_encrypted,
+               database_name            = excluded.database_name,
+               ssh_enabled              = excluded.ssh_enabled,
+               ssh_host                 = excluded.ssh_host,
+               ssh_port                 = excluded.ssh_port,
+               ssh_user                 = excluded.ssh_user,
+               ssh_auth_method          = excluded.ssh_auth_method,
+               ssh_password_encrypted   = excluded.ssh_password_encrypted,
+               ssh_key_path             = excluded.ssh_key_path,
+               ssh_passphrase_encrypted = excluded.ssh_passphrase_encrypted",
         )
         .bind(&cc.id)
         .bind(&cc.name)
@@ -109,6 +152,14 @@ impl ConnectionRepository {
         .bind(cc.safe_dml as i32)
         .bind(cc.read_only as i32)
         .bind(order)
+        .bind(cc.ssh_enabled as i32)
+        .bind(&cc.ssh_host)
+        .bind(cc.ssh_port.map(|p| p as i64))
+        .bind(&cc.ssh_user)
+        .bind(ssh_auth_str)
+        .bind(&cc.ssh_password_encrypted)
+        .bind(&cc.ssh_key_path)
+        .bind(&cc.ssh_passphrase_encrypted)
         .execute(&self.pool)
         .await?;
         Ok(())
@@ -127,7 +178,9 @@ impl ConnectionRepository {
     pub async fn last_used(&self) -> anyhow::Result<Option<ConnectionConfig>> {
         let row = sqlx::query(
             "SELECT id, name, db_type, connection_string, host, port, user_name,
-                    password_encrypted, database_name, safe_dml, read_only
+                    password_encrypted, database_name, safe_dml, read_only,
+                    ssh_enabled, ssh_host, ssh_port, ssh_user, ssh_auth_method,
+                    ssh_password_encrypted, ssh_key_path, ssh_passphrase_encrypted
              FROM connections WHERE last_used_at IS NOT NULL
              ORDER BY last_used_at DESC LIMIT 1",
         )
@@ -183,6 +236,8 @@ impl ConnectionRepository {
 // ── Row → model conversion ────────────────────────────────────────────────────
 
 fn row_to_config(row: &sqlx::sqlite::SqliteRow) -> anyhow::Result<ConnectionConfig> {
+    use crate::models::SshAuthMethod;
+
     let db_type_str: String = row.try_get("db_type")?;
     let db_type = match db_type_str.as_str() {
         "mysql" => DbTypeName::MySQL,
@@ -190,6 +245,12 @@ fn row_to_config(row: &sqlx::sqlite::SqliteRow) -> anyhow::Result<ConnectionConf
         _ => DbTypeName::PostgreSQL,
     };
     let port_i: Option<i64> = row.try_get("port")?;
+    let ssh_port_i: Option<i64> = row.try_get("ssh_port")?;
+    let ssh_auth_str: Option<String> = row.try_get("ssh_auth_method").ok();
+    let ssh_auth_method = match ssh_auth_str.as_deref() {
+        Some("private_key") => SshAuthMethod::PrivateKey,
+        _ => SshAuthMethod::Password,
+    };
     Ok(ConnectionConfig {
         id: row.try_get("id")?,
         name: row.try_get("name")?,
@@ -202,6 +263,14 @@ fn row_to_config(row: &sqlx::sqlite::SqliteRow) -> anyhow::Result<ConnectionConf
         database: row.try_get("database_name")?,
         safe_dml: row.try_get::<i64, _>("safe_dml")? != 0,
         read_only: row.try_get::<i64, _>("read_only")? != 0,
+        ssh_enabled: row.try_get::<i64, _>("ssh_enabled").unwrap_or(0) != 0,
+        ssh_host: row.try_get("ssh_host").ok().flatten(),
+        ssh_port: ssh_port_i.map(|p| p as u16),
+        ssh_user: row.try_get("ssh_user").ok().flatten(),
+        ssh_auth_method,
+        ssh_password_encrypted: row.try_get("ssh_password_encrypted").ok().flatten(),
+        ssh_key_path: row.try_get("ssh_key_path").ok().flatten(),
+        ssh_passphrase_encrypted: row.try_get("ssh_passphrase_encrypted").ok().flatten(),
     })
 }
 
@@ -233,6 +302,14 @@ mod tests {
             database: None,
             safe_dml: true,
             read_only: false,
+            ssh_enabled: false,
+            ssh_host: None,
+            ssh_port: None,
+            ssh_user: None,
+            ssh_auth_method: crate::models::SshAuthMethod::Password,
+            ssh_password_encrypted: None,
+            ssh_key_path: None,
+            ssh_passphrase_encrypted: None,
         }
     }
 
