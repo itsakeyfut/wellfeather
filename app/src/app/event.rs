@@ -1,6 +1,6 @@
 use tokio::sync::oneshot;
 use wf_completion::CompletionItem;
-use wf_config::models::{ConnectionConfig, Theme};
+use wf_config::models::{ConnectionConfig, GroupConfig, Theme};
 use wf_db::models::{DbMetadata, QueryResult};
 
 /// Fine-grained state transitions forwarded to the UI via `StateChanged`.
@@ -67,5 +67,18 @@ pub enum Event {
     TableDataFailed {
         tab_id: String,
         msg: String,
+    },
+    // ── Group events ─────────────────────────────────────────────────────────
+    /// A new group was created; `id` is the new group's ID. Used by the UI to
+    /// trigger inline rename on the newly added group node.
+    GroupCreated {
+        id: String,
+        groups: Vec<GroupConfig>,
+        connections: Vec<ConnectionConfig>,
+    },
+    /// Groups or connection group assignments changed; UI should rebuild the sidebar.
+    GroupsUpdated {
+        groups: Vec<GroupConfig>,
+        connections: Vec<ConnectionConfig>,
     },
 }

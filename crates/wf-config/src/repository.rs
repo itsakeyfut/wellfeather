@@ -1,7 +1,8 @@
 use anyhow::Context as _;
 use sqlx::{Row as _, SqlitePool};
 
-use crate::models::{ConnectionConfig, DbTypeName};
+use crate::error::RepositoryError;
+use crate::models::{ConnectionConfig, DbTypeName, GroupConfig};
 
 const CREATE_TABLE: &str = "
     CREATE TABLE IF NOT EXISTS connections (
@@ -31,9 +32,27 @@ const CREATE_TABLE: &str = "
         ssl_mode                 TEXT    NOT NULL DEFAULT 'require',
         ssl_ca_cert              TEXT,
         ssl_client_cert          TEXT,
-        ssl_client_key           TEXT
+        ssl_client_key           TEXT,
+        group_id                 TEXT,
+        color                    TEXT
     )
 ";
+
+const CREATE_TABLE_GROUPS: &str = "
+    CREATE TABLE IF NOT EXISTS groups (
+        id         TEXT    PRIMARY KEY,
+        name       TEXT    NOT NULL,
+        color      TEXT    NOT NULL DEFAULT '#6c7086',
+        expanded   INTEGER NOT NULL DEFAULT 1,
+        sort_order INTEGER NOT NULL DEFAULT 0
+    )
+";
+
+/// Migrations for existing databases created before group columns were added.
+const MIGRATE_GROUP_COLUMNS: &[&str] = &[
+    "ALTER TABLE connections ADD COLUMN group_id TEXT",
+    "ALTER TABLE connections ADD COLUMN color    TEXT",
+];
 
 /// Migrations for existing databases created before SSL columns were added.
 const MIGRATE_SSL_COLUMNS: &[&str] = &[
@@ -71,12 +90,15 @@ impl ConnectionRepository {
             .execute(&pool)
             .await
             .context("failed to migrate connections table")?;
-        // Best-effort: add SSH and SSL columns to existing databases. Errors are
-        // ignored because the column may already exist (SQLite has no IF NOT EXISTS for ALTER).
+        // Best-effort: add SSH, SSL, and group columns to existing databases.
+        // Errors are ignored because the column may already exist.
         for stmt in MIGRATE_SSH_COLUMNS {
             let _ = sqlx::query(stmt).execute(&pool).await;
         }
         for stmt in MIGRATE_SSL_COLUMNS {
+            let _ = sqlx::query(stmt).execute(&pool).await;
+        }
+        for stmt in MIGRATE_GROUP_COLUMNS {
             let _ = sqlx::query(stmt).execute(&pool).await;
         }
         Ok(Self { pool })
@@ -95,7 +117,8 @@ impl ConnectionRepository {
                     password_encrypted, database_name, safe_dml, read_only,
                     ssh_enabled, ssh_host, ssh_port, ssh_user, ssh_auth_method,
                     ssh_password_encrypted, ssh_key_path, ssh_passphrase_encrypted,
-                    ssl_enabled, ssl_mode, ssl_ca_cert, ssl_client_cert, ssl_client_key
+                    ssl_enabled, ssl_mode, ssl_ca_cert, ssl_client_cert, ssl_client_key,
+                    group_id, color
              FROM connections ORDER BY sort_order ASC, created_at ASC",
         )
         .fetch_all(&self.pool)
@@ -110,7 +133,8 @@ impl ConnectionRepository {
                     password_encrypted, database_name, safe_dml, read_only,
                     ssh_enabled, ssh_host, ssh_port, ssh_user, ssh_auth_method,
                     ssh_password_encrypted, ssh_key_path, ssh_passphrase_encrypted,
-                    ssl_enabled, ssl_mode, ssl_ca_cert, ssl_client_cert, ssl_client_key
+                    ssl_enabled, ssl_mode, ssl_ca_cert, ssl_client_cert, ssl_client_key,
+                    group_id, color
              FROM connections WHERE id = ?",
         )
         .bind(id)
@@ -145,8 +169,9 @@ impl ConnectionRepository {
               password_encrypted, database_name, safe_dml, read_only, sort_order,
               ssh_enabled, ssh_host, ssh_port, ssh_user, ssh_auth_method,
               ssh_password_encrypted, ssh_key_path, ssh_passphrase_encrypted,
-              ssl_enabled, ssl_mode, ssl_ca_cert, ssl_client_cert, ssl_client_key)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              ssl_enabled, ssl_mode, ssl_ca_cert, ssl_client_cert, ssl_client_key,
+              group_id, color)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
              ON CONFLICT(id) DO UPDATE SET
                name                     = excluded.name,
                db_type                  = excluded.db_type,
@@ -168,7 +193,9 @@ impl ConnectionRepository {
                ssl_mode                 = excluded.ssl_mode,
                ssl_ca_cert              = excluded.ssl_ca_cert,
                ssl_client_cert          = excluded.ssl_client_cert,
-               ssl_client_key           = excluded.ssl_client_key",
+               ssl_client_key           = excluded.ssl_client_key,
+               group_id                 = excluded.group_id,
+               color                    = excluded.color",
         )
         .bind(&cc.id)
         .bind(&cc.name)
@@ -195,6 +222,8 @@ impl ConnectionRepository {
         .bind(&cc.ssl_ca_cert)
         .bind(&cc.ssl_client_cert)
         .bind(&cc.ssl_client_key)
+        .bind(&cc.group_id)
+        .bind(&cc.color)
         .execute(&self.pool)
         .await?;
         Ok(())
@@ -216,7 +245,8 @@ impl ConnectionRepository {
                     password_encrypted, database_name, safe_dml, read_only,
                     ssh_enabled, ssh_host, ssh_port, ssh_user, ssh_auth_method,
                     ssh_password_encrypted, ssh_key_path, ssh_passphrase_encrypted,
-                    ssl_enabled, ssl_mode, ssl_ca_cert, ssl_client_cert, ssl_client_key
+                    ssl_enabled, ssl_mode, ssl_ca_cert, ssl_client_cert, ssl_client_key,
+                    group_id, color
              FROM connections WHERE last_used_at IS NOT NULL
              ORDER BY last_used_at DESC LIMIT 1",
         )
@@ -318,6 +348,100 @@ fn row_to_config(row: &sqlx::sqlite::SqliteRow) -> anyhow::Result<ConnectionConf
         ssl_ca_cert: row.try_get("ssl_ca_cert").ok().flatten(),
         ssl_client_cert: row.try_get("ssl_client_cert").ok().flatten(),
         ssl_client_key: row.try_get("ssl_client_key").ok().flatten(),
+        group_id: row.try_get("group_id").ok().flatten(),
+        color: row.try_get("color").ok().flatten(),
+    })
+}
+
+// ── GroupRepository ────────────────────────────────────────────────────────────
+
+/// Persists [`GroupConfig`] records to SQLite.
+///
+/// Cheap to clone — all clones share the same underlying connection pool.
+#[derive(Clone)]
+pub struct GroupRepository {
+    pool: SqlitePool,
+}
+
+impl GroupRepository {
+    /// Accept an already-open [`SqlitePool`] and ensure the schema exists.
+    pub async fn new(pool: SqlitePool) -> Result<Self, RepositoryError> {
+        sqlx::query(CREATE_TABLE_GROUPS).execute(&pool).await?;
+        Ok(Self { pool })
+    }
+
+    /// In-memory database (for tests only).
+    pub async fn open_memory() -> Result<Self, RepositoryError> {
+        let pool = SqlitePool::connect("sqlite::memory:").await?;
+        Self::new(pool).await
+    }
+
+    /// Return all groups ordered by `sort_order`.
+    pub async fn all(&self) -> Result<Vec<GroupConfig>, RepositoryError> {
+        let rows =
+            sqlx::query("SELECT id, name, color, expanded FROM groups ORDER BY sort_order ASC")
+                .fetch_all(&self.pool)
+                .await?;
+        rows.iter()
+            .map(row_to_group)
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(RepositoryError::from)
+    }
+
+    /// Insert or update a group.
+    pub async fn upsert(&self, g: &GroupConfig) -> Result<(), RepositoryError> {
+        let order = self.next_sort_order().await?;
+        sqlx::query(
+            "INSERT INTO groups (id, name, color, expanded, sort_order)
+             VALUES (?, ?, ?, ?, ?)
+             ON CONFLICT(id) DO UPDATE SET
+               name       = excluded.name,
+               color      = excluded.color,
+               expanded   = excluded.expanded",
+        )
+        .bind(&g.id)
+        .bind(&g.name)
+        .bind(&g.color)
+        .bind(g.expanded as i32)
+        .bind(order)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Delete a group by id. Connections that belonged to this group become ungrouped.
+    pub async fn delete(&self, id: &str) -> Result<(), RepositoryError> {
+        sqlx::query("DELETE FROM groups WHERE id = ?")
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    /// Persist the expanded/collapsed state of a group.
+    pub async fn set_expanded(&self, id: &str, expanded: bool) -> Result<(), RepositoryError> {
+        sqlx::query("UPDATE groups SET expanded = ? WHERE id = ?")
+            .bind(expanded as i32)
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    async fn next_sort_order(&self) -> Result<i64, RepositoryError> {
+        let max: Option<i64> = sqlx::query_scalar("SELECT MAX(sort_order) FROM groups")
+            .fetch_one(&self.pool)
+            .await?;
+        Ok(max.unwrap_or(-1) + 1)
+    }
+}
+
+fn row_to_group(row: &sqlx::sqlite::SqliteRow) -> Result<GroupConfig, sqlx::Error> {
+    Ok(GroupConfig {
+        id: row.try_get("id")?,
+        name: row.try_get("name")?,
+        color: row.try_get("color")?,
+        expanded: row.try_get::<i64, _>("expanded")? != 0,
     })
 }
 
@@ -362,6 +486,8 @@ mod tests {
             ssl_ca_cert: None,
             ssl_client_cert: None,
             ssl_client_key: None,
+            group_id: None,
+            color: None,
         }
     }
 
@@ -439,5 +565,51 @@ mod tests {
         let found = repo.find("c1").await.unwrap().unwrap();
         assert!(!found.safe_dml);
         assert!(found.read_only);
+    }
+
+    #[tokio::test]
+    async fn group_repository_should_upsert_and_return_all() {
+        let repo = GroupRepository::open_memory().await.unwrap();
+        let g = crate::models::GroupConfig {
+            id: "g1".into(),
+            name: "Production".into(),
+            color: "#e74c3c".into(),
+            expanded: true,
+        };
+        repo.upsert(&g).await.unwrap();
+        let all = repo.all().await.unwrap();
+        assert_eq!(all.len(), 1);
+        assert_eq!(all[0].name, "Production");
+        assert_eq!(all[0].color, "#e74c3c");
+        assert!(all[0].expanded);
+    }
+
+    #[tokio::test]
+    async fn group_repository_should_set_expanded() {
+        let repo = GroupRepository::open_memory().await.unwrap();
+        let g = crate::models::GroupConfig {
+            id: "g1".into(),
+            name: "Production".into(),
+            color: "#6c7086".into(),
+            expanded: true,
+        };
+        repo.upsert(&g).await.unwrap();
+        repo.set_expanded("g1", false).await.unwrap();
+        let all = repo.all().await.unwrap();
+        assert!(!all[0].expanded);
+    }
+
+    #[tokio::test]
+    async fn group_repository_should_delete_group() {
+        let repo = GroupRepository::open_memory().await.unwrap();
+        let g = crate::models::GroupConfig {
+            id: "g1".into(),
+            name: "Staging".into(),
+            color: "#6c7086".into(),
+            expanded: true,
+        };
+        repo.upsert(&g).await.unwrap();
+        repo.delete("g1").await.unwrap();
+        assert!(repo.all().await.unwrap().is_empty());
     }
 }

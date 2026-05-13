@@ -20,17 +20,32 @@ export struct RowData {
 }
 
 export struct SidebarNode {
-    id: string,           // "conn:{id}" | "cat:{id}:{name}" | "item:{id}:{kind}:{name}"
+    id: string,           // "conn:{id}" | "cat:{id}:{name}" | "item:{id}:{kind}:{name}" | "group:{id}"
+    raw-id: string,       // bare connection or group id without prefix
     label: string,
     sub-label: string,    // db-type badge for connections; "" otherwise
-    level: int,           // 0=connection, 1=category, 2=item
+    level: int,           // 0=connection or group, 1=category, 2=item
     is-expanded: bool,
     is-active: bool,      // true for the active connection (level 0 only)
     is-read-only: bool,   // true for connections with read_only=true
-    node-kind: string,    // "connection" | "category" | "table" | "view" | "proc" | "index"
-    parent-index: int,    // flat-list index of parent node; -1 for root connection nodes
+    node-kind: string,    // "group" | "connection" | "category" | "table" | "view" | "proc" | "index"
+    parent-index: int,    // flat-list index of parent node; -1 for root nodes
     visible: bool,        // animation: false = collapsed (height 0), true = expanded
     stagger-delay: int,   // animation: ms delay for enter stagger (0 for non-item nodes)
+    color: color,         // display color (group color, or connection override)
+    has-color: bool,      // true when color should be shown as an indicator dot
+}
+
+export struct GroupEntry {
+    id: string,
+    name: string,
+    color: color,
+}
+
+/// One entry in the group color palette (display color + hex string for persistence).
+export struct ColorPaletteEntry {
+    display-color: color,
+    hex: string,
 }
 
 export struct CompletionRow {

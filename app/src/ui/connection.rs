@@ -607,14 +607,26 @@ pub(super) fn register_sidebar_callbacks(
                     return;
                 }
             }
-            // Toggle expanded state (active connection and category nodes).
-            with_sidebar_mut(&sidebar_state, |sb| {
+            // Toggle expanded state (active connection, category, and group nodes).
+            let new_expanded = with_sidebar_mut(&sidebar_state, |sb| {
                 if sb.expanded.contains(&id) {
                     sb.expanded.remove(&id);
+                    false
                 } else {
                     sb.expanded.insert(id.clone());
+                    true
                 }
             });
+            // Persist group expanded state so it survives app restarts.
+            if let Some(group_id) = id.strip_prefix("group:") {
+                send_cmd(
+                    &tx_cmd,
+                    Command::SetGroupExpanded {
+                        id: group_id.to_string(),
+                        expanded: new_expanded,
+                    },
+                );
+            }
             // Rebuild and push the updated tree (already on UI thread)
             let nodes = with_sidebar(&sidebar_state, |sb| {
                 let active_id = state
@@ -623,6 +635,7 @@ pub(super) fn register_sidebar_callbacks(
                     .map(|c| c.id.clone())
                     .unwrap_or_default();
                 build_sidebar_tree(
+                    &sb.groups,
                     &sb.config_connections,
                     &active_id,
                     &sb.metadata,
@@ -708,6 +721,7 @@ pub(super) fn register_sidebar_callbacks(
             // Rebuild tree (no active connection, no expanded node for id).
             let (nodes, entries) = with_sidebar(&sidebar_state, |sb| {
                 let nodes = build_sidebar_tree(
+                    &sb.groups,
                     &sb.config_connections,
                     "",
                     &sb.metadata,
@@ -802,6 +816,70 @@ pub(super) fn register_sidebar_callbacks(
                     },
                 );
             }
+        });
+    }
+
+    // add-group: create a new group with a placeholder name.
+    {
+        let tx_cmd = tx_cmd.clone(); // clone required: callback closure needs owned tx_cmd
+        ui_state.on_add_group(move || {
+            send_cmd(
+                &tx_cmd,
+                Command::CreateGroup {
+                    name: t!("group.default_name").to_string(),
+                },
+            );
+        });
+    }
+
+    // rename-group: persist a new name for an existing group.
+    {
+        let tx_cmd = tx_cmd.clone(); // clone required: callback closure needs owned tx_cmd
+        ui_state.on_rename_group(move |id, name| {
+            send_cmd(
+                &tx_cmd,
+                Command::RenameGroup {
+                    id: id.to_string(),
+                    name: name.to_string(),
+                },
+            );
+        });
+    }
+
+    // delete-group: delete a group and ungroup its member connections.
+    {
+        let tx_cmd = tx_cmd.clone(); // clone required: callback closure needs owned tx_cmd
+        ui_state.on_delete_group(move |id| {
+            send_cmd(&tx_cmd, Command::DeleteGroup { id: id.to_string() });
+        });
+    }
+
+    // move-to-group: assign a connection to a group, or ungroup when id is empty.
+    {
+        let tx_cmd = tx_cmd.clone(); // clone required: callback closure needs owned tx_cmd
+        ui_state.on_move_to_group(move |conn_id, group_id| {
+            let gid = group_id.to_string();
+            send_cmd(
+                &tx_cmd,
+                Command::MoveConnectionToGroup {
+                    conn_id: conn_id.to_string(),
+                    group_id: if gid.is_empty() { None } else { Some(gid) },
+                },
+            );
+        });
+    }
+
+    // set-group-color: update the color of a group.
+    {
+        let tx_cmd = tx_cmd.clone(); // clone required: callback closure needs owned tx_cmd
+        ui_state.on_set_group_color(move |group_id, hex_color| {
+            send_cmd(
+                &tx_cmd,
+                Command::SetGroupColor {
+                    group_id: group_id.to_string(),
+                    color: hex_color.to_string(),
+                },
+            );
         });
     }
 }

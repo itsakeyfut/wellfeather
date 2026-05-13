@@ -8,6 +8,8 @@ status:
   connect_failed: "接続に失敗しました: %{msg}"
   metadata_unavailable: "メタデータを取得できませんでした: %{msg}"
   read_only: "読み取り専用"
+group:
+  default_name: "新しいグループ"
 error:
   no_active_connection: "接続がありません"
   db_connect_failed: "接続に失敗しました: %{reason}"
@@ -22,3 +24,6 @@ error:
   ssh_conn_string_unsupported: "接続文字列モードではSSHトンネルはサポートされていません。Individual Fieldsに切り替えてください。"
   ssl_error: "SSL/TLSエラー: %{reason}"
   ssl_cert_copy_failed: "証明書ファイルのコピーに失敗しました: %{reason}"
+  group_create_failed: "グループの作成に失敗しました: %{reason}"
+  group_rename_failed: "グループの名前変更に失敗しました: %{reason}"
+  group_delete_failed: "グループの削除に失敗しました: %{reason}"

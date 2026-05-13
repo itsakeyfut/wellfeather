@@ -36,7 +36,8 @@ use state::AppState;
 use ui::UI;
 use wf_completion::cache::MetadataCache;
 use wf_config::{
-    ConnectionRepository, SnippetRepository, crypto, manager::ConfigManager, models::Theme,
+    ConnectionRepository, GroupRepository, SnippetRepository, crypto, manager::ConfigManager,
+    models::Theme,
 };
 use wf_db::service::DbService;
 use wf_history::{
@@ -144,6 +145,8 @@ fn main() -> anyhow::Result<()> {
     // Initialise all services from the shared pool (Composition Root).
     let repo: Arc<ConnectionRepository> =
         Arc::new(runtime.block_on(ConnectionRepository::new(pool.clone()))?);
+    let group_repo: Arc<GroupRepository> =
+        Arc::new(runtime.block_on(GroupRepository::new(pool.clone()))?);
     let history_svc = runtime.block_on(HistoryService::new(pool.clone()))?;
     let find_history_svc = runtime.block_on(FindHistoryService::new(pool.clone()))?;
     let session_svc = runtime.block_on(SessionService::new(pool.clone()))?;
@@ -151,8 +154,9 @@ fn main() -> anyhow::Result<()> {
         Arc::new(runtime.block_on(SnippetRepository::new(pool.clone()))?);
     let metadata_cache = runtime.block_on(MetadataCache::new(pool.clone()))?;
 
-    // Load all saved connections for the initial sidebar/DB-manager list.
+    // Load all saved connections and groups for the initial sidebar.
     let initial_connections = runtime.block_on(repo.all()).unwrap_or_default();
+    let initial_groups = runtime.block_on(group_repo.all()).unwrap_or_default();
 
     // Find the most-recently-used connection for auto-connect.
     let restore_conn = runtime
@@ -169,6 +173,7 @@ fn main() -> anyhow::Result<()> {
         db,
         session,
         repo,
+        group_repo,
         history_svc,
         metadata_cache,
         config_dir.clone(),
@@ -198,6 +203,7 @@ fn main() -> anyhow::Result<()> {
         rx_event,
         enc_key,
         initial_connections,
+        initial_groups,
         find_history_svc,
         session_svc,
         snippet_repo,

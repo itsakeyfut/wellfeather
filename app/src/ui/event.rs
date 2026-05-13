@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 use rust_i18n::t;
 use slint::ComponentHandle;
 use tokio::sync::mpsc;
-use wf_config::models::{ConnectionConfig, Theme};
+use wf_config::models::{ConnectionConfig, GroupConfig, Theme};
 use wf_config::snippet::SnippetRepository;
 use wf_db::models::DbMetadata;
 
@@ -16,7 +16,7 @@ use super::query::{handle_query_finished, handle_table_data_loaded};
 use super::snippet::do_refresh_snippets;
 use super::{
     ERROR_TRUNCATION_CHARS, SharedOriginalData, SidebarUiState, build_sidebar_tree,
-    config_connections_to_entries, with_sidebar, with_sidebar_mut, with_ui,
+    config_connections_to_entries, groups_to_slint, with_sidebar, with_sidebar_mut, with_ui,
 };
 
 pub(super) fn spawn_event_handler(
@@ -135,6 +135,29 @@ pub(super) fn spawn_event_handler(
                         });
                     });
                 }
+                Event::GroupCreated {
+                    id,
+                    groups,
+                    connections,
+                } => handle_groups_updated(
+                    groups,
+                    connections,
+                    Some(id),
+                    window_weak.clone(),
+                    Arc::clone(&sidebar_state),
+                    state.clone(), // clone required: passed to spawned handler
+                ),
+                Event::GroupsUpdated {
+                    groups,
+                    connections,
+                } => handle_groups_updated(
+                    groups,
+                    connections,
+                    None,
+                    window_weak.clone(),
+                    Arc::clone(&sidebar_state),
+                    state.clone(), // clone required: passed to spawned handler
+                ),
                 _ => {}
             }
         }
@@ -142,6 +165,56 @@ pub(super) fn spawn_event_handler(
 }
 
 // ── Per-event handlers ─────────────────────────────────────────────────────────
+
+fn handle_groups_updated(
+    groups: Vec<GroupConfig>,
+    connections: Vec<ConnectionConfig>,
+    new_group_id: Option<String>,
+    ww: slint::Weak<crate::AppWindow>,
+    sidebar_state: Arc<Mutex<SidebarUiState>>,
+    state: SharedState,
+) {
+    with_sidebar_mut(&sidebar_state, |sb| {
+        sb.groups = groups.clone();
+        sb.config_connections = connections.clone();
+        sb.read_only = connections
+            .iter()
+            .map(|c| (c.id.clone(), c.read_only))
+            .collect();
+    });
+    let active_id = state.conn.active().map(|c| c.id).unwrap_or_default();
+    let (group_entries, sidebar_nodes) = with_sidebar(&sidebar_state, |sb| {
+        let ge = groups_to_slint(&sb.groups);
+        let nodes = build_sidebar_tree(
+            &sb.groups,
+            &sb.config_connections,
+            &active_id,
+            &sb.metadata,
+            &sb.expanded,
+            &sb.read_only,
+        );
+        (ge, nodes)
+    });
+    // clone required: invoke_from_event_loop closure must be 'static
+    let _ = slint::invoke_from_event_loop(move || {
+        with_ui(&ww, |ui| {
+            ui.set_group_list(Rc::new(slint::VecModel::from(group_entries)).into());
+            ui.set_sidebar_tree(Rc::new(slint::VecModel::from(sidebar_nodes)).into());
+        });
+        // Trigger inline rename on the next event-loop tick so the tree update
+        // fully completes before the rename TextInput is instantiated.
+        if let Some(id) = new_group_id {
+            // clone required: nested invoke_from_event_loop needs owned Weak ref
+            let ww_inner = ww.clone();
+            let _ = slint::invoke_from_event_loop(move || {
+                with_ui(&ww_inner, |ui| {
+                    ui.set_sidebar_renaming_group_id(id.into());
+                    ui.set_sidebar_rename_draft(t!("group.default_name").to_string().into());
+                });
+            });
+        }
+    });
+}
 
 fn handle_connected(
     id: String,
@@ -177,6 +250,7 @@ fn handle_connected(
     });
     let sidebar_nodes = with_sidebar(&sidebar_state, |sb| {
         build_sidebar_tree(
+            &sb.groups,
             &sb.config_connections,
             &id,
             &sb.metadata,
@@ -230,6 +304,7 @@ fn handle_connection_flags_updated(
     let active_id = state.conn.active().map(|c| c.id).unwrap_or_default();
     let sidebar_nodes = with_sidebar(&sidebar_state, |sb| {
         build_sidebar_tree(
+            &sb.groups,
             &sb.config_connections,
             &active_id,
             &sb.metadata,
@@ -386,6 +461,7 @@ fn handle_connection_removed(
     let (entries, sidebar_nodes) = with_sidebar(&sidebar_state, |sb| {
         let e = config_connections_to_entries(&sb.config_connections, "");
         let nodes = build_sidebar_tree(
+            &sb.groups,
             &sb.config_connections,
             "",
             &sb.metadata,
@@ -422,6 +498,7 @@ fn handle_metadata_loaded(
     let active_id = state.conn.active().map(|c| c.id).unwrap_or_default();
     let nodes = with_sidebar(&sidebar_state, |sb| {
         build_sidebar_tree(
+            &sb.groups,
             &sb.config_connections,
             &active_id,
             &sb.metadata,

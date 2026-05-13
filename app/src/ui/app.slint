@@ -7,7 +7,7 @@ import "../../assets/fonts/NotoSansJP-Bold.ttf";
 import "../../assets/fonts/JetBrainsMono-Regular.ttf";
 import "../../assets/fonts/JetBrainsMono-Bold.ttf";
 
-import { ConnectionEntry, RowData, SidebarNode, CompletionRow, TabEntry, ColumnData, SnippetEntry, MetadataSearchResult, HighlightSpan, CommandPaletteItem } from "globals.slint";
+import { ConnectionEntry, RowData, SidebarNode, GroupEntry, CompletionRow, TabEntry, ColumnData, SnippetEntry, MetadataSearchResult, HighlightSpan, CommandPaletteItem } from "globals.slint";
 import { Colors, Typography, Layout, Icons, Animation } from "theme.slint";
 import { CompletionPopup } from "components/completion_popup.slint";
 import { ConnectionForm }  from "components/connection_form.slint";
@@ -170,6 +170,17 @@ export global UiState {
     callback browse-ssl-ca-cert();
     callback browse-ssl-client-cert();
     callback browse-ssl-client-key();
+
+    // ── Group management ─────────────────────────────────────────────────────
+    in-out property <[GroupEntry]> group-list: [];
+    /// Non-empty while a group node is being inline-renamed.
+    in-out property <string> sidebar-renaming-group-id: "";
+    in-out property <string> sidebar-rename-draft:      "";
+    callback add-group();
+    callback rename-group(string, string);    // group_id, new_name
+    callback delete-group(string);            // group_id
+    callback move-to-group(string, string);   // conn_id, group_id (empty = ungrouped)
+    callback set-group-color(string, string); // group_id, hex_color
 
     // ── Connection test / add state ───────────────────────────────────────────
     /// True after a successful Test Connection; reset when form is opened.
@@ -737,9 +748,17 @@ export component AppWindow inherits Window {
             height: content-height + tab-bar-height;
             tree:               UiState.sidebar-tree;
             is-loading:         UiState.sidebar-loading;
+            groups:             UiState.group-list;
+            renaming-group-id <=> UiState.sidebar-renaming-group-id;
+            rename-draft      <=> UiState.sidebar-rename-draft;
             toggle-node(id) => { UiState.toggle-sidebar-node(id); }
             table-double-clicked(name) => { UiState.table-double-clicked(name); }
             add-connection => { UiState.open-connection-form(); }
+            add-group      => { UiState.add-group(); }
+            rename-group(id, name) => { UiState.rename-group(id, name); }
+            delete-group(id)       => { UiState.delete-group(id); }
+            move-to-group(conn-id, gid)     => { UiState.move-to-group(conn-id, gid); }
+            set-group-color(gid, hex-color) => { UiState.set-group-color(gid, hex-color); }
         }
 
         // ── SQL Editor main content panel ─────────────────────────────────────
