@@ -285,6 +285,8 @@ pub(crate) fn db_to_config_conn(conn: &DbConnection) -> ConnectionConfig {
         ssl_ca_cert,
         ssl_client_cert,
         ssl_client_key,
+        group_id: None,
+        color: None,
     }
 }
 
@@ -355,6 +357,8 @@ mod tests {
             ssl_ca_cert: None,
             ssl_client_cert: None,
             ssl_client_key: None,
+            group_id: None,
+            color: None,
         };
 
         let conn = config_to_db_conn(&cc);
@@ -398,6 +402,8 @@ mod tests {
             ssl_ca_cert: None,
             ssl_client_cert: None,
             ssl_client_key: None,
+            group_id: None,
+            color: None,
         };
 
         let conn = config_to_db_conn(&cc);
@@ -473,6 +479,8 @@ mod tests {
             ssl_ca_cert: Some("/certs/ca.pem".into()),
             ssl_client_cert: Some("/certs/client.pem".into()),
             ssl_client_key: Some("/certs/client.key".into()),
+            group_id: None,
+            color: None,
         };
 
         let conn = config_to_db_conn(&cc);

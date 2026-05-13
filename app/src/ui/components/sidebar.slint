@@ -1,14 +1,37 @@
-import { SidebarNode } from "../globals.slint";
+import { SidebarNode, GroupEntry, ColorPaletteEntry } from "../globals.slint";
 import { Colors, Typography, Layout, Icons, Animation } from "../theme.slint";
+
+// Preset group color swatches (Catppuccin-inspired, theme-neutral).
+global GroupColorPalette {
+    out property <[ColorPaletteEntry]> colors: [
+        { display-color: #f38ba8, hex: "#f38ba8" },
+        { display-color: #fab387, hex: "#fab387" },
+        { display-color: #f9e2af, hex: "#f9e2af" },
+        { display-color: #a6e3a1, hex: "#a6e3a1" },
+        { display-color: #89dceb, hex: "#89dceb" },
+        { display-color: #89b4fa, hex: "#89b4fa" },
+        { display-color: #b4befe, hex: "#b4befe" },
+        { display-color: #6c7086, hex: "#6c7086" },
+    ];
+}
 
 export component Sidebar inherits Rectangle {
     background: Colors.base;
 
     in property <[SidebarNode]>    tree:               [];
     in property <bool>             is-loading:         false;
+    in property <[GroupEntry]>     groups:             [];
+    in-out property <string>       renaming-group-id:  "";
+    in-out property <string>       rename-draft:       "";
+
     callback toggle-node(string);
     callback table-double-clicked(string);
     callback add-connection();
+    callback add-group();
+    callback rename-group(string, string);    // id, new_name
+    callback delete-group(string);            // id
+    callback move-to-group(string, string);   // conn_id, group_id (empty = ungrouped)
+    callback set-group-color(string, string); // group_id, hex_color
 
     /// True while this sidebar holds keyboard focus (used by app.slint to sync focused-pane).
     out property <bool> sidebar-focused: sidebar-fs.has-focus;
@@ -23,15 +46,28 @@ export component Sidebar inherits Rectangle {
     /// Keyboard-navigation cursor (-1 = none selected).
     property <int> kb-focus: -1;
 
-    // Clamp kb-focus when the tree model is replaced (e.g. after toggle-node).
+    // ── Context menu state ────────────────────────────────────────────────────
+    private property <bool>   ctx-visible:      false;
+    private property <length> ctx-y:            0;
+    private property <string> ctx-node-raw-id:  "";
+    private property <string> ctx-node-kind:    "";
+    private property <string> ctx-node-label:   "";
+
+    // Clamp kb-focus when the tree model is replaced.
     changed tree => {
         if (root.kb-focus >= root.tree.length) {
             root.kb-focus = root.tree.length > 0 ? root.tree.length - 1 : -1;
         }
     }
 
-    // Auto-scroll: keep the kb-focused row visible in the Flickable viewport.
-    // viewport-y is 0 at top and negative as content scrolls down.
+    // Cancel inline rename when the sidebar loses focus (user clicked outside).
+    changed sidebar-focused => {
+        if (!root.sidebar-focused && root.renaming-group-id != "") {
+            root.renaming-group-id = "";
+        }
+    }
+
+    // Auto-scroll: keep the kb-focused row visible.
     changed kb-focus => {
         if (root.kb-focus >= 0) {
             let row-top = root.kb-focus * 32px;
@@ -50,7 +86,13 @@ export component Sidebar inherits Rectangle {
         focus-on-click: true;
 
         key-pressed(event) => {
-            if (event.text == Key.UpArrow) {
+            if (event.text == Key.Escape && root.ctx-visible) {
+                root.ctx-visible = false;
+                EventResult.accept
+            } else if (event.text == Key.Escape && root.renaming-group-id != "") {
+                root.renaming-group-id = "";
+                EventResult.accept
+            } else if (event.text == Key.UpArrow) {
                 if (root.kb-focus <= 0) {
                     root.kb-focus = 0;
                 } else {
@@ -108,7 +150,7 @@ export component Sidebar inherits Rectangle {
             viewport-height: max(sidebar-content.preferred-height, self.height);
 
             sidebar-content := VerticalLayout {
-                // ── Schema tree ───────────────────────────────────────────────────────
+                // ── Schema tree ───────────────────────────────────────────────
                 for node[i] in root.tree : Rectangle {
                     height: node.visible ? Layout.height-sidebar-row : 0px;
                     clip: true;
@@ -121,24 +163,39 @@ export component Sidebar inherits Rectangle {
                         width: parent.width;
                         height: parent.height;
                         clicked => {
+                            root.ctx-visible = false;
+                            root.renaming-group-id = "";
                             root.kb-focus = i;
-                            // Level-2 items (tables, views, etc.) have no children to
-                            // expand, so skip toggle-node to avoid rebuilding the VecModel
-                            // on the first click — a rebuild would destroy the element and
-                            // prevent Slint from recognising the second click as a
-                            // double-click.
                             if (node.level < 2) {
                                 root.toggle-node(node.id);
                             }
                         }
                         double-clicked => {
-                            if node.node-kind == "table" || node.node-kind == "view" {
+                            if (node.node-kind == "table" || node.node-kind == "view") {
                                 root.table-double-clicked(node.label);
+                            } else if (node.node-kind == "group") {
+                                root.rename-draft = node.label;
+                                root.renaming-group-id = node.raw-id;
+                            }
+                        }
+                        pointer-event(pe) => {
+                            if (pe.button == PointerEventButton.right
+                                    && pe.kind == PointerEventKind.down
+                                    && node.level == 0
+                                    && (node.node-kind == "group" || node.node-kind == "connection")) {
+                                root.renaming-group-id = "";
+                                root.ctx-node-raw-id = node.raw-id;
+                                root.ctx-node-kind   = node.node-kind;
+                                root.ctx-node-label  = node.label;
+                                // Position menu below this row (approximate, ignoring collapsed nodes).
+                                root.ctx-y = (i + 1) * Layout.height-sidebar-row
+                                    + sidebar-scroll.viewport-y;
+                                root.ctx-visible = true;
                             }
                         }
                     }
 
-                    // Hover overlay (skipped for kb-focused and active-connection rows)
+                    // Hover overlay
                     Rectangle {
                         background: ta.has-hover
                             && i != root.kb-focus
@@ -156,7 +213,7 @@ export component Sidebar inherits Rectangle {
                         padding-right: Layout.padding-sm;
                         spacing: Layout.spacing-lg;
 
-                        // Expand/collapse toggle icon for connection and category nodes
+                        // Expand/collapse chevron for connection, group, and category nodes
                         if node.level < 2 : Image {
                             width: Layout.icon-md;
                             source: node.is-expanded
@@ -168,8 +225,15 @@ export component Sidebar inherits Rectangle {
                         // Spacer for item nodes
                         if node.level >= 2 : Rectangle { width: Layout.icon-md; }
 
+                        // Group icon (folder)
+                        if node.level == 0 && node.node-kind == "group" : Image {
+                            width: Layout.icon-lg;
+                            source: Icons.folder;
+                            colorize: node.has-color ? node.color : Colors.surface2;
+                            image-fit: contain;
+                        }
                         // Connection status dot (filled = active / empty = inactive)
-                        if node.level == 0 : Image {
+                        if node.level == 0 && node.node-kind == "connection" : Image {
                             width: Layout.icon-lg;
                             source: node.is-active
                                 ? Icons.dot-filled
@@ -178,8 +242,62 @@ export component Sidebar inherits Rectangle {
                             image-fit: contain;
                         }
 
-                        // Main label
-                        Text {
+                        // Inline rename input (group nodes only, while renaming)
+                        // FocusScope wraps the rename TextInput so we can detect focus loss
+                        // and dismiss the rename automatically (click anywhere to cancel).
+                        // The Timer defers focus() to the next event-loop tick to avoid
+                        // accessing the parent layout cache during instantiation, which
+                        // would trigger a Slint "Recursion detected" panic.
+                        if root.renaming-group-id == node.raw-id && node.node-kind == "group" : rename-scope := FocusScope {
+                            horizontal-stretch: 1;
+                            height: parent.height;
+
+                            // Guard: only dismiss after focus has actually been acquired
+                            // once, to avoid a spurious cancel before the Timer fires.
+                            property <bool> had-focus: false;
+                            changed has-focus => {
+                                if (rename-scope.has-focus) {
+                                    rename-scope.had-focus = true;
+                                } else if (rename-scope.had-focus) {
+                                    root.renaming-group-id = "";
+                                }
+                            }
+
+                            rename-ti := TextInput {
+                                width: parent.width;
+                                height: parent.height;
+                                text <=> root.rename-draft;
+                                font-size: Typography.size-lg;
+                                color: Colors.text;
+                                vertical-alignment: center;
+                                single-line: true;
+                                accepted => {
+                                    root.rename-group(node.raw-id, root.rename-draft);
+                                    root.renaming-group-id = "";
+                                }
+                                key-pressed(e) => {
+                                    if (e.text == Key.Escape) {
+                                        root.renaming-group-id = "";
+                                        EventResult.accept
+                                    } else {
+                                        EventResult.reject
+                                    }
+                                }
+                            }
+
+                            // Fire on next event-loop tick (after layout cache is settled).
+                            Timer {
+                                interval: 1ms;
+                                running: true;
+                                triggered => {
+                                    self.running = false;
+                                    rename-ti.focus();
+                                }
+                            }
+                        }
+
+                        // Normal label (hidden while inline-renaming this group)
+                        if root.renaming-group-id != node.raw-id || node.node-kind != "group" : Text {
                             text: node.label;
                             color: node.level == 0
                                 ? (node.is-active ? Colors.text : Colors.subtext1)
@@ -191,11 +309,24 @@ export component Sidebar inherits Rectangle {
                         }
 
                         // Lock icon for read-only connection nodes
-                        if node.level == 0 && node.is-read-only : Image {
+                        if node.level == 0 && node.is-read-only && node.node-kind == "connection" : Image {
                             width: Layout.icon-md;
                             source: Icons.lock;
                             colorize: Colors.yellow;
                             image-fit: contain;
+                        }
+
+                        // Color indicator dot for connections that have a per-connection color
+                        if node.level == 0 && node.has-color && node.node-kind == "connection" : VerticalLayout {
+                            alignment: center;
+                            horizontal-stretch: 0;
+                            width: 8px;
+                            Rectangle {
+                                width: 8px;
+                                height: 8px;
+                                border-radius: 4px;
+                                background: node.color;
+                            }
                         }
 
                         // Sub-label badge (db-type for connection nodes)
@@ -208,7 +339,7 @@ export component Sidebar inherits Rectangle {
                     }
                 }
 
-                // ── Metadata loading indicator ────────────────────────────────────────
+                // ── Metadata loading indicator ────────────────────────────────
                 if root.is-loading : Rectangle {
                     height: Layout.height-row;
                     HorizontalLayout {
@@ -223,14 +354,14 @@ export component Sidebar inherits Rectangle {
                     }
                 }
 
-                // ── Divider ───────────────────────────────────────────────────────────
+                // ── Divider ───────────────────────────────────────────────────
                 Rectangle {
                     height: 1px;
                     background: Colors.surface0;
                 }
 
-                // ── Add connection button ─────────────────────────────────────────────
-                Rectangle {
+                // ── Add connection button ─────────────────────────────────────
+                add-conn-rect := Rectangle {
                     height: Layout.height-sidebar-row + 4px;
                     background: transparent;
 
@@ -253,7 +384,219 @@ export component Sidebar inherits Rectangle {
                     TouchArea {
                         width: parent.width;
                         height: parent.height;
-                        clicked => { root.add-connection(); }
+                        clicked => {
+                            root.ctx-visible = false;
+                            root.renaming-group-id = "";
+                            root.add-connection();
+                        }
+                    }
+                }
+
+                // ── Add group button ──────────────────────────────────────────
+                add-group-rect := Rectangle {
+                    height: Layout.height-sidebar-row + 4px;
+                    background: transparent;
+
+                    HorizontalLayout {
+                        padding-left: Layout.padding-md;
+                        spacing: Layout.spacing-md;
+                        Image {
+                            width: Layout.icon-md;
+                            source: Icons.folder;
+                            colorize: Colors.overlay1;
+                            image-fit: contain;
+                        }
+                        Text {
+                            text: @tr("Add group");
+                            color: Colors.overlay1;
+                            vertical-alignment: center;
+                        }
+                    }
+
+                    TouchArea {
+                        width: parent.width;
+                        height: parent.height;
+                        clicked => {
+                            root.ctx-visible = false;
+                            root.renaming-group-id = "";
+                            root.add-group();
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // ── Click-outside dismiss backdrop ───────────────────────────────────────
+    // Sits below the context menu (z=99 vs 100) and catches any click that
+    // misses the menu items, closing it without triggering the underlying action.
+    if root.ctx-visible : TouchArea {
+        x: 0; y: 0;
+        width: root.width; height: root.height;
+        z: 99;
+        clicked => { root.ctx-visible = false; }
+    }
+
+    // ── Context menu overlay (outside Flickable so not clipped) ──────────────
+    if root.ctx-visible : Rectangle {
+        x: 4px;
+        // Clamp so the menu stays within the sidebar vertically.
+        y: clamp(root.ctx-y, 4px, root.height - ctx-vl.preferred-height - 4px);
+        z: 100;
+        width: 200px;
+        height: ctx-vl.preferred-height;
+        background: Colors.surface0;
+        border-radius: Layout.radius-md;
+        drop-shadow-blur: 8px;
+        drop-shadow-color: Colors.shadow;
+        border-width: 1px;
+        border-color: Colors.surface1;
+
+        ctx-vl := VerticalLayout {
+            padding: Layout.spacing-sm;
+            spacing: 0;
+
+            // ── Group actions ─────────────────────────────────────────────────
+            if root.ctx-node-kind == "group" : Rectangle {
+                height: Layout.height-menu-item;
+                border-radius: Layout.radius-sm;
+                background: rename-mta.has-hover ? Colors.hover-btn : transparent;
+                HorizontalLayout {
+                    padding-left: Layout.padding-sm;
+                    spacing: Layout.spacing-md;
+                    Image {
+                        width: Layout.icon-md;
+                        source: Icons.edit;
+                        colorize: Colors.text;
+                        image-fit: contain;
+                    }
+                    Text { text: @tr("Rename"); color: Colors.text; vertical-alignment: center; }
+                }
+                rename-mta := TouchArea {
+                    clicked => {
+                        root.rename-draft = root.ctx-node-label;
+                        root.renaming-group-id = root.ctx-node-raw-id;
+                        root.ctx-visible = false;
+                    }
+                }
+            }
+
+            if root.ctx-node-kind == "group" : Rectangle {
+                height: Layout.height-menu-item;
+                border-radius: Layout.radius-sm;
+                background: delete-mta.has-hover ? Colors.hover-btn : transparent;
+                HorizontalLayout {
+                    padding-left: Layout.padding-sm;
+                    spacing: Layout.spacing-md;
+                    Image {
+                        width: Layout.icon-md;
+                        source: Icons.delete;
+                        colorize: Colors.red;
+                        image-fit: contain;
+                    }
+                    Text { text: @tr("Delete"); color: Colors.red; vertical-alignment: center; }
+                }
+                delete-mta := TouchArea {
+                    clicked => {
+                        root.delete-group(root.ctx-node-raw-id);
+                        root.ctx-visible = false;
+                    }
+                }
+            }
+
+            // Color swatches for groups
+            if root.ctx-node-kind == "group" : Rectangle {
+                height: 1px;
+                background: Colors.surface1;
+            }
+            if root.ctx-node-kind == "group" : HorizontalLayout {
+                padding-left: Layout.padding-sm;
+                padding-right: Layout.padding-sm;
+                padding-top: Layout.spacing-sm;
+                padding-bottom: Layout.spacing-sm;
+                spacing: Layout.spacing-sm;
+                height: 24px + 2 * Layout.spacing-sm;
+
+                for clr in GroupColorPalette.colors : Rectangle {
+                    width: 18px;
+                    height: 18px;
+                    border-radius: 9px;
+                    background: clr.display-color;
+                    TouchArea {
+                        clicked => {
+                            root.set-group-color(root.ctx-node-raw-id, clr.hex);
+                            root.ctx-visible = false;
+                        }
+                    }
+                }
+            }
+
+            // ── Connection actions ────────────────────────────────────────────
+            if root.ctx-node-kind == "connection" : Rectangle {
+                height: Layout.height-compact;
+                HorizontalLayout {
+                    padding-left: Layout.padding-sm;
+                    Text {
+                        text: @tr("Move to group");
+                        color: Colors.subtext0;
+                        font-size: Typography.size-sm;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+
+            if root.ctx-node-kind == "connection" : VerticalLayout {
+                for g in root.groups : Rectangle {
+                    height: Layout.height-menu-item;
+                    border-radius: Layout.radius-sm;
+                    background: grp-mta.has-hover ? Colors.hover-btn : transparent;
+                    HorizontalLayout {
+                        padding-left: Layout.padding-md;
+                        spacing: Layout.spacing-md;
+                        VerticalLayout {
+                            alignment: center;
+                            horizontal-stretch: 0;
+                            width: 10px;
+                            Rectangle {
+                                width: 10px;
+                                height: 10px;
+                                border-radius: 5px;
+                                background: g.color;
+                            }
+                        }
+                        Text {
+                            text: g.name;
+                            color: Colors.text;
+                            vertical-alignment: center;
+                            overflow: elide;
+                            horizontal-stretch: 1;
+                        }
+                    }
+                    grp-mta := TouchArea {
+                        clicked => {
+                            root.move-to-group(root.ctx-node-raw-id, g.id);
+                            root.ctx-visible = false;
+                        }
+                    }
+                }
+
+                Rectangle {
+                    height: Layout.height-menu-item;
+                    border-radius: Layout.radius-sm;
+                    background: ungrp-mta.has-hover ? Colors.hover-btn : transparent;
+                    HorizontalLayout {
+                        padding-left: Layout.padding-md;
+                        Text {
+                            text: @tr("Ungrouped");
+                            color: Colors.text;
+                            vertical-alignment: center;
+                        }
+                    }
+                    ungrp-mta := TouchArea {
+                        clicked => {
+                            root.move-to-group(root.ctx-node-raw-id, "");
+                            root.ctx-visible = false;
+                        }
                     }
                 }
             }

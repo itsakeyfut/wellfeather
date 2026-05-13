@@ -141,6 +141,28 @@ impl Default for UiConfig {
 }
 
 // ---------------------------------------------------------------------------
+// GroupConfig  [[group]]
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct GroupConfig {
+    pub id: String,
+    pub name: String,
+    #[serde(default = "default_group_color")]
+    pub color: String,
+    #[serde(default = "default_true")]
+    pub expanded: bool,
+}
+
+fn default_group_color() -> String {
+    "#6c7086".to_string()
+}
+
+fn default_true() -> bool {
+    true
+}
+
+// ---------------------------------------------------------------------------
 // SslMode
 // ---------------------------------------------------------------------------
 
@@ -228,6 +250,14 @@ pub struct ConnectionConfig {
     /// Path to the client private key PEM file (copied into config_dir).
     #[serde(default)]
     pub ssl_client_key: Option<String>,
+    // ── Group membership ─────────────────────────────────────────────────────
+    /// ID of the group this connection belongs to, or `None` for ungrouped.
+    #[serde(default)]
+    pub group_id: Option<String>,
+    /// Per-connection color override (CSS hex, e.g. "#e74c3c").
+    /// When `None`, the parent group's color is used; ungrouped connections have no color.
+    #[serde(default)]
+    pub color: Option<String>,
 }
 
 fn default_safe_dml() -> bool {
@@ -378,6 +408,8 @@ language = "ja"
             ssl_ca_cert: None,
             ssl_client_cert: None,
             ssl_client_key: None,
+            group_id: None,
+            color: None,
         };
 
         let serialized = toml::to_string(&original).expect("failed to serialize");
@@ -436,6 +468,8 @@ language = "ja"
             ssl_ca_cert: Some("/config/certs/ssl-test/ca.pem".into()),
             ssl_client_cert: Some("/config/certs/ssl-test/client.pem".into()),
             ssl_client_key: Some("/config/certs/ssl-test/client.key".into()),
+            group_id: None,
+            color: None,
         };
 
         let serialized = toml::to_string(&original).expect("failed to serialize");
@@ -449,6 +483,35 @@ language = "ja"
             deserialized.ssl_ca_cert.as_deref(),
             Some("/config/certs/ssl-test/ca.pem")
         );
+    }
+
+    #[test]
+    fn group_config_defaults_should_be_applied() {
+        let toml = "id = \"g1\"\nname = \"Production\"";
+        let g: GroupConfig = toml::from_str(toml).expect("should parse with defaults");
+        assert_eq!(g.color, "#6c7086");
+        assert!(g.expanded);
+    }
+
+    #[test]
+    fn group_config_fields_should_round_trip_through_toml() {
+        let original = GroupConfig {
+            id: "g1".into(),
+            name: "Production".into(),
+            color: "#e74c3c".into(),
+            expanded: false,
+        };
+        let s = toml::to_string(&original).expect("failed to serialize");
+        let back: GroupConfig = toml::from_str(&s).expect("failed to deserialize");
+        assert_eq!(original, back);
+    }
+
+    #[test]
+    fn connection_config_group_fields_should_default_to_none() {
+        let toml = "id = \"c1\"\nname = \"c1\"\ndb_type = \"sqlite\"";
+        let cc: ConnectionConfig = toml::from_str(toml).expect("should parse");
+        assert_eq!(cc.group_id, None);
+        assert_eq!(cc.color, None);
     }
 
     #[test]

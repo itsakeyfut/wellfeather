@@ -60,6 +60,18 @@ fn with_sidebar_mut<R>(
     f(&mut s.lock().unwrap_or_else(|p| p.into_inner()))
 }
 
+/// Map a slice of `GroupConfig` to Slint `GroupEntry` values.
+fn groups_to_slint(groups: &[GroupConfig]) -> Vec<crate::GroupEntry> {
+    groups
+        .iter()
+        .map(|g| crate::GroupEntry {
+            id: g.id.clone().into(),
+            name: g.name.clone().into(),
+            color: parse_hex_color(&g.color),
+        })
+        .collect()
+}
+
 /// Map a slice of `ConnectionConfig` entries to Slint `ConnectionEntry` values.
 /// Pass the active connection id; connections whose id matches get `is_active: true`.
 /// Pass `""` to mark all entries as inactive.
@@ -178,7 +190,7 @@ impl FindState {
     }
 }
 
-use wf_config::models::{ConnectionConfig, Theme};
+use wf_config::models::{ConnectionConfig, GroupConfig, Theme};
 
 use crate::{
     app::{command::Command, event::Event},
@@ -197,9 +209,112 @@ struct SidebarUiState {
     /// All saved connections (from ConnectionRepository). Used to build the
     /// sidebar and DB manager list even when no DB is running.
     config_connections: Vec<ConnectionConfig>,
+    /// All saved groups. Ordered for stable sidebar rendering.
+    groups: Vec<GroupConfig>,
+}
+
+/// Parse a CSS hex color string (e.g. "#89b4fa") into a Slint `Color`.
+/// Falls back to a neutral gray on malformed input.
+fn parse_hex_color(s: &str) -> slint::Color {
+    let s = s.trim_start_matches('#');
+    if s.len() == 6
+        && let (Ok(r), Ok(g), Ok(b)) = (
+            u8::from_str_radix(&s[0..2], 16),
+            u8::from_str_radix(&s[2..4], 16),
+            u8::from_str_radix(&s[4..6], 16),
+        )
+    {
+        return slint::Color::from_rgb_u8(r, g, b);
+    }
+    slint::Color::from_rgb_u8(0x6c, 0x70, 0x86) // overlay0 gray
+}
+
+#[allow(clippy::too_many_arguments)]
+fn push_conn_node(
+    nodes: &mut Vec<crate::SidebarNode>,
+    conn: &ConnectionConfig,
+    active_id: &str,
+    metadata: &HashMap<String, DbMetadata>,
+    expanded: &HashSet<String>,
+    read_only: &HashMap<String, bool>,
+    parent_index: i32,
+    visible: bool,
+    group_color: Option<slint::Color>,
+) {
+    let conn_node_id = format!("conn:{}", conn.id);
+    let is_conn_expanded = expanded.contains(&conn_node_id);
+    let conn_color = conn
+        .color
+        .as_deref()
+        .map(parse_hex_color)
+        .or(group_color)
+        .unwrap_or_default();
+    let has_conn_color = conn.color.is_some() || group_color.is_some();
+    let conn_idx = nodes.len() as i32;
+    nodes.push(crate::SidebarNode {
+        id: conn_node_id.clone().into(),
+        raw_id: conn.id.clone().into(),
+        label: conn.name.clone().into(),
+        sub_label: connection::db_type_label_config(&conn.db_type).into(),
+        level: 0,
+        is_expanded: is_conn_expanded,
+        is_active: conn.id == active_id,
+        is_read_only: *read_only.get(&conn.id).unwrap_or(&false),
+        node_kind: "connection".into(),
+        parent_index,
+        visible,
+        stagger_delay: 0,
+        color: conn_color,
+        has_color: has_conn_color,
+    });
+    let parent_visible = visible && is_conn_expanded;
+    let Some(meta) = metadata.get(&conn.id) else {
+        return;
+    };
+    push_tableinfo_category(
+        nodes,
+        conn_idx,
+        &conn.id,
+        "Tables",
+        &meta.tables,
+        "table",
+        expanded,
+        parent_visible,
+    );
+    push_tableinfo_category(
+        nodes,
+        conn_idx,
+        &conn.id,
+        "Views",
+        &meta.views,
+        "view",
+        expanded,
+        parent_visible,
+    );
+    push_string_category(
+        nodes,
+        conn_idx,
+        &conn.id,
+        "Stored Procedures",
+        &meta.stored_procs,
+        "proc",
+        expanded,
+        parent_visible,
+    );
+    push_string_category(
+        nodes,
+        conn_idx,
+        &conn.id,
+        "Indexes",
+        &meta.indexes,
+        "index",
+        expanded,
+        parent_visible,
+    );
 }
 
 fn build_sidebar_tree(
+    groups: &[GroupConfig],
     config_conns: &[ConnectionConfig],
     active_id: &str,
     metadata: &HashMap<String, DbMetadata>,
@@ -207,68 +322,54 @@ fn build_sidebar_tree(
     read_only: &HashMap<String, bool>,
 ) -> Vec<crate::SidebarNode> {
     let mut nodes = vec![];
-    for conn in config_conns {
-        let conn_node_id = format!("conn:{}", conn.id);
-        let is_conn_expanded = expanded.contains(&conn_node_id);
-        let conn_idx = nodes.len() as i32;
+
+    // --- Group nodes first, then their member connections ---
+    for group in groups {
+        let group_node_id = format!("group:{}", group.id);
+        let is_group_expanded = expanded.contains(&group_node_id);
+        let group_color = parse_hex_color(&group.color);
+        let group_idx = nodes.len() as i32;
         nodes.push(crate::SidebarNode {
-            id: conn_node_id.clone().into(),
-            label: conn.name.clone().into(),
-            sub_label: connection::db_type_label_config(&conn.db_type).into(),
+            id: group_node_id.clone().into(),
+            raw_id: group.id.clone().into(),
+            label: group.name.clone().into(),
+            sub_label: "".into(),
             level: 0,
-            is_expanded: is_conn_expanded,
-            is_active: conn.id == active_id,
-            is_read_only: *read_only.get(&conn.id).unwrap_or(&false),
-            node_kind: "connection".into(),
+            is_expanded: is_group_expanded,
+            is_active: false,
+            is_read_only: false,
+            node_kind: "group".into(),
             parent_index: -1,
             visible: true,
             stagger_delay: 0,
+            color: group_color,
+            has_color: true,
         });
-        // Always push all children (with visible flag) so Slint can animate height/opacity.
-        let Some(meta) = metadata.get(&conn.id) else {
-            continue;
-        };
-        push_tableinfo_category(
-            &mut nodes,
-            conn_idx,
-            &conn.id,
-            "Tables",
-            &meta.tables,
-            "table",
-            expanded,
-            is_conn_expanded,
-        );
-        push_tableinfo_category(
-            &mut nodes,
-            conn_idx,
-            &conn.id,
-            "Views",
-            &meta.views,
-            "view",
-            expanded,
-            is_conn_expanded,
-        );
-        push_string_category(
-            &mut nodes,
-            conn_idx,
-            &conn.id,
-            "Stored Procedures",
-            &meta.stored_procs,
-            "proc",
-            expanded,
-            is_conn_expanded,
-        );
-        push_string_category(
-            &mut nodes,
-            conn_idx,
-            &conn.id,
-            "Indexes",
-            &meta.indexes,
-            "index",
-            expanded,
-            is_conn_expanded,
+        for conn in config_conns
+            .iter()
+            .filter(|c| c.group_id.as_deref() == Some(group.id.as_str()))
+        {
+            push_conn_node(
+                &mut nodes,
+                conn,
+                active_id,
+                metadata,
+                expanded,
+                read_only,
+                group_idx,
+                is_group_expanded,
+                Some(group_color),
+            );
+        }
+    }
+
+    // --- Ungrouped connections ---
+    for conn in config_conns.iter().filter(|c| c.group_id.is_none()) {
+        push_conn_node(
+            &mut nodes, conn, active_id, metadata, expanded, read_only, -1, true, None,
         );
     }
+
     nodes
 }
 
@@ -288,6 +389,7 @@ fn push_tableinfo_category(
     let cat_idx = nodes.len() as i32;
     nodes.push(crate::SidebarNode {
         id: cat_id.into(),
+        raw_id: "".into(),
         label: name.into(),
         sub_label: "".into(),
         level: 1,
@@ -298,11 +400,14 @@ fn push_tableinfo_category(
         parent_index: conn_idx,
         visible: parent_visible,
         stagger_delay: 0,
+        color: Default::default(),
+        has_color: false,
     });
     // Always emit children; visible flag drives Slint height/opacity animation.
     for (child_idx, item) in items.iter().enumerate() {
         nodes.push(crate::SidebarNode {
             id: format!("item:{}:{}:{}", conn_id, kind, item.name).into(),
+            raw_id: "".into(),
             label: item.name.clone().into(),
             sub_label: "".into(),
             level: 2,
@@ -313,6 +418,8 @@ fn push_tableinfo_category(
             parent_index: cat_idx,
             visible: parent_visible && is_exp,
             stagger_delay: (child_idx.min(9) as i32) * 30,
+            color: Default::default(),
+            has_color: false,
         });
     }
 }
@@ -333,6 +440,7 @@ fn push_string_category(
     let cat_idx = nodes.len() as i32;
     nodes.push(crate::SidebarNode {
         id: cat_id.into(),
+        raw_id: "".into(),
         label: name.into(),
         sub_label: "".into(),
         level: 1,
@@ -343,11 +451,14 @@ fn push_string_category(
         parent_index: conn_idx,
         visible: parent_visible,
         stagger_delay: 0,
+        color: Default::default(),
+        has_color: false,
     });
     // Always emit children; visible flag drives Slint height/opacity animation.
     for (child_idx, item) in items.iter().enumerate() {
         nodes.push(crate::SidebarNode {
             id: format!("item:{}:{}:{}", conn_id, kind, item).into(),
+            raw_id: "".into(),
             label: item.clone().into(),
             sub_label: "".into(),
             level: 2,
@@ -358,6 +469,8 @@ fn push_string_category(
             parent_index: cat_idx,
             visible: parent_visible && is_exp,
             stagger_delay: (child_idx.min(9) as i32) * 30,
+            color: Default::default(),
+            has_color: false,
         });
     }
 }
@@ -378,6 +491,7 @@ impl UI {
         rx_event: mpsc::Receiver<Event>,
         enc_key: [u8; 32],
         initial_connections: Vec<ConnectionConfig>,
+        initial_groups: Vec<GroupConfig>,
         find_history_svc: FindHistoryService,
         session_svc: SessionService,
         snippet_repo: Arc<SnippetRepository>,
@@ -390,6 +504,7 @@ impl UI {
                 .map(|c| (c.id.clone(), c.read_only))
                 .collect(),
             config_connections: initial_connections,
+            groups: initial_groups,
             ..Default::default()
         }));
 
@@ -509,21 +624,22 @@ impl UI {
             ui_global.set_editor_text(query.clone().into());
             tabs_state.borrow_mut().save_current_text(&query);
         }
-        // Populate the connection list and sidebar from all saved connections at startup
-        // so they are visible even when no DB is running.
-        let (startup_entries, startup_nodes) = with_sidebar(&sidebar_state, |sb| {
-            (
-                config_connections_to_entries(&sb.config_connections, ""),
-                build_sidebar_tree(
-                    &sb.config_connections,
-                    "",
-                    &sb.metadata,
-                    &sb.expanded,
-                    &sb.read_only,
-                ),
-            )
+        // Populate the connection list, group list, and sidebar at startup.
+        let (startup_entries, startup_groups, startup_nodes) = with_sidebar(&sidebar_state, |sb| {
+            let entries = config_connections_to_entries(&sb.config_connections, "");
+            let group_entries = groups_to_slint(&sb.groups);
+            let nodes = build_sidebar_tree(
+                &sb.groups,
+                &sb.config_connections,
+                "",
+                &sb.metadata,
+                &sb.expanded,
+                &sb.read_only,
+            );
+            (entries, group_entries, nodes)
         });
         ui_global.set_connection_list(Rc::new(slint::VecModel::from(startup_entries)).into());
+        ui_global.set_group_list(Rc::new(slint::VecModel::from(startup_groups)).into());
         ui_global.set_sidebar_tree(Rc::new(slint::VecModel::from(startup_nodes)).into());
 
         query::register_result_callbacks(
@@ -595,7 +711,23 @@ impl UI {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use wf_config::models::{ConnectionConfig, DbTypeName};
+    use wf_config::models::{ConnectionConfig, DbTypeName, GroupConfig};
+
+    fn make_group(id: &str, name: &str) -> GroupConfig {
+        GroupConfig {
+            id: id.to_string(),
+            name: name.to_string(),
+            color: "#6c7086".to_string(),
+            expanded: true,
+        }
+    }
+
+    fn make_conn_with_group(id: &str, name: &str, group_id: Option<&str>) -> ConnectionConfig {
+        ConnectionConfig {
+            group_id: group_id.map(|s| s.to_string()),
+            ..make_conn(id, name)
+        }
+    }
 
     fn make_conn(id: &str, name: &str) -> ConnectionConfig {
         ConnectionConfig {
@@ -623,6 +755,8 @@ mod tests {
             ssl_ca_cert: None,
             ssl_client_cert: None,
             ssl_client_key: None,
+            group_id: None,
+            color: None,
         }
     }
 
@@ -647,6 +781,7 @@ mod tests {
     fn build_sidebar_tree_should_render_connection_nodes() {
         let conns = vec![make_conn("a", "Alpha"), make_conn("b", "Beta")];
         let nodes = build_sidebar_tree(
+            &[],
             &conns,
             "",
             &HashMap::new(),
@@ -667,7 +802,7 @@ mod tests {
         expanded.insert("conn:a".to_string());
         let mut metadata = HashMap::new();
         metadata.insert("a".to_string(), make_meta(&["users"]));
-        let nodes = build_sidebar_tree(&conns, "a", &metadata, &expanded, &HashMap::new());
+        let nodes = build_sidebar_tree(&[], &conns, "a", &metadata, &expanded, &HashMap::new());
         // conn + Tables + users(visible=false) + Views + Stored Procedures + Indexes = 6 nodes
         // Children are always emitted; visible flag drives animation.
         assert_eq!(nodes.len(), 6);
@@ -687,7 +822,7 @@ mod tests {
         expanded.insert("cat:a:Tables".to_string());
         let mut metadata = HashMap::new();
         metadata.insert("a".to_string(), make_meta(&["users", "orders"]));
-        let nodes = build_sidebar_tree(&conns, "a", &metadata, &expanded, &HashMap::new());
+        let nodes = build_sidebar_tree(&[], &conns, "a", &metadata, &expanded, &HashMap::new());
         // conn + Tables + users + orders + Views + Stored Procedures + Indexes = 7
         assert_eq!(nodes.len(), 7);
         assert_eq!(nodes[2].label.as_str(), "users");
@@ -700,6 +835,7 @@ mod tests {
     fn build_sidebar_tree_should_hide_children_when_collapsed() {
         let conns = vec![make_conn("a", "Alpha")];
         let nodes = build_sidebar_tree(
+            &[],
             &conns,
             "a",
             &HashMap::new(),
@@ -717,7 +853,14 @@ mod tests {
         let mut metadata = HashMap::new();
         metadata.insert("a".to_string(), make_meta(&["users"]));
         // Connection collapsed (not in expanded)
-        let nodes = build_sidebar_tree(&conns, "a", &metadata, &HashSet::new(), &HashMap::new());
+        let nodes = build_sidebar_tree(
+            &[],
+            &conns,
+            "a",
+            &metadata,
+            &HashSet::new(),
+            &HashMap::new(),
+        );
         // Categories are emitted but invisible
         assert!(nodes.len() > 1);
         for node in nodes.iter().skip(1) {
@@ -732,6 +875,7 @@ mod tests {
     fn build_sidebar_tree_should_mark_active_connection() {
         let conns = vec![make_conn("a", "Alpha"), make_conn("b", "Beta")];
         let nodes = build_sidebar_tree(
+            &[],
             &conns,
             "b",
             &HashMap::new(),
@@ -740,5 +884,68 @@ mod tests {
         );
         assert!(!nodes[0].is_active);
         assert!(nodes[1].is_active);
+    }
+
+    #[test]
+    fn build_sidebar_tree_should_render_group_with_member_connection() {
+        let groups = vec![make_group("g1", "Production")];
+        let conns = vec![make_conn_with_group("c1", "Alpha", Some("g1"))];
+        let mut expanded = HashSet::new();
+        expanded.insert("group:g1".to_string());
+        let nodes = build_sidebar_tree(
+            &groups,
+            &conns,
+            "",
+            &HashMap::new(),
+            &expanded,
+            &HashMap::new(),
+        );
+        assert_eq!(nodes.len(), 2);
+        assert_eq!(nodes[0].node_kind.as_str(), "group");
+        assert_eq!(nodes[0].label.as_str(), "Production");
+        assert_eq!(nodes[1].node_kind.as_str(), "connection");
+        assert_eq!(nodes[1].parent_index, 0);
+    }
+
+    #[test]
+    fn build_sidebar_tree_should_place_ungrouped_connections_after_groups() {
+        let groups = vec![make_group("g1", "Prod")];
+        let conns = vec![
+            make_conn_with_group("c1", "Ungrouped", None),
+            make_conn_with_group("c2", "InGroup", Some("g1")),
+        ];
+        let nodes = build_sidebar_tree(
+            &groups,
+            &conns,
+            "",
+            &HashMap::new(),
+            &HashSet::new(),
+            &HashMap::new(),
+        );
+        // group node → grouped conn → ungrouped conn
+        assert_eq!(nodes[0].node_kind.as_str(), "group");
+        assert_eq!(nodes[1].label.as_str(), "InGroup");
+        assert_eq!(nodes[2].label.as_str(), "Ungrouped");
+        assert_eq!(nodes[2].parent_index, -1);
+    }
+
+    // ── parse_hex_color ───────────────────────────────────────────────────────
+
+    #[test]
+    fn parse_hex_color_should_parse_valid_hex() {
+        let c = parse_hex_color("#e74c3c");
+        assert_eq!(c, slint::Color::from_rgb_u8(0xe7, 0x4c, 0x3c));
+    }
+
+    #[test]
+    fn parse_hex_color_should_parse_hex_without_leading_hash() {
+        let c = parse_hex_color("89b4fa");
+        assert_eq!(c, slint::Color::from_rgb_u8(0x89, 0xb4, 0xfa));
+    }
+
+    #[test]
+    fn parse_hex_color_should_fall_back_on_malformed_input() {
+        let c = parse_hex_color("not-a-color");
+        assert_eq!(c, slint::Color::from_rgb_u8(0x6c, 0x70, 0x86));
     }
 }

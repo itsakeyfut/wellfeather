@@ -50,6 +50,35 @@ pub enum Command {
         table_name: String,
         page_size: usize,
     },
+    // ── Group management ─────────────────────────────────────────────────────
+    /// Create a new connection group with the given name.
+    CreateGroup {
+        name: String,
+    },
+    /// Rename an existing group.
+    RenameGroup {
+        id: String,
+        name: String,
+    },
+    /// Delete a group; connections that belonged to it become ungrouped.
+    DeleteGroup {
+        id: String,
+    },
+    /// Move a connection into a group, or ungroup it when `group_id` is `None`.
+    MoveConnectionToGroup {
+        conn_id: String,
+        group_id: Option<String>,
+    },
+    /// Change the display color of a group (CSS hex string, e.g. "#e74c3c").
+    SetGroupColor {
+        group_id: String,
+        color: String,
+    },
+    /// Persist the expanded/collapsed state of a group node.
+    SetGroupExpanded {
+        id: String,
+        expanded: bool,
+    },
 }
 
 impl Command {
@@ -68,6 +97,12 @@ impl Command {
             Self::UpdateConfig(..) => "UpdateConfig",
             Self::FetchDdl { .. } => "FetchDdl",
             Self::FetchTableData { .. } => "FetchTableData",
+            Self::CreateGroup { .. } => "CreateGroup",
+            Self::RenameGroup { .. } => "RenameGroup",
+            Self::DeleteGroup { .. } => "DeleteGroup",
+            Self::MoveConnectionToGroup { .. } => "MoveConnectionToGroup",
+            Self::SetGroupColor { .. } => "SetGroupColor",
+            Self::SetGroupExpanded { .. } => "SetGroupExpanded",
         }
     }
 }

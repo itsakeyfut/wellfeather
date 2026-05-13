@@ -15,6 +15,7 @@
 
 mod config;
 mod connection;
+mod group;
 mod metadata;
 mod query;
 
@@ -24,7 +25,7 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 use tracing::{debug, warn};
 use wf_completion::{cache::MetadataCache, service::CompletionService};
-use wf_config::ConnectionRepository;
+use wf_config::{ConnectionRepository, GroupRepository};
 use wf_db::service::DbService;
 use wf_history::service::HistoryService;
 
@@ -43,6 +44,7 @@ pub struct AppController {
     db: DbService,
     session: SessionManager,
     repo: Arc<ConnectionRepository>,
+    group_repo: Arc<GroupRepository>,
     history: HistoryService,
     metadata_cache: MetadataCache,
     completion: CompletionService,
@@ -67,6 +69,7 @@ impl AppController {
         db: DbService,
         session: SessionManager,
         repo: Arc<ConnectionRepository>,
+        group_repo: Arc<GroupRepository>,
         history: HistoryService,
         metadata_cache: MetadataCache,
         config_dir: PathBuf,
@@ -81,6 +84,7 @@ impl AppController {
                 db,
                 session,
                 repo,
+                group_repo,
                 history,
                 metadata_cache,
                 completion,
@@ -130,6 +134,19 @@ impl AppController {
                 } => {
                     this.handle_fetch_table_data(tab_id, conn_id, table_name, page_size)
                         .await
+                }
+                Command::CreateGroup { name } => this.handle_create_group(name).await,
+                Command::RenameGroup { id, name } => this.handle_rename_group(id, name).await,
+                Command::DeleteGroup { id } => this.handle_delete_group(id).await,
+                Command::MoveConnectionToGroup { conn_id, group_id } => {
+                    this.handle_move_connection_to_group(conn_id, group_id)
+                        .await
+                }
+                Command::SetGroupColor { group_id, color } => {
+                    this.handle_set_group_color(group_id, color).await
+                }
+                Command::SetGroupExpanded { id, expanded } => {
+                    this.handle_set_group_expanded(id, expanded).await
                 }
             }
         }
@@ -191,6 +208,10 @@ mod tests {
 
     async fn test_repo() -> Arc<ConnectionRepository> {
         Arc::new(ConnectionRepository::open_memory().await.unwrap())
+    }
+
+    async fn test_group_repo() -> Arc<wf_config::GroupRepository> {
+        Arc::new(wf_config::GroupRepository::open_memory().await.unwrap())
     }
 
     async fn test_history() -> HistoryService {
@@ -302,6 +323,7 @@ mod tests {
             db,
             test_session(),
             test_repo().await,
+            test_group_repo().await,
             test_history().await,
             test_metadata_cache().await,
             tempdir().unwrap().keep(),
@@ -330,6 +352,7 @@ mod tests {
             db,
             test_session(),
             test_repo().await,
+            test_group_repo().await,
             test_history().await,
             test_metadata_cache().await,
             tempdir().unwrap().keep(),
@@ -374,6 +397,7 @@ mod tests {
             db,
             test_session(),
             test_repo().await,
+            test_group_repo().await,
             test_history().await,
             test_metadata_cache().await,
             tempdir().unwrap().keep(),
@@ -402,6 +426,7 @@ mod tests {
             db,
             test_session(),
             test_repo().await,
+            test_group_repo().await,
             test_history().await,
             test_metadata_cache().await,
             tempdir().unwrap().keep(),
@@ -439,6 +464,7 @@ mod tests {
             db,
             test_session(),
             test_repo().await,
+            test_group_repo().await,
             test_history().await,
             test_metadata_cache().await,
             tempdir().unwrap().keep(),
@@ -480,6 +506,7 @@ mod tests {
             db,
             test_session(),
             test_repo().await,
+            test_group_repo().await,
             test_history().await,
             test_metadata_cache().await,
             tempdir().unwrap().keep(),
@@ -525,6 +552,7 @@ mod tests {
             db,
             test_session(),
             test_repo().await,
+            test_group_repo().await,
             test_history().await,
             test_metadata_cache().await,
             tempdir().unwrap().keep(),
@@ -552,6 +580,7 @@ mod tests {
             db,
             test_session(),
             test_repo().await,
+            test_group_repo().await,
             test_history().await,
             test_metadata_cache().await,
             tempdir().unwrap().keep(),
@@ -576,6 +605,7 @@ mod tests {
             db,
             test_session(),
             test_repo().await,
+            test_group_repo().await,
             test_history().await,
             test_metadata_cache().await,
             tempdir().unwrap().keep(),
@@ -611,6 +641,7 @@ mod tests {
             db,
             test_session(),
             test_repo().await,
+            test_group_repo().await,
             test_history().await,
             test_metadata_cache().await,
             tempdir().unwrap().keep(),

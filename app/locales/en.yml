@@ -8,6 +8,8 @@ status:
   connect_failed: "Connection failed: %{msg}"
   metadata_unavailable: "Metadata unavailable: %{msg}"
   read_only: "Read-only"
+group:
+  default_name: "New Group"
 error:
   no_active_connection: "No active connection"
   db_connect_failed: "Failed to connect: %{reason}"
@@ -22,3 +24,6 @@ error:
   ssh_conn_string_unsupported: "SSH tunnel is not supported with connection string mode. Switch to Individual Fields."
   ssl_error: "SSL/TLS error: %{reason}"
   ssl_cert_copy_failed: "Failed to copy certificate file: %{reason}"
+  group_create_failed: "Failed to create group: %{reason}"
+  group_rename_failed: "Failed to rename group: %{reason}"
+  group_delete_failed: "Failed to delete group: %{reason}"
