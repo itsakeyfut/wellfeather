@@ -1,5 +1,8 @@
-use anyhow::Result;
-use sqlx::SqlitePool;
+use sqlx::{Row as _, SqlitePool};
+
+use crate::error::HistoryError;
+
+type Result<T> = std::result::Result<T, HistoryError>;
 
 /// Persists find/replace bar search terms to a SQLite table.
 ///
@@ -48,7 +51,6 @@ impl FindHistoryService {
                 .fetch_all(&self.pool)
                 .await?;
 
-        use sqlx::Row as _;
         Ok(rows.iter().map(|r| r.get("query")).collect())
     }
 

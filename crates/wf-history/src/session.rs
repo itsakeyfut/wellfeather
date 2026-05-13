@@ -1,5 +1,8 @@
-use anyhow::Context as _;
 use sqlx::{Row as _, SqlitePool};
+
+use crate::error::HistoryError;
+
+type Result<T> = std::result::Result<T, HistoryError>;
 
 /// A single SQL Editor tab persisted across app restarts.
 #[derive(Debug, Clone)]
@@ -36,26 +39,16 @@ pub struct SessionService {
 
 impl SessionService {
     /// Accept an already-open [`SqlitePool`] and ensure the schema exists.
-    pub async fn new(pool: SqlitePool) -> anyhow::Result<Self> {
-        sqlx::query(CREATE_TABS)
-            .execute(&pool)
-            .await
-            .context("failed to create session_tabs table")?;
-        sqlx::query(CREATE_STATE)
-            .execute(&pool)
-            .await
-            .context("failed to create session_state table")?;
+    pub async fn new(pool: SqlitePool) -> Result<Self> {
+        sqlx::query(CREATE_TABS).execute(&pool).await?;
+        sqlx::query(CREATE_STATE).execute(&pool).await?;
         Ok(Self { pool })
     }
 
     /// Persist the editor tabs. Replaces all previously saved tabs.
     ///
     /// `active_index` is the index within `tabs` (SQL Editor tabs only) that was active.
-    pub async fn save_tabs(
-        &self,
-        active_index: usize,
-        tabs: &[TabSessionEntry],
-    ) -> anyhow::Result<()> {
+    pub async fn save_tabs(&self, active_index: usize, tabs: &[TabSessionEntry]) -> Result<()> {
         let mut tx = self.pool.begin().await?;
         sqlx::query("DELETE FROM session_tabs")
             .execute(&mut *tx)
@@ -81,7 +74,7 @@ impl SessionService {
     /// Restore tabs from the previous session.
     ///
     /// Returns `None` when no tabs have been saved yet.
-    pub async fn restore_tabs(&self) -> anyhow::Result<Option<(usize, Vec<TabSessionEntry>)>> {
+    pub async fn restore_tabs(&self) -> Result<Option<(usize, Vec<TabSessionEntry>)>> {
         let rows = sqlx::query(
             "SELECT sort_order, id, title, query_text, is_active
              FROM session_tabs ORDER BY sort_order ASC",
@@ -108,13 +101,13 @@ impl SessionService {
                     query_text: row.try_get("query_text")?,
                 })
             })
-            .collect::<anyhow::Result<Vec<_>>>()?;
+            .collect::<Result<Vec<_>>>()?;
 
         Ok(Some((active_index, entries)))
     }
 
     /// Persist the last active editor query text.
-    pub async fn save_last_query(&self, query: &str) -> anyhow::Result<()> {
+    pub async fn save_last_query(&self, query: &str) -> Result<()> {
         sqlx::query(
             "INSERT INTO session_state (key, value) VALUES ('last_query', ?)
              ON CONFLICT(key) DO UPDATE SET value = excluded.value",
@@ -128,7 +121,7 @@ impl SessionService {
     /// Restore the last active editor query text.
     ///
     /// Returns `None` when no query has been saved or it is empty.
-    pub async fn restore_last_query(&self) -> anyhow::Result<Option<String>> {
+    pub async fn restore_last_query(&self) -> Result<Option<String>> {
         let value: Option<String> =
             sqlx::query_scalar("SELECT value FROM session_state WHERE key = 'last_query'")
                 .fetch_optional(&self.pool)
