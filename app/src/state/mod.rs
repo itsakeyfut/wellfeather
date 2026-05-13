@@ -69,6 +69,7 @@ mod tests {
             password_encrypted: None,
             database: Some("test.db".to_string()),
             ssh: None,
+            ssl: None,
         }
     }
 

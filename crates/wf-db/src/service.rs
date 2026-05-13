@@ -179,6 +179,7 @@ mod tests {
             password_encrypted: None,
             database: None,
             ssh: None,
+            ssl: None,
         }
     }
 

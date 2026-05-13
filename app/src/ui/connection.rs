@@ -6,7 +6,7 @@ use rust_i18n::t;
 use slint::{ComponentHandle, Model as _};
 use tokio::sync::{mpsc, oneshot};
 use wf_config::{crypto, models::DbTypeName};
-use wf_db::models::{DbConnection, DbType, SshAuth, SshTunnelConfig};
+use wf_db::models::{DbConnection, DbType, SshAuth, SshTunnelConfig, SslConfig, SslMode};
 
 use crate::app::{
     command::{Command, ConfigUpdate},
@@ -157,9 +157,34 @@ fn build_conn_from_form(
             opt(ui.get_form_database())
         },
         ssh,
+        ssl: if ui.get_form_ssl_mode() != 0 && ui.get_form_db_type() != 2 {
+            Some(SslConfig {
+                mode: match ui.get_form_ssl_mode() {
+                    2 => SslMode::VerifyCa,
+                    3 => SslMode::VerifyFull,
+                    _ => SslMode::Require,
+                },
+                ca_cert: opt_path(ui.get_form_ssl_ca_cert().as_str()),
+                client_cert: opt_path(ui.get_form_ssl_client_cert().as_str()),
+                client_key: opt_path(ui.get_form_ssl_client_key().as_str()),
+            })
+        } else {
+            None
+        },
     };
 
     (conn, password)
+}
+
+// ── Misc helpers ─────────────────────────────────────────────────────────────
+
+/// Convert a non-empty string to a `PathBuf`, or `None` if the string is empty.
+fn opt_path(s: &str) -> Option<std::path::PathBuf> {
+    if s.is_empty() {
+        None
+    } else {
+        Some(std::path::PathBuf::from(s))
+    }
 }
 
 // ── Connection string helpers ─────────────────────────────────────────────────
@@ -356,6 +381,11 @@ pub(super) fn register_sidebar_callbacks(
                 ui.set_form_ssh_password("".into());
                 ui.set_form_ssh_key_path("".into());
                 ui.set_form_ssh_passphrase("".into());
+                // Reset SSL/TLS fields
+                ui.set_form_ssl_mode(0);
+                ui.set_form_ssl_ca_cert("".into());
+                ui.set_form_ssl_client_cert("".into());
+                ui.set_form_ssl_client_key("".into());
                 ui.set_show_connection_form(true);
             });
         });
@@ -500,6 +530,40 @@ pub(super) fn register_sidebar_callbacks(
                 ui.set_form_ssh_password(ssh_password.into());
                 ui.set_form_ssh_key_path(ssh_key_path.into());
                 ui.set_form_ssh_passphrase(ssh_passphrase.into());
+                // SSL/TLS fields (0=Disabled, 1=Require, 2=VerifyCa, 3=VerifyFull)
+                if let Some(ref ssl) = conn.ssl {
+                    ui.set_form_ssl_mode(match ssl.mode {
+                        SslMode::Require => 1,
+                        SslMode::VerifyCa => 2,
+                        SslMode::VerifyFull => 3,
+                    });
+                    ui.set_form_ssl_ca_cert(
+                        ssl.ca_cert
+                            .as_ref()
+                            .map(|p| p.to_string_lossy().into_owned())
+                            .unwrap_or_default()
+                            .into(),
+                    );
+                    ui.set_form_ssl_client_cert(
+                        ssl.client_cert
+                            .as_ref()
+                            .map(|p| p.to_string_lossy().into_owned())
+                            .unwrap_or_default()
+                            .into(),
+                    );
+                    ui.set_form_ssl_client_key(
+                        ssl.client_key
+                            .as_ref()
+                            .map(|p| p.to_string_lossy().into_owned())
+                            .unwrap_or_default()
+                            .into(),
+                    );
+                } else {
+                    ui.set_form_ssl_mode(0);
+                    ui.set_form_ssl_ca_cert("".into());
+                    ui.set_form_ssl_client_cert("".into());
+                    ui.set_form_ssl_client_key("".into());
+                }
                 ui.set_show_test_result_popup(false);
                 ui.set_show_add_confirm_popup(false);
                 ui.set_show_connection_form(true);
@@ -897,6 +961,78 @@ pub(super) fn register_connection_form_callbacks(
                         if let Some(w) = window_weak.upgrade() {
                             w.global::<crate::UiState>()
                                 .set_form_ssh_key_path(path.into());
+                        }
+                    })
+                    .ok();
+                }
+            });
+        });
+    }
+
+    // browse-ssl-ca-cert: open a file picker and set form-ssl-ca-cert.
+    {
+        let window_weak = window.as_weak();
+        ui_state.on_browse_ssl_ca_cert(move || {
+            let window_weak = window_weak.clone(); // clone required: async move
+            tokio::spawn(async move {
+                if let Some(file) = rfd::AsyncFileDialog::new()
+                    .add_filter("PEM certificate", &["pem", "crt", "cer", ""])
+                    .pick_file()
+                    .await
+                {
+                    let path = file.path().to_string_lossy().into_owned();
+                    slint::invoke_from_event_loop(move || {
+                        if let Some(w) = window_weak.upgrade() {
+                            w.global::<crate::UiState>()
+                                .set_form_ssl_ca_cert(path.into());
+                        }
+                    })
+                    .ok();
+                }
+            });
+        });
+    }
+
+    // browse-ssl-client-cert: open a file picker and set form-ssl-client-cert.
+    {
+        let window_weak = window.as_weak();
+        ui_state.on_browse_ssl_client_cert(move || {
+            let window_weak = window_weak.clone(); // clone required: async move
+            tokio::spawn(async move {
+                if let Some(file) = rfd::AsyncFileDialog::new()
+                    .add_filter("PEM certificate", &["pem", "crt", "cer", ""])
+                    .pick_file()
+                    .await
+                {
+                    let path = file.path().to_string_lossy().into_owned();
+                    slint::invoke_from_event_loop(move || {
+                        if let Some(w) = window_weak.upgrade() {
+                            w.global::<crate::UiState>()
+                                .set_form_ssl_client_cert(path.into());
+                        }
+                    })
+                    .ok();
+                }
+            });
+        });
+    }
+
+    // browse-ssl-client-key: open a file picker and set form-ssl-client-key.
+    {
+        let window_weak = window.as_weak();
+        ui_state.on_browse_ssl_client_key(move || {
+            let window_weak = window_weak.clone(); // clone required: async move
+            tokio::spawn(async move {
+                if let Some(file) = rfd::AsyncFileDialog::new()
+                    .add_filter("PEM private key", &["pem", "key", ""])
+                    .pick_file()
+                    .await
+                {
+                    let path = file.path().to_string_lossy().into_owned();
+                    slint::invoke_from_event_loop(move || {
+                        if let Some(w) = window_weak.upgrade() {
+                            w.global::<crate::UiState>()
+                                .set_form_ssl_client_key(path.into());
                         }
                     })
                     .ok();

@@ -20,3 +20,5 @@ error:
   ssh_host_key_rejected: "SSH host key was not accepted"
   ssh_fingerprint_mismatch: "SSH host key mismatch — expected: %{expected}, got: %{actual}"
   ssh_conn_string_unsupported: "SSH tunnel is not supported with connection string mode. Switch to Individual Fields."
+  ssl_error: "SSL/TLS error: %{reason}"
+  ssl_cert_copy_failed: "Failed to copy certificate file: %{reason}"

@@ -1,8 +1,11 @@
+use std::path::Path;
+
+use rust_i18n::t;
 use tokio::sync::oneshot;
 use tracing::{info, warn};
 use wf_config::crypto;
 use wf_db::{
-    models::DbConnection,
+    models::{DbConnection, SslConfig},
     tunnel::{
         KnownHostStatus, check_known_host, connect_tunnel, probe_fingerprint, save_known_host,
     },
@@ -121,6 +124,16 @@ impl AppController {
             conn.port = Some(local_port);
         }
 
+        // ── SSL cert file copy ────────────────────────────────────────────────
+        if let Some(ref mut ssl) = conn.ssl
+            && let Err(e) = copy_cert_files(&self.config_dir, &id, ssl)
+        {
+            warn!(conn_id = %id, error = %e, "failed to copy SSL cert files");
+            let msg = t!("error.ssl_cert_copy_failed", reason = e.to_string()).to_string();
+            let _ = self.tx_event.send(Event::ConnectError(msg)).await;
+            return;
+        }
+
         match self
             .db
             .connect(&conn, password.as_ref().map(|z| z.as_str()))
@@ -230,3 +243,45 @@ impl AppController {
         let _ = self.tx_event.send(Event::ConnectionRemoved(id)).await;
     }
 }
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+/// Copy SSL certificate files into `{config_dir}/certs/{conn_id}/` and update
+/// the paths in `ssl` to point to the copies.
+///
+/// Skips any file that is already inside the destination directory (idempotent
+/// on reconnect).  Sets Unix permissions 0o600 on each copied file.
+fn copy_cert_files(config_dir: &Path, conn_id: &str, ssl: &mut SslConfig) -> anyhow::Result<()> {
+    let dest_dir = config_dir.join("certs").join(conn_id);
+    std::fs::create_dir_all(&dest_dir)?;
+
+    for (field, filename) in [
+        (&mut ssl.ca_cert, "ca.pem"),
+        (&mut ssl.client_cert, "client.pem"),
+        (&mut ssl.client_key, "client.key"),
+    ] {
+        if let Some(src) = field.as_ref() {
+            let dest = dest_dir.join(filename);
+            if src == &dest {
+                continue; // already in the right place
+            }
+            std::fs::copy(src, &dest)?;
+            set_file_permissions_600(&dest);
+            *field = Some(dest);
+        }
+    }
+
+    Ok(())
+}
+
+#[cfg(unix)]
+fn set_file_permissions_600(path: &Path) {
+    use std::os::unix::fs::PermissionsExt as _;
+    if let Ok(mut perms) = std::fs::metadata(path).map(|m| m.permissions()) {
+        perms.set_mode(0o600);
+        let _ = std::fs::set_permissions(path, perms);
+    }
+}
+
+#[cfg(not(unix))]
+fn set_file_permissions_600(_path: &Path) {}

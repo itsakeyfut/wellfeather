@@ -26,9 +26,23 @@ const CREATE_TABLE: &str = "
         ssh_auth_method          TEXT    NOT NULL DEFAULT 'password',
         ssh_password_encrypted   TEXT,
         ssh_key_path             TEXT,
-        ssh_passphrase_encrypted TEXT
+        ssh_passphrase_encrypted TEXT,
+        ssl_enabled              INTEGER NOT NULL DEFAULT 0,
+        ssl_mode                 TEXT    NOT NULL DEFAULT 'require',
+        ssl_ca_cert              TEXT,
+        ssl_client_cert          TEXT,
+        ssl_client_key           TEXT
     )
 ";
+
+/// Migrations for existing databases created before SSL columns were added.
+const MIGRATE_SSL_COLUMNS: &[&str] = &[
+    "ALTER TABLE connections ADD COLUMN ssl_enabled     INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE connections ADD COLUMN ssl_mode        TEXT    NOT NULL DEFAULT 'require'",
+    "ALTER TABLE connections ADD COLUMN ssl_ca_cert     TEXT",
+    "ALTER TABLE connections ADD COLUMN ssl_client_cert TEXT",
+    "ALTER TABLE connections ADD COLUMN ssl_client_key  TEXT",
+];
 
 /// Migrations for existing databases that were created before SSH columns were added.
 const MIGRATE_SSH_COLUMNS: &[&str] = &[
@@ -57,9 +71,12 @@ impl ConnectionRepository {
             .execute(&pool)
             .await
             .context("failed to migrate connections table")?;
-        // Best-effort: add SSH columns to existing databases. Errors are ignored
-        // because the column may already exist (SQLite has no IF NOT EXISTS for ALTER).
+        // Best-effort: add SSH and SSL columns to existing databases. Errors are
+        // ignored because the column may already exist (SQLite has no IF NOT EXISTS for ALTER).
         for stmt in MIGRATE_SSH_COLUMNS {
+            let _ = sqlx::query(stmt).execute(&pool).await;
+        }
+        for stmt in MIGRATE_SSL_COLUMNS {
             let _ = sqlx::query(stmt).execute(&pool).await;
         }
         Ok(Self { pool })
@@ -77,7 +94,8 @@ impl ConnectionRepository {
             "SELECT id, name, db_type, connection_string, host, port, user_name,
                     password_encrypted, database_name, safe_dml, read_only,
                     ssh_enabled, ssh_host, ssh_port, ssh_user, ssh_auth_method,
-                    ssh_password_encrypted, ssh_key_path, ssh_passphrase_encrypted
+                    ssh_password_encrypted, ssh_key_path, ssh_passphrase_encrypted,
+                    ssl_enabled, ssl_mode, ssl_ca_cert, ssl_client_cert, ssl_client_key
              FROM connections ORDER BY sort_order ASC, created_at ASC",
         )
         .fetch_all(&self.pool)
@@ -91,7 +109,8 @@ impl ConnectionRepository {
             "SELECT id, name, db_type, connection_string, host, port, user_name,
                     password_encrypted, database_name, safe_dml, read_only,
                     ssh_enabled, ssh_host, ssh_port, ssh_user, ssh_auth_method,
-                    ssh_password_encrypted, ssh_key_path, ssh_passphrase_encrypted
+                    ssh_password_encrypted, ssh_key_path, ssh_passphrase_encrypted,
+                    ssl_enabled, ssl_mode, ssl_ca_cert, ssl_client_cert, ssl_client_key
              FROM connections WHERE id = ?",
         )
         .bind(id)
@@ -115,13 +134,19 @@ impl ConnectionRepository {
             crate::models::SshAuthMethod::Password => "password",
             crate::models::SshAuthMethod::PrivateKey => "private_key",
         };
+        let ssl_mode_str = match cc.ssl_mode {
+            crate::models::SslMode::Require => "require",
+            crate::models::SslMode::VerifyCa => "verify_ca",
+            crate::models::SslMode::VerifyFull => "verify_full",
+        };
         sqlx::query(
             "INSERT INTO connections
              (id, name, db_type, connection_string, host, port, user_name,
               password_encrypted, database_name, safe_dml, read_only, sort_order,
               ssh_enabled, ssh_host, ssh_port, ssh_user, ssh_auth_method,
-              ssh_password_encrypted, ssh_key_path, ssh_passphrase_encrypted)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              ssh_password_encrypted, ssh_key_path, ssh_passphrase_encrypted,
+              ssl_enabled, ssl_mode, ssl_ca_cert, ssl_client_cert, ssl_client_key)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
              ON CONFLICT(id) DO UPDATE SET
                name                     = excluded.name,
                db_type                  = excluded.db_type,
@@ -138,7 +163,12 @@ impl ConnectionRepository {
                ssh_auth_method          = excluded.ssh_auth_method,
                ssh_password_encrypted   = excluded.ssh_password_encrypted,
                ssh_key_path             = excluded.ssh_key_path,
-               ssh_passphrase_encrypted = excluded.ssh_passphrase_encrypted",
+               ssh_passphrase_encrypted = excluded.ssh_passphrase_encrypted,
+               ssl_enabled              = excluded.ssl_enabled,
+               ssl_mode                 = excluded.ssl_mode,
+               ssl_ca_cert              = excluded.ssl_ca_cert,
+               ssl_client_cert          = excluded.ssl_client_cert,
+               ssl_client_key           = excluded.ssl_client_key",
         )
         .bind(&cc.id)
         .bind(&cc.name)
@@ -160,6 +190,11 @@ impl ConnectionRepository {
         .bind(&cc.ssh_password_encrypted)
         .bind(&cc.ssh_key_path)
         .bind(&cc.ssh_passphrase_encrypted)
+        .bind(cc.ssl_enabled as i32)
+        .bind(ssl_mode_str)
+        .bind(&cc.ssl_ca_cert)
+        .bind(&cc.ssl_client_cert)
+        .bind(&cc.ssl_client_key)
         .execute(&self.pool)
         .await?;
         Ok(())
@@ -180,7 +215,8 @@ impl ConnectionRepository {
             "SELECT id, name, db_type, connection_string, host, port, user_name,
                     password_encrypted, database_name, safe_dml, read_only,
                     ssh_enabled, ssh_host, ssh_port, ssh_user, ssh_auth_method,
-                    ssh_password_encrypted, ssh_key_path, ssh_passphrase_encrypted
+                    ssh_password_encrypted, ssh_key_path, ssh_passphrase_encrypted,
+                    ssl_enabled, ssl_mode, ssl_ca_cert, ssl_client_cert, ssl_client_key
              FROM connections WHERE last_used_at IS NOT NULL
              ORDER BY last_used_at DESC LIMIT 1",
         )
@@ -236,7 +272,7 @@ impl ConnectionRepository {
 // ── Row → model conversion ────────────────────────────────────────────────────
 
 fn row_to_config(row: &sqlx::sqlite::SqliteRow) -> anyhow::Result<ConnectionConfig> {
-    use crate::models::SshAuthMethod;
+    use crate::models::{SshAuthMethod, SslMode};
 
     let db_type_str: String = row.try_get("db_type")?;
     let db_type = match db_type_str.as_str() {
@@ -250,6 +286,12 @@ fn row_to_config(row: &sqlx::sqlite::SqliteRow) -> anyhow::Result<ConnectionConf
     let ssh_auth_method = match ssh_auth_str.as_deref() {
         Some("private_key") => SshAuthMethod::PrivateKey,
         _ => SshAuthMethod::Password,
+    };
+    let ssl_mode_str: Option<String> = row.try_get("ssl_mode").ok();
+    let ssl_mode = match ssl_mode_str.as_deref() {
+        Some("verify_ca") => SslMode::VerifyCa,
+        Some("verify_full") => SslMode::VerifyFull,
+        _ => SslMode::Require,
     };
     Ok(ConnectionConfig {
         id: row.try_get("id")?,
@@ -271,6 +313,11 @@ fn row_to_config(row: &sqlx::sqlite::SqliteRow) -> anyhow::Result<ConnectionConf
         ssh_password_encrypted: row.try_get("ssh_password_encrypted").ok().flatten(),
         ssh_key_path: row.try_get("ssh_key_path").ok().flatten(),
         ssh_passphrase_encrypted: row.try_get("ssh_passphrase_encrypted").ok().flatten(),
+        ssl_enabled: row.try_get::<i64, _>("ssl_enabled").unwrap_or(0) != 0,
+        ssl_mode,
+        ssl_ca_cert: row.try_get("ssl_ca_cert").ok().flatten(),
+        ssl_client_cert: row.try_get("ssl_client_cert").ok().flatten(),
+        ssl_client_key: row.try_get("ssl_client_key").ok().flatten(),
     })
 }
 
@@ -310,6 +357,11 @@ mod tests {
             ssh_password_encrypted: None,
             ssh_key_path: None,
             ssh_passphrase_encrypted: None,
+            ssl_enabled: false,
+            ssl_mode: crate::models::SslMode::Require,
+            ssl_ca_cert: None,
+            ssl_client_cert: None,
+            ssl_client_key: None,
         }
     }
 

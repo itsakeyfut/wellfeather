@@ -618,6 +618,11 @@ mod tests {
             ssh_password_encrypted: None,
             ssh_key_path: None,
             ssh_passphrase_encrypted: None,
+            ssl_enabled: false,
+            ssl_mode: wf_config::models::SslMode::Require,
+            ssl_ca_cert: None,
+            ssl_client_cert: None,
+            ssl_client_key: None,
         }
     }
 

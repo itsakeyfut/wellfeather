@@ -18,7 +18,7 @@ use wf_config::{
     manager::ConfigManager,
     models::{ConnectionConfig, DbTypeName, PageSize, SshAuthMethod, Theme},
 };
-use wf_db::models::{DbConnection, DbType, SshAuth, SshTunnelConfig};
+use wf_db::models::{DbConnection, DbType, SshAuth, SshTunnelConfig, SslConfig, SslMode};
 
 pub use wf_history::session::TabSessionEntry;
 
@@ -170,6 +170,21 @@ pub(crate) fn config_to_db_conn(cc: &ConnectionConfig) -> DbConnection {
         None
     };
 
+    let ssl = if cc.ssl_enabled {
+        Some(SslConfig {
+            mode: match cc.ssl_mode {
+                wf_config::models::SslMode::Require => SslMode::Require,
+                wf_config::models::SslMode::VerifyCa => SslMode::VerifyCa,
+                wf_config::models::SslMode::VerifyFull => SslMode::VerifyFull,
+            },
+            ca_cert: cc.ssl_ca_cert.as_deref().map(std::path::PathBuf::from),
+            client_cert: cc.ssl_client_cert.as_deref().map(std::path::PathBuf::from),
+            client_key: cc.ssl_client_key.as_deref().map(std::path::PathBuf::from),
+        })
+    } else {
+        None
+    };
+
     DbConnection {
         id: cc.id.clone(),
         name: cc.name.clone(),
@@ -185,6 +200,7 @@ pub(crate) fn config_to_db_conn(cc: &ConnectionConfig) -> DbConnection {
         password_encrypted: cc.password_encrypted.clone(),
         database: cc.database.clone(),
         ssh,
+        ssl,
     }
 }
 
@@ -217,6 +233,29 @@ pub(crate) fn db_to_config_conn(conn: &DbConnection) -> ConnectionConfig {
         (None, None, None, SshAuthMethod::Password, None, None, None)
     };
 
+    let ssl_enabled = conn.ssl.is_some();
+    let (ssl_mode, ssl_ca_cert, ssl_client_cert, ssl_client_key) = if let Some(ref ssl) = conn.ssl {
+        let mode = match ssl.mode {
+            SslMode::Require => wf_config::models::SslMode::Require,
+            SslMode::VerifyCa => wf_config::models::SslMode::VerifyCa,
+            SslMode::VerifyFull => wf_config::models::SslMode::VerifyFull,
+        };
+        (
+            mode,
+            ssl.ca_cert
+                .as_ref()
+                .map(|p| p.to_string_lossy().into_owned()),
+            ssl.client_cert
+                .as_ref()
+                .map(|p| p.to_string_lossy().into_owned()),
+            ssl.client_key
+                .as_ref()
+                .map(|p| p.to_string_lossy().into_owned()),
+        )
+    } else {
+        (wf_config::models::SslMode::Require, None, None, None)
+    };
+
     ConnectionConfig {
         id: conn.id.clone(),
         name: conn.name.clone(),
@@ -241,6 +280,11 @@ pub(crate) fn db_to_config_conn(conn: &DbConnection) -> ConnectionConfig {
         ssh_key_path,
         ssh_password_encrypted,
         ssh_passphrase_encrypted,
+        ssl_enabled,
+        ssl_mode,
+        ssl_ca_cert,
+        ssl_client_cert,
+        ssl_client_key,
     }
 }
 
@@ -250,7 +294,7 @@ pub(crate) fn db_to_config_conn(conn: &DbConnection) -> ConnectionConfig {
 mod tests {
     use tempfile::tempdir;
     use wf_config::{manager::ConfigManager, models::SshAuthMethod};
-    use wf_db::models::{DbType, SshAuth, SshTunnelConfig};
+    use wf_db::models::{DbType, SshAuth, SshTunnelConfig, SslConfig, SslMode};
 
     use super::{SessionManager, config_to_db_conn, db_to_config_conn};
     use wf_config::models::{ConnectionConfig, DbTypeName};
@@ -306,6 +350,11 @@ mod tests {
             ssh_password_encrypted: None,
             ssh_key_path: Some("/home/user/.ssh/id_rsa".into()),
             ssh_passphrase_encrypted: Some("enc:xyz".into()),
+            ssl_enabled: false,
+            ssl_mode: wf_config::models::SslMode::Require,
+            ssl_ca_cert: None,
+            ssl_client_cert: None,
+            ssl_client_key: None,
         };
 
         let conn = config_to_db_conn(&cc);
@@ -344,6 +393,11 @@ mod tests {
             ssh_password_encrypted: None,
             ssh_key_path: None,
             ssh_passphrase_encrypted: None,
+            ssl_enabled: false,
+            ssl_mode: wf_config::models::SslMode::Require,
+            ssl_ca_cert: None,
+            ssl_client_cert: None,
+            ssl_client_key: None,
         };
 
         let conn = config_to_db_conn(&cc);
@@ -377,6 +431,7 @@ mod tests {
                 ssh_password_encrypted: Some("enc:abc".into()),
                 ssh_passphrase_encrypted: None,
             }),
+            ssl: None,
         };
 
         let cc = db_to_config_conn(&conn);
@@ -387,5 +442,85 @@ mod tests {
         assert_eq!(cc.ssh_auth_method, SshAuthMethod::Password);
         assert_eq!(cc.ssh_password_encrypted.as_deref(), Some("enc:abc"));
         assert_eq!(cc.ssh_passphrase_encrypted, None);
+    }
+
+    #[test]
+    fn config_to_db_conn_should_map_ssl_fields_when_enabled() {
+        use wf_config::models::SslMode as ConfigSslMode;
+
+        let cc = ConnectionConfig {
+            id: "ssl-c1".into(),
+            name: "ssl-c1".into(),
+            db_type: DbTypeName::PostgreSQL,
+            connection_string: None,
+            host: Some("db.internal".into()),
+            port: Some(5432),
+            user: Some("admin".into()),
+            password_encrypted: None,
+            database: Some("mydb".into()),
+            safe_dml: true,
+            read_only: false,
+            ssh_enabled: false,
+            ssh_host: None,
+            ssh_port: None,
+            ssh_user: None,
+            ssh_auth_method: SshAuthMethod::Password,
+            ssh_password_encrypted: None,
+            ssh_key_path: None,
+            ssh_passphrase_encrypted: None,
+            ssl_enabled: true,
+            ssl_mode: ConfigSslMode::VerifyFull,
+            ssl_ca_cert: Some("/certs/ca.pem".into()),
+            ssl_client_cert: Some("/certs/client.pem".into()),
+            ssl_client_key: Some("/certs/client.key".into()),
+        };
+
+        let conn = config_to_db_conn(&cc);
+        let ssl = conn.ssl.expect("ssl should be Some when ssl_enabled");
+
+        assert_eq!(ssl.mode, SslMode::VerifyFull);
+        assert_eq!(
+            ssl.ca_cert.as_deref(),
+            Some(std::path::Path::new("/certs/ca.pem"))
+        );
+        assert_eq!(
+            ssl.client_cert.as_deref(),
+            Some(std::path::Path::new("/certs/client.pem"))
+        );
+        assert_eq!(
+            ssl.client_key.as_deref(),
+            Some(std::path::Path::new("/certs/client.key"))
+        );
+    }
+
+    #[test]
+    fn db_to_config_conn_should_round_trip_ssl() {
+        use wf_db::models::DbConnection;
+
+        let conn = DbConnection {
+            id: "ssl-c2".into(),
+            name: "SSL connection".into(),
+            db_type: DbType::PostgreSQL,
+            connection_string: None,
+            host: Some("db.internal".into()),
+            port: Some(5432),
+            user: None,
+            password_encrypted: None,
+            database: None,
+            ssh: None,
+            ssl: Some(SslConfig {
+                mode: SslMode::VerifyCa,
+                ca_cert: Some(std::path::PathBuf::from("/certs/ca.pem")),
+                client_cert: None,
+                client_key: None,
+            }),
+        };
+
+        let cc = db_to_config_conn(&conn);
+        assert!(cc.ssl_enabled);
+        assert_eq!(cc.ssl_mode, wf_config::models::SslMode::VerifyCa);
+        assert_eq!(cc.ssl_ca_cert.as_deref(), Some("/certs/ca.pem"));
+        assert_eq!(cc.ssl_client_cert, None);
+        assert_eq!(cc.ssl_client_key, None);
     }
 }

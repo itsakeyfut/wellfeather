@@ -30,6 +30,9 @@ pub enum DbError {
 
     #[error("failed to write known-hosts file: {0}")]
     KnownHostsWrite(String),
+
+    #[error("SSL/TLS error: {0}")]
+    SslError(String),
 }
 
 // ---------------------------------------------------------------------------

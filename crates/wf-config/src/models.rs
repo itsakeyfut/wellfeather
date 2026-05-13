@@ -141,6 +141,19 @@ impl Default for UiConfig {
 }
 
 // ---------------------------------------------------------------------------
+// SslMode
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum SslMode {
+    #[default]
+    Require,
+    VerifyCa,
+    VerifyFull,
+}
+
+// ---------------------------------------------------------------------------
 // SshAuthMethod
 // ---------------------------------------------------------------------------
 
@@ -201,6 +214,20 @@ pub struct ConnectionConfig {
     /// AES-256-GCM encrypted SSH private-key passphrase
     #[serde(default)]
     pub ssh_passphrase_encrypted: Option<String>,
+    // ── SSL/TLS ───────────────────────────────────────────────────────────────
+    #[serde(default)]
+    pub ssl_enabled: bool,
+    #[serde(default)]
+    pub ssl_mode: SslMode,
+    /// Path to the CA certificate PEM file (copied into config_dir).
+    #[serde(default)]
+    pub ssl_ca_cert: Option<String>,
+    /// Path to the client certificate PEM file (copied into config_dir).
+    #[serde(default)]
+    pub ssl_client_cert: Option<String>,
+    /// Path to the client private key PEM file (copied into config_dir).
+    #[serde(default)]
+    pub ssl_client_key: Option<String>,
 }
 
 fn default_safe_dml() -> bool {
@@ -346,6 +373,11 @@ language = "ja"
             ssh_password_encrypted: None,
             ssh_key_path: Some("/home/user/.ssh/id_rsa".into()),
             ssh_passphrase_encrypted: Some("enc:abc123".into()),
+            ssl_enabled: false,
+            ssl_mode: SslMode::Require,
+            ssl_ca_cert: None,
+            ssl_client_cert: None,
+            ssl_client_key: None,
         };
 
         let serialized = toml::to_string(&original).expect("failed to serialize");
@@ -360,6 +392,63 @@ language = "ja"
         );
         assert_eq!(deserialized.ssh_port, Some(22));
         assert_eq!(deserialized.ssh_auth_method, SshAuthMethod::PrivateKey);
+    }
+
+    #[test]
+    fn ssl_config_defaults_should_be_disabled_and_none() {
+        let toml = r#"
+            id = "c1"
+            name = "c1"
+            db_type = "postgresql"
+        "#;
+        let cc: ConnectionConfig = toml::from_str(toml).expect("should parse with SSL defaults");
+        assert!(!cc.ssl_enabled);
+        assert_eq!(cc.ssl_mode, SslMode::Require);
+        assert_eq!(cc.ssl_ca_cert, None);
+        assert_eq!(cc.ssl_client_cert, None);
+        assert_eq!(cc.ssl_client_key, None);
+    }
+
+    #[test]
+    fn ssl_config_fields_should_round_trip_through_toml() {
+        let original = ConnectionConfig {
+            id: "ssl-test".into(),
+            name: "SSL Test".into(),
+            db_type: DbTypeName::PostgreSQL,
+            connection_string: None,
+            host: Some("db.internal".into()),
+            port: Some(5432),
+            user: Some("admin".into()),
+            password_encrypted: None,
+            database: Some("mydb".into()),
+            safe_dml: true,
+            read_only: false,
+            ssh_enabled: false,
+            ssh_host: None,
+            ssh_port: None,
+            ssh_user: None,
+            ssh_auth_method: SshAuthMethod::Password,
+            ssh_password_encrypted: None,
+            ssh_key_path: None,
+            ssh_passphrase_encrypted: None,
+            ssl_enabled: true,
+            ssl_mode: SslMode::VerifyFull,
+            ssl_ca_cert: Some("/config/certs/ssl-test/ca.pem".into()),
+            ssl_client_cert: Some("/config/certs/ssl-test/client.pem".into()),
+            ssl_client_key: Some("/config/certs/ssl-test/client.key".into()),
+        };
+
+        let serialized = toml::to_string(&original).expect("failed to serialize");
+        let deserialized: ConnectionConfig =
+            toml::from_str(&serialized).expect("failed to deserialize");
+
+        assert_eq!(original, deserialized);
+        assert!(deserialized.ssl_enabled);
+        assert_eq!(deserialized.ssl_mode, SslMode::VerifyFull);
+        assert_eq!(
+            deserialized.ssl_ca_cert.as_deref(),
+            Some("/config/certs/ssl-test/ca.pem")
+        );
     }
 
     #[test]

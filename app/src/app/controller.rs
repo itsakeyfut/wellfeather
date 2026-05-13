@@ -215,6 +215,7 @@ mod tests {
             password_encrypted: None,
             database: None,
             ssh: None,
+            ssl: None,
         }
     }
 
@@ -346,6 +347,7 @@ mod tests {
             password_encrypted: None,
             database: None,
             ssh: None,
+            ssl: None,
         };
         tx_cmd
             .send(Command::TestConnection(bad, None))
@@ -417,6 +419,7 @@ mod tests {
             password_encrypted: None,
             database: None,
             ssh: None,
+            ssl: None,
         };
         tx_cmd.send(Command::Connect(bad, None)).await.unwrap();
         drop(tx_cmd);

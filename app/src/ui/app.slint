@@ -161,6 +161,15 @@ export global UiState {
     callback reject-ssh-fingerprint();
     // ── SSH active status ─────────────────────────────────────────────────────
     in-out property <bool>   ssh-active: false;
+    // ── SSL/TLS form ──────────────────────────────────────────────────────────
+    /// 0=Disabled, 1=Require, 2=VerifyCa, 3=VerifyFull
+    in-out property <int>    form-ssl-mode:        0;
+    in-out property <string> form-ssl-ca-cert:     "";
+    in-out property <string> form-ssl-client-cert: "";
+    in-out property <string> form-ssl-client-key:  "";
+    callback browse-ssl-ca-cert();
+    callback browse-ssl-client-cert();
+    callback browse-ssl-client-key();
 
     // ── Connection test / add state ───────────────────────────────────────────
     /// True after a successful Test Connection; reset when form is opened.
@@ -1163,6 +1172,13 @@ export component AppWindow inherits Window {
                 ssh-key-path      <=> UiState.form-ssh-key-path;
                 ssh-passphrase    <=> UiState.form-ssh-passphrase;
                 browse-ssh-key-file => { UiState.browse-ssh-key-file(); }
+                ssl-mode            <=> UiState.form-ssl-mode;
+                ssl-ca-cert         <=> UiState.form-ssl-ca-cert;
+                ssl-client-cert     <=> UiState.form-ssl-client-cert;
+                ssl-client-key      <=> UiState.form-ssl-client-key;
+                browse-ssl-ca-cert     => { UiState.browse-ssl-ca-cert(); }
+                browse-ssl-client-cert => { UiState.browse-ssl-client-cert(); }
+                browse-ssl-client-key  => { UiState.browse-ssl-client-key(); }
 
                 is-edit: UiState.form-edit-id != "";
                 cancel => { UiState.close-connection-form(); }

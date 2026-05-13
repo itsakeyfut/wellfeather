@@ -20,3 +20,5 @@ error:
   ssh_host_key_rejected: "SSHホスト鍵が承認されませんでした"
   ssh_fingerprint_mismatch: "SSHホスト鍵が一致しません — 期待値: %{expected}、実際値: %{actual}"
   ssh_conn_string_unsupported: "接続文字列モードではSSHトンネルはサポートされていません。Individual Fieldsに切り替えてください。"
+  ssl_error: "SSL/TLSエラー: %{reason}"
+  ssl_cert_copy_failed: "証明書ファイルのコピーに失敗しました: %{reason}"

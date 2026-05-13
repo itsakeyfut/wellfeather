@@ -23,6 +23,33 @@ pub enum DbKind {
 }
 
 // ---------------------------------------------------------------------------
+// SSL/TLS types
+// ---------------------------------------------------------------------------
+
+/// SSL/TLS verification mode (runtime-only, no serde).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SslMode {
+    /// Encrypt connection; do not verify server certificate.
+    Require,
+    /// Verify that the server certificate is signed by a trusted CA.
+    VerifyCa,
+    /// Verify CA and that the server hostname matches the certificate.
+    VerifyFull,
+}
+
+/// SSL/TLS configuration for a database connection.
+///
+/// Cert paths point to files already copied into `{config_dir}/certs/{conn_id}/`
+/// by the controller before `DbPool::connect` is called.
+#[derive(Debug, Clone)]
+pub struct SslConfig {
+    pub mode: SslMode,
+    pub ca_cert: Option<std::path::PathBuf>,
+    pub client_cert: Option<std::path::PathBuf>,
+    pub client_key: Option<std::path::PathBuf>,
+}
+
+// ---------------------------------------------------------------------------
 // SSH tunnel types
 // ---------------------------------------------------------------------------
 
@@ -81,6 +108,9 @@ pub struct DbConnection {
     /// Optional SSH tunnel configuration. When present, the controller
     /// establishes a port-forward tunnel before connecting to the database.
     pub ssh: Option<SshTunnelConfig>,
+    /// Optional SSL/TLS configuration. When present, the pool applies the
+    /// specified mode and cert files via `ConnectOptions` before connecting.
+    pub ssl: Option<SslConfig>,
 }
 
 // ---------------------------------------------------------------------------
