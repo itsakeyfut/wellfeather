@@ -232,7 +232,7 @@ export component ConnectionForm inherits Rectangle {
     in-out property <bool>   testing:     false;
     in-out property <bool>   safe-dml:    true;
     in-out property <bool>   read-only:   false;
-    // ── Section (0=General, 1=SSH Tunnel) ─────────────────────────────────
+    // ── Section (0=General, 1=SSH Tunnel, 2=SSL/TLS) ──────────────────────
     in-out property <int>    form-section:      0;
     in-out property <string> ssh-host:          "";
     in-out property <string> ssh-port:          "22";
@@ -243,6 +243,16 @@ export component ConnectionForm inherits Rectangle {
     in-out property <string> ssh-key-path:      "";
     in-out property <string> ssh-passphrase:    "";
     callback browse-ssh-key-file();
+    // ── SSL/TLS ────────────────────────────────────────────────────────────
+
+    /// 0=Disabled, 1=Require, 2=VerifyCa, 3=VerifyFull
+    in-out property <int>    ssl-mode:        0;
+    in-out property <string> ssl-ca-cert:     "";
+    in-out property <string> ssl-client-cert: "";
+    in-out property <string> ssl-client-key:  "";
+    callback browse-ssl-ca-cert();
+    callback browse-ssl-client-cert();
+    callback browse-ssl-client-key();
     /// Set to true after a successful Test Connection; resets to false when the
     /// form is opened or a new test is started.  Used to decide whether Add
     /// shows a confirmation dialog.
@@ -267,7 +277,7 @@ export component ConnectionForm inherits Rectangle {
     drop-shadow-blur: 24px;
     drop-shadow-color: Colors.shadow-light;
     width: 660px;
-    height: 560px;
+    height: 600px;
     clip: true;
 
     VerticalLayout {
@@ -292,7 +302,8 @@ export component ConnectionForm inherits Rectangle {
             move-focus(_d) => {}
         }
 
-        // Section tab bar (General / SSH Tunnel)
+        // Section tab bar (General / SSH Tunnel / SSL/TLS)
+        // SSL/TLS tab is hidden for SQLite (db-type == 2).
         HorizontalLayout {
             TabButton {
                 label-text: @tr("General");
@@ -303,6 +314,11 @@ export component ConnectionForm inherits Rectangle {
                 label-text: @tr("SSH Tunnel");
                 active: root.form-section == 1;
                 clicked => { root.form-section = 1; }
+            }
+            if root.db-type != 2: TabButton {
+                label-text: @tr("SSL/TLS");
+                active: root.form-section == 2;
+                clicked => { root.form-section = 2; }
             }
         }
 
@@ -551,6 +567,99 @@ export component ConnectionForm inherits Rectangle {
                 value <=> root.ssh-passphrase;
                 is-password: true;
                 move-focus(_d) => {}
+            }
+
+            // Spacer to push buttons down
+            Rectangle { vertical-stretch: 1; }
+        }
+
+        // ── SSL/TLS section ───────────────────────────────────────────────────
+        if root.form-section == 2 && root.db-type != 2: VerticalLayout {
+            spacing: Layout.spacing-md;
+
+            // Mode selector (4-button toggle: 0=Disabled, 1=Require, 2=Verify CA, 3=Verify Full)
+            HorizontalLayout {
+                spacing: 0px;
+                Text {
+                    text: @tr("Mode");
+                    color: Colors.subtext0;
+                    width: 80px;
+                    vertical-alignment: center;
+                }
+                HorizontalLayout {
+                    spacing: Layout.spacing-sm;
+                    AuthToggleButton {
+                        label-text: @tr("Disabled");
+                        active: root.ssl-mode == 0;
+                        clicked => { root.ssl-mode = 0; }
+                    }
+                    AuthToggleButton {
+                        label-text: @tr("Require");
+                        active: root.ssl-mode == 1;
+                        clicked => { root.ssl-mode = 1; }
+                    }
+                    AuthToggleButton {
+                        label-text: @tr("Verify CA");
+                        active: root.ssl-mode == 2;
+                        clicked => { root.ssl-mode = 2; }
+                    }
+                    AuthToggleButton {
+                        label-text: @tr("Verify Full");
+                        active: root.ssl-mode == 3;
+                        clicked => { root.ssl-mode = 3; }
+                    }
+                }
+            }
+
+            // CA Certificate
+            HorizontalLayout {
+                spacing: Layout.spacing-md;
+                FieldRow {
+                    label-text: @tr("CA Cert");
+                    placeholder: @tr("ca.pem");
+                    value <=> root.ssl-ca-cert;
+                    horizontal-stretch: 1;
+                    move-focus(_d) => {}
+                }
+                ActionButton {
+                    width: 80px;
+                    text: @tr("Browse\u{2026}");
+                    clicked => { root.browse-ssl-ca-cert(); }
+                }
+            }
+
+            // Client Certificate
+            HorizontalLayout {
+                spacing: Layout.spacing-md;
+                FieldRow {
+                    label-text: @tr("Cert");
+                    placeholder: @tr("client.pem");
+                    value <=> root.ssl-client-cert;
+                    horizontal-stretch: 1;
+                    move-focus(_d) => {}
+                }
+                ActionButton {
+                    width: 80px;
+                    text: @tr("Browse\u{2026}");
+                    clicked => { root.browse-ssl-client-cert(); }
+                }
+            }
+
+            // Client Key
+            HorizontalLayout {
+                spacing: Layout.spacing-md;
+                FieldRow {
+                    label-text: @tr("Key");
+                    placeholder: @tr("client.key");
+                    value <=> root.ssl-client-key;
+                    horizontal-stretch: 1;
+                    move-focus(_d) => {}
+                }
+                ActionButton {
+                    width: 80px;
+                    text: @tr("Browse\u{2026}");
+                    clicked => { root.browse-ssl-client-key(); }
+                }
             }
 
             // Spacer to push buttons down

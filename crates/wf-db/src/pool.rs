@@ -1,11 +1,15 @@
+use std::str::FromStr as _;
+
 use percent_encoding::{NON_ALPHANUMERIC, utf8_percent_encode};
+use sqlx::mysql::{MySqlConnectOptions, MySqlSslMode};
+use sqlx::postgres::{PgConnectOptions, PgSslMode};
 use sqlx::{MySqlPool, PgPool, SqlitePool};
 
 use crate::drivers;
 use crate::error::DbError;
 #[cfg(test)]
 use crate::models::DbKind;
-use crate::models::{DbConnection, DbMetadata, DbType, QueryResult};
+use crate::models::{DbConnection, DbMetadata, DbType, QueryResult, SslMode};
 
 // ---------------------------------------------------------------------------
 // DbPool
@@ -29,16 +33,62 @@ impl DbPool {
         match conn.db_type {
             DbType::PostgreSQL => {
                 let url = pg_url(conn, password);
-                let pool = PgPool::connect(&url)
-                    .await
-                    .map_err(|e| DbError::ConnectionFailed(redact_url_password(&e.to_string())))?;
+                let pool = if let Some(ssl) = &conn.ssl {
+                    let pg_ssl = match ssl.mode {
+                        SslMode::Require => PgSslMode::Require,
+                        SslMode::VerifyCa => PgSslMode::VerifyCa,
+                        SslMode::VerifyFull => PgSslMode::VerifyFull,
+                    };
+                    let mut opts = PgConnectOptions::from_str(&url)
+                        .map_err(|e| DbError::SslError(e.to_string()))?
+                        .ssl_mode(pg_ssl);
+                    if let Some(p) = &ssl.ca_cert {
+                        opts = opts.ssl_root_cert(p);
+                    }
+                    if let Some(p) = &ssl.client_cert {
+                        opts = opts.ssl_client_cert(p);
+                    }
+                    if let Some(p) = &ssl.client_key {
+                        opts = opts.ssl_client_key(p);
+                    }
+                    PgPool::connect_with(opts).await.map_err(|e| {
+                        DbError::ConnectionFailed(redact_url_password(&e.to_string()))
+                    })?
+                } else {
+                    PgPool::connect(&url).await.map_err(|e| {
+                        DbError::ConnectionFailed(redact_url_password(&e.to_string()))
+                    })?
+                };
                 Ok(DbPool::Pg(pool))
             }
             DbType::MySQL => {
                 let url = my_url(conn, password);
-                let pool = MySqlPool::connect(&url)
-                    .await
-                    .map_err(|e| DbError::ConnectionFailed(redact_url_password(&e.to_string())))?;
+                let pool = if let Some(ssl) = &conn.ssl {
+                    let my_ssl = match ssl.mode {
+                        SslMode::Require => MySqlSslMode::Required,
+                        SslMode::VerifyCa => MySqlSslMode::VerifyCa,
+                        SslMode::VerifyFull => MySqlSslMode::VerifyIdentity,
+                    };
+                    let mut opts = MySqlConnectOptions::from_str(&url)
+                        .map_err(|e| DbError::SslError(e.to_string()))?
+                        .ssl_mode(my_ssl);
+                    if let Some(p) = &ssl.ca_cert {
+                        opts = opts.ssl_ca(p);
+                    }
+                    if let Some(p) = &ssl.client_cert {
+                        opts = opts.ssl_client_cert(p);
+                    }
+                    if let Some(p) = &ssl.client_key {
+                        opts = opts.ssl_client_key(p);
+                    }
+                    MySqlPool::connect_with(opts).await.map_err(|e| {
+                        DbError::ConnectionFailed(redact_url_password(&e.to_string()))
+                    })?
+                } else {
+                    MySqlPool::connect(&url).await.map_err(|e| {
+                        DbError::ConnectionFailed(redact_url_password(&e.to_string()))
+                    })?
+                };
                 Ok(DbPool::My(pool))
             }
             DbType::SQLite => {
@@ -231,7 +281,7 @@ pub(crate) fn redact_url_password(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::{DbConnection, DbType};
+    use crate::models::{DbConnection, DbType, SslMode};
 
     fn pg_conn_fields() -> DbConnection {
         DbConnection {
@@ -245,6 +295,7 @@ mod tests {
             password_encrypted: None,
             database: Some("mydb".to_string()),
             ssh: None,
+            ssl: None,
         }
     }
 
@@ -260,6 +311,7 @@ mod tests {
             password_encrypted: None,
             database: Some("shop".to_string()),
             ssh: None,
+            ssl: None,
         }
     }
 
@@ -275,6 +327,7 @@ mod tests {
             password_encrypted: None,
             database: None,
             ssh: None,
+            ssl: None,
         }
     }
 
@@ -290,6 +343,7 @@ mod tests {
             password_encrypted: None,
             database: None, // None → :memory:
             ssh: None,
+            ssl: None,
         }
     }
 
@@ -454,6 +508,56 @@ mod tests {
         let conn = sqlite_conn_memory();
         let pool = DbPool::connect(&conn, None).await.unwrap();
         assert_eq!(pool.kind(), DbKind::Sqlite);
+    }
+
+    // -- SSL helpers ----------------------------------------------------------
+
+    #[test]
+    fn ssl_mode_should_map_to_pg_ssl_mode() {
+        assert!(matches!(
+            map_pg_ssl_mode(SslMode::Require),
+            PgSslMode::Require
+        ));
+        assert!(matches!(
+            map_pg_ssl_mode(SslMode::VerifyCa),
+            PgSslMode::VerifyCa
+        ));
+        assert!(matches!(
+            map_pg_ssl_mode(SslMode::VerifyFull),
+            PgSslMode::VerifyFull
+        ));
+    }
+
+    #[test]
+    fn ssl_mode_should_map_to_mysql_ssl_mode() {
+        assert!(matches!(
+            map_mysql_ssl_mode(SslMode::Require),
+            MySqlSslMode::Required
+        ));
+        assert!(matches!(
+            map_mysql_ssl_mode(SslMode::VerifyCa),
+            MySqlSslMode::VerifyCa
+        ));
+        assert!(matches!(
+            map_mysql_ssl_mode(SslMode::VerifyFull),
+            MySqlSslMode::VerifyIdentity
+        ));
+    }
+
+    fn map_pg_ssl_mode(m: SslMode) -> PgSslMode {
+        match m {
+            SslMode::Require => PgSslMode::Require,
+            SslMode::VerifyCa => PgSslMode::VerifyCa,
+            SslMode::VerifyFull => PgSslMode::VerifyFull,
+        }
+    }
+
+    fn map_mysql_ssl_mode(m: SslMode) -> MySqlSslMode {
+        match m {
+            SslMode::Require => MySqlSslMode::Required,
+            SslMode::VerifyCa => MySqlSslMode::VerifyCa,
+            SslMode::VerifyFull => MySqlSslMode::VerifyIdentity,
+        }
     }
 
     // -- redact_url_password --------------------------------------------------
