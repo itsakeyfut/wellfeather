@@ -9,6 +9,8 @@ use wf_history::session::SessionService;
 
 use crate::app::command::{Command, ConfigUpdate};
 
+use super::tabs_state::TabsState;
+use super::undo::TextUndoState;
 use super::{send_cmd, tabs_state, with_ui};
 
 /// Tokenize `sql` and return Slint-typed `HighlightSpan` values for rendering.
@@ -172,6 +174,8 @@ pub(super) fn register_language_callback(window: &crate::AppWindow, tx_cmd: mpsc
 pub(super) fn register_editor_prefs_callbacks(
     window: &crate::AppWindow,
     tx_cmd: mpsc::Sender<Command>,
+    tabs_state: Rc<RefCell<TabsState>>,
+    undo_state: Rc<TextUndoState>,
 ) {
     let ui = window.global::<crate::UiState>();
 
@@ -185,6 +189,7 @@ pub(super) fn register_editor_prefs_callbacks(
         };
         let ui = window.global::<crate::UiState>();
         let text = ui.get_editor_text().to_string();
+        let tab_id = ui.get_editor_active_tab_id().to_string();
         let tab_width = (ui.get_tab_width() as usize).max(1);
         let cursor = cursor as usize;
 
@@ -192,11 +197,17 @@ pub(super) fn register_editor_prefs_callbacks(
             return;
         }
 
+        undo_state.flush_before_programmatic_change(&mut tabs_state.borrow_mut(), &tab_id);
+        tabs_state
+            .borrow_mut()
+            .push_undo_snapshot(&tab_id, text.clone());
+
         let spaces = " ".repeat(tab_width);
         let mut new_text = text;
         new_text.insert_str(cursor, &spaces);
         let new_cursor = (cursor + tab_width) as i32;
 
+        *undo_state.last_known.borrow_mut() = new_text.clone();
         let shared: slint::SharedString = new_text.into();
         ui.set_editor_text(shared.clone());
         ui.set_editor_cursor_target(new_cursor);

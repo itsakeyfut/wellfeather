@@ -16,6 +16,7 @@
 mod config;
 mod connection;
 mod group;
+mod group_undo;
 mod history;
 mod metadata;
 mod query;
@@ -31,7 +32,7 @@ use wf_db::service::DbService;
 use wf_history::service::HistoryService;
 
 use crate::{
-    app::{command::Command, event::Event, session::SessionManager},
+    app::{command::Command, event::Event, group_undo::GroupUndoStack, session::SessionManager},
     state::SharedState,
 };
 
@@ -55,6 +56,8 @@ pub struct AppController {
     pub(crate) config_dir: PathBuf,
     /// Encryption key for decrypting SSH credentials.
     pub(crate) enc_key: [u8; 32],
+    /// Per-session undo/redo stack for group mutations (create/rename/color/move/delete).
+    pub(crate) group_undo: std::sync::Mutex<GroupUndoStack>,
 }
 
 impl AppController {
@@ -93,6 +96,7 @@ impl AppController {
                 tx_event,
                 config_dir,
                 enc_key,
+                group_undo: std::sync::Mutex::new(GroupUndoStack::new()),
             },
             tx_cmd,
             rx_event,
@@ -152,6 +156,8 @@ impl AppController {
                 Command::SearchHistory { keyword, conn_id } => {
                     this.handle_search_history(keyword, conn_id).await
                 }
+                Command::UndoGroupAction => this.handle_undo_group_action().await,
+                Command::RedoGroupAction => this.handle_redo_group_action().await,
             }
         }
     }

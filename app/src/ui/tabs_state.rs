@@ -1,11 +1,66 @@
+use std::collections::HashMap;
+
 use uuid::Uuid;
 
 use crate::app::session::TabSessionEntry;
+
+// ── Per-tab text undo/redo stack ─────────────────────────────────────────────
+
+const UNDO_MAX: usize = 100;
+
+pub struct TextUndoStack {
+    undo: Vec<String>,
+    redo: Vec<String>,
+}
+
+impl TextUndoStack {
+    fn new() -> Self {
+        Self {
+            undo: vec![],
+            redo: vec![],
+        }
+    }
+
+    /// Push a snapshot of the text *before* a change. Clears redo. Deduplicates top.
+    pub fn push(&mut self, text: String) {
+        if self.undo.last().map(|s| s == &text).unwrap_or(false) {
+            return;
+        }
+        self.undo.push(text);
+        if self.undo.len() > UNDO_MAX {
+            self.undo.remove(0);
+        }
+        self.redo.clear();
+    }
+
+    /// Undo: restore previous state. `current` is pushed to redo.
+    pub fn undo(&mut self, current: String) -> Option<String> {
+        let prev = self.undo.pop()?;
+        self.redo.push(current);
+        if self.redo.len() > UNDO_MAX {
+            self.redo.remove(0);
+        }
+        Some(prev)
+    }
+
+    /// Redo: restore next state. `current` is pushed to undo.
+    pub fn redo(&mut self, current: String) -> Option<String> {
+        let next = self.redo.pop()?;
+        self.undo.push(current);
+        if self.undo.len() > UNDO_MAX {
+            self.undo.remove(0);
+        }
+        Some(next)
+    }
+}
+
+// ── TabsState ─────────────────────────────────────────────────────────────────
 
 pub struct TabsState {
     pub tabs: Vec<TabEntry>,
     pub active_index: usize,
     counter: usize,
+    pub undo_stacks: HashMap<String, TextUndoStack>,
 }
 
 #[derive(Clone)]
@@ -39,6 +94,7 @@ impl TabsState {
             }],
             active_index: 0,
             counter: 1,
+            undo_stacks: HashMap::new(),
         }
     }
 
@@ -71,6 +127,7 @@ impl TabsState {
             tabs,
             active_index,
             counter,
+            undo_stacks: HashMap::new(),
         }
     }
 
@@ -141,11 +198,28 @@ impl TabsState {
         if matches!(self.tabs[index].kind, TabKind::SqlEditor { .. }) && sql_count <= 1 {
             return false;
         }
+        let tab_id = self.tabs[index].id.clone();
+        self.undo_stacks.remove(&tab_id);
         self.tabs.remove(index);
         if self.active_index >= self.tabs.len() {
             self.active_index = self.tabs.len().saturating_sub(1);
         }
         true
+    }
+
+    pub fn push_undo_snapshot(&mut self, tab_id: &str, text: String) {
+        self.undo_stacks
+            .entry(tab_id.to_string())
+            .or_insert_with(TextUndoStack::new)
+            .push(text);
+    }
+
+    pub fn text_undo(&mut self, tab_id: &str, current: String) -> Option<String> {
+        self.undo_stacks.get_mut(tab_id)?.undo(current)
+    }
+
+    pub fn text_redo(&mut self, tab_id: &str, current: String) -> Option<String> {
+        self.undo_stacks.get_mut(tab_id)?.redo(current)
     }
 
     pub fn set_active(&mut self, index: usize) {
@@ -213,5 +287,58 @@ impl TabsState {
             .collect();
 
         (active_sql_idx, entries)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn text_undo_stack_should_push_and_undo() {
+        let mut s = TextUndoStack::new();
+        s.push("hello".to_string());
+        let restored = s.undo("hello world".to_string());
+        assert_eq!(restored, Some("hello".to_string()));
+    }
+
+    #[test]
+    fn text_undo_stack_should_not_push_duplicate() {
+        let mut s = TextUndoStack::new();
+        s.push("hello".to_string());
+        s.push("hello".to_string());
+        assert_eq!(s.undo.len(), 1);
+    }
+
+    #[test]
+    fn text_undo_stack_should_clear_redo_on_push() {
+        let mut s = TextUndoStack::new();
+        s.push("a".to_string());
+        s.undo("b".to_string());
+        assert_eq!(s.redo.len(), 1);
+        s.push("c".to_string());
+        assert_eq!(s.redo.len(), 0);
+    }
+
+    #[test]
+    fn text_undo_stack_should_redo_after_undo() {
+        let mut s = TextUndoStack::new();
+        s.push("before".to_string());
+        let _prev = s.undo("after".to_string());
+        let redone = s.redo("before".to_string());
+        assert_eq!(redone, Some("after".to_string()));
+    }
+
+    #[test]
+    fn text_undo_stack_should_cap_at_max_size() {
+        let mut s = TextUndoStack::new();
+        for i in 0..=UNDO_MAX {
+            s.push(format!("text{i}"));
+        }
+        assert_eq!(s.undo.len(), UNDO_MAX);
     }
 }

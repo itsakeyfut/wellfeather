@@ -367,6 +367,9 @@ export global UiState {
     in-out property <int>        active-tab-index:   0;
     /// true = active tab is a SQL Editor tab; false = Table View tab.
     in-out property <bool>       active-tab-kind-sql: true;
+    /// UUID of the currently active tab; set by Rust on tab switch / new / close.
+    /// Used by the undo system to scope snapshots to the correct per-tab stack.
+    in-out property <string>     editor-active-tab-id: "";
     callback new-tab();
     callback close-tab(int);
     callback switch-tab(int);
@@ -421,6 +424,20 @@ export global UiState {
     callback history-insert-sql(string, int);
     /// Replace editor text with SQL and execute immediately.
     callback history-execute-sql(string);
+
+    // ── Text undo / redo ─────────────────────────────────────────────────────
+    /// Fired by the editor when the user presses Ctrl+Z.
+    callback editor-undo();
+    /// Fired by the editor when the user presses Ctrl+Shift+Z.
+    callback editor-redo();
+    /// Fired on every user text edit; Rust uses this to drive the debounce snapshot.
+    callback text-changed(string);
+
+    // ── Sidebar action undo / redo ────────────────────────────────────────────
+    /// Fired when Ctrl+Z is pressed while the sidebar has focus.
+    callback sidebar-undo();
+    /// Fired when Ctrl+Shift+Z is pressed while the sidebar has focus.
+    callback sidebar-redo();
 }
 
 export component AppWindow inherits Window {
@@ -718,6 +735,19 @@ export component AppWindow inherits Window {
                 } else {
                     EventResult.reject
                 }
+            } else if (event.modifiers.control
+                    && !event.modifiers.alt
+                    && (event.text == "z" || event.text == "Z")) {
+                // Sidebar undo/redo — editor handles its own via capture-key-pressed
+                // and never lets the bubble reach here when focused.
+                if (root.focused-pane == 0) {
+                    if (event.modifiers.shift) {
+                        UiState.sidebar-redo();
+                    } else {
+                        UiState.sidebar-undo();
+                    }
+                }
+                EventResult.accept
             } else {
                 EventResult.reject
             }
@@ -843,6 +873,7 @@ export component AppWindow inherits Window {
                 text-edited(sql, pos) => {
                     UiState.fetch-completion(sql, pos);
                     UiState.update-highlight(sql);
+                    UiState.text-changed(sql);
                 }
                 trigger-completion(sql, pos) => { UiState.trigger-completion(sql, pos); }
                 format-sql => { UiState.format-sql(); }
@@ -862,6 +893,8 @@ export component AppWindow inherits Window {
                 }
                 tab-width: UiState.tab-width;
                 tab-key-pressed(cursor) => { UiState.tab-key-pressed(cursor); }
+                editor-undo => { UiState.editor-undo(); }
+                editor-redo => { UiState.editor-redo(); }
                 open-snippet-save(a, c) => { UiState.open-snippet-save(a, c); }
                 focus-sidebar => { root.focused-pane = 0; sidebar-inst.grab-focus(); }
                 focus-result  => {

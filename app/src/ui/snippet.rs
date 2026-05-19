@@ -1,9 +1,12 @@
+use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 
 use slint::ComponentHandle;
 use wf_config::snippet::SnippetRepository;
 
+use super::tabs_state::TabsState;
+use super::undo::TextUndoState;
 use super::with_ui;
 
 pub(super) fn snippet_to_slint(b: wf_config::snippet::SnippetEntry) -> crate::SnippetEntry {
@@ -33,6 +36,8 @@ pub(super) async fn do_refresh_snippets(
 pub(super) fn register_snippet_callbacks(
     window: &crate::AppWindow,
     snippet_repo: Arc<SnippetRepository>,
+    tabs_state: Rc<RefCell<TabsState>>,
+    undo_state: Rc<TextUndoState>,
 ) {
     let ui = window.global::<crate::UiState>();
 
@@ -165,12 +170,20 @@ pub(super) fn register_snippet_callbacks(
     // load-snippet-sql: insert SQL at editor cursor position.
     {
         let ww = window.as_weak();
+        let tabs_state = Rc::clone(&tabs_state); // clone required: on_load_snippet_sql closure
+        let undo_state = Rc::clone(&undo_state); // clone required: on_load_snippet_sql closure
         ui.on_load_snippet_sql(move |sql, cursor_pos| {
             with_ui(&ww, |ui| {
                 let current = ui.get_editor_text().to_string();
+                let tab_id = ui.get_editor_active_tab_id().to_string();
+                undo_state.flush_before_programmatic_change(&mut tabs_state.borrow_mut(), &tab_id);
+                tabs_state
+                    .borrow_mut()
+                    .push_undo_snapshot(&tab_id, current.clone());
                 let pos = (cursor_pos as usize).min(current.len());
                 let new_text = format!("{}{}{}", &current[..pos], sql, &current[pos..]);
                 let new_cursor = (pos + sql.len()) as i32;
+                *undo_state.last_known.borrow_mut() = new_text.clone();
                 ui.set_editor_text(new_text.into());
                 ui.set_editor_cursor_target(new_cursor);
             });

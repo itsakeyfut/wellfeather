@@ -84,6 +84,10 @@ pub enum Command {
         keyword: String,
         conn_id: Option<String>,
     },
+    /// Undo the last group action (create/rename/color/move/delete).
+    UndoGroupAction,
+    /// Redo the last undone group action.
+    RedoGroupAction,
 }
 
 impl Command {
@@ -109,6 +113,8 @@ impl Command {
             Self::SetGroupColor { .. } => "SetGroupColor",
             Self::SetGroupExpanded { .. } => "SetGroupExpanded",
             Self::SearchHistory { .. } => "SearchHistory",
+            Self::UndoGroupAction => "UndoGroupAction",
+            Self::RedoGroupAction => "RedoGroupAction",
         }
     }
 }
