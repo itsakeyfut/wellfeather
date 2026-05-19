@@ -7,7 +7,7 @@ import "../../assets/fonts/NotoSansJP-Bold.ttf";
 import "../../assets/fonts/JetBrainsMono-Regular.ttf";
 import "../../assets/fonts/JetBrainsMono-Bold.ttf";
 
-import { ConnectionEntry, RowData, SidebarNode, GroupEntry, CompletionRow, TabEntry, ColumnData, SnippetEntry, MetadataSearchResult, HighlightSpan, CommandPaletteItem } from "globals.slint";
+import { ConnectionEntry, RowData, SidebarNode, GroupEntry, CompletionRow, TabEntry, ColumnData, SnippetEntry, MetadataSearchResult, HighlightSpan, CommandPaletteItem, HistoryEntry } from "globals.slint";
 import { Colors, Typography, Layout, Icons, Animation } from "theme.slint";
 import { CompletionPopup } from "components/completion_popup.slint";
 import { ConnectionForm }  from "components/connection_form.slint";
@@ -30,6 +30,7 @@ import { SnippetEditDialog }     from "components/snippet_edit_dialog.slint";
 import { SnippetBar }            from "components/snippet_bar.slint";
 import { MetadataSearch }        from "components/metadata_search.slint";
 import { CommandPalette }        from "components/command_palette.slint";
+import { HistoryPanel }          from "components/history_panel.slint";
 import { EditorPrefsDialog }     from "components/dialogs/editor_prefs_dialog.slint";
 import { FingerprintDialog }    from "components/dialogs/fingerprint_dialog.slint";
 
@@ -407,6 +408,19 @@ export global UiState {
     callback command-palette-search(string);
     /// Execute the command identified by id.
     callback command-palette-execute(string);
+
+    // ── Query History Panel (Ctrl+Shift+H) ───────────────────────────────────
+    in-out property <bool>            show-history:    false;
+    in-out property <string>          history-query:   "";
+    in-out property <[HistoryEntry]>  history-entries: [];
+    /// Load recent history entries on panel open.
+    callback history-open();
+    /// Re-query history on keyword change (debounced in Rust).
+    callback history-search();
+    /// Insert SQL at editor cursor position; cursor-pos is byte offset.
+    callback history-insert-sql(string, int);
+    /// Replace editor text with SQL and execute immediately.
+    callback history-execute-sql(string);
 }
 
 export component AppWindow inherits Window {
@@ -564,6 +578,7 @@ export component AppWindow inherits Window {
                     || UiState.show-snippet-edit
                     || UiState.show-metadata-search
                     || UiState.show-command-palette
+                    || UiState.show-history
                     || UiState.show-editor-prefs
                     || UiState.show-ssh-fingerprint-dialog) {
                 EventResult.reject
@@ -633,6 +648,12 @@ export component AppWindow inherits Window {
                 if (!UiState.show-command-palette) {
                     UiState.command-palette-open();
                 }
+                EventResult.accept
+            } else if (event.modifiers.control
+                    && event.modifiers.shift
+                    && !event.modifiers.alt
+                    && event.text == "H") {
+                if (!UiState.show-history) { UiState.history-open(); }
                 EventResult.accept
             } else if (event.modifiers.control
                     && !event.modifiers.shift
@@ -1432,6 +1453,34 @@ export component AppWindow inherits Window {
             close-on-blur => {
                 UiState.show-command-palette  = false;
                 UiState.command-palette-query = "";
+            }
+        }
+
+        // ── Query History Panel (Ctrl+Shift+H) ────────────────────────────────
+        if UiState.show-history: HistoryPanel {
+            x: sidebar-width + (main-width - self.width) / 2;
+            y: menu-bar-height + tab-bar-height + 20px;
+            query          <=> UiState.history-query;
+            entries:           UiState.history-entries;
+            search-changed => { UiState.history-search(); }
+            insert-sql(sql) => {
+                UiState.history-insert-sql(sql, editor-inst.cursor-pos);
+                editor-inst.grab-focus();
+            }
+            execute-sql(sql) => {
+                UiState.history-execute-sql(sql);
+                UiState.show-history  = false;
+                UiState.history-query = "";
+                editor-inst.grab-focus();
+            }
+            close => {
+                UiState.show-history  = false;
+                UiState.history-query = "";
+                editor-inst.grab-focus();
+            }
+            close-on-blur => {
+                UiState.show-history  = false;
+                UiState.history-query = "";
             }
         }
 

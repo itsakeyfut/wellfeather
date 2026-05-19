@@ -79,6 +79,11 @@ pub enum Command {
         id: String,
         expanded: bool,
     },
+    /// Search query execution history. Empty keyword = most recent N rows.
+    SearchHistory {
+        keyword: String,
+        conn_id: Option<String>,
+    },
 }
 
 impl Command {
@@ -103,6 +108,7 @@ impl Command {
             Self::MoveConnectionToGroup { .. } => "MoveConnectionToGroup",
             Self::SetGroupColor { .. } => "SetGroupColor",
             Self::SetGroupExpanded { .. } => "SetGroupExpanded",
+            Self::SearchHistory { .. } => "SearchHistory",
         }
     }
 }

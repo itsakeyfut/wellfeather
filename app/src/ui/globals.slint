@@ -97,3 +97,13 @@ export struct HighlightSpan {
     text: string,
     kind: int,
 }
+
+export struct HistoryEntry {
+    id:             int,
+    sql-preview:    string,   // first ~80 chars, newlines collapsed to spaces
+    full-sql:       string,
+    timestamp-text: string,   // "YYYY-MM-DD HH:mm"
+    duration-text:  string,   // "42ms" or "1.2s"
+    success:        bool,
+    connection-id:  string,
+}

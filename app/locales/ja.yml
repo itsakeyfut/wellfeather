@@ -27,3 +27,7 @@ error:
   group_create_failed: "グループの作成に失敗しました: %{reason}"
   group_rename_failed: "グループの名前変更に失敗しました: %{reason}"
   group_delete_failed: "グループの削除に失敗しました: %{reason}"
+history:
+  title: "クエリ履歴"
+  placeholder: "履歴を検索..."
+  empty: "履歴がありません"

@@ -6,7 +6,7 @@ use slint::ComponentHandle;
 use tokio::sync::mpsc;
 use wf_config::models::{ConnectionConfig, GroupConfig, Theme};
 use wf_config::snippet::SnippetRepository;
-use wf_db::models::DbMetadata;
+use wf_db::models::{DbMetadata, QueryExecution};
 
 use crate::app::event::{Event, StateEvent};
 use crate::state::SharedState;
@@ -158,10 +158,37 @@ pub(super) fn spawn_event_handler(
                     Arc::clone(&sidebar_state),
                     state.clone(), // clone required: passed to spawned handler
                 ),
+                Event::HistoryLoaded(rows) => handle_history_loaded(rows, window_weak.clone()),
                 _ => {}
             }
         }
     });
+}
+
+pub(super) fn history_rows_to_slint(rows: &[QueryExecution]) -> Vec<crate::HistoryEntry> {
+    rows.iter()
+        .map(|r| {
+            let ts = chrono::DateTime::from_timestamp(r.timestamp, 0)
+                .map(|dt| dt.format("%Y-%m-%d %H:%M").to_string())
+                .unwrap_or_default();
+            let duration_text = if r.duration_ms >= 1000 {
+                format!("{:.1}s", r.duration_ms as f64 / 1000.0)
+            } else {
+                format!("{}ms", r.duration_ms)
+            };
+            let preview = r.sql.split_whitespace().collect::<Vec<_>>().join(" ");
+            let preview: String = preview.chars().take(80).collect();
+            crate::HistoryEntry {
+                id: r.id as i32,
+                sql_preview: preview.into(),
+                full_sql: r.sql.clone().into(),
+                timestamp_text: ts.into(),
+                duration_text: duration_text.into(),
+                success: r.success,
+                connection_id: r.connection_id.clone().into(),
+            }
+        })
+        .collect()
 }
 
 // ── Per-event handlers ─────────────────────────────────────────────────────────
@@ -563,6 +590,18 @@ fn handle_table_data_failed(_tab_id: String, msg: String, ww: slint::Weak<crate:
         with_ui(&ww, move |ui| {
             ui.set_tv_data_loading(false);
             ui.set_tv_data_error(msg.into());
+        });
+    });
+}
+
+fn handle_history_loaded(rows: Vec<QueryExecution>, ww: slint::Weak<crate::AppWindow>) {
+    let entries = history_rows_to_slint(&rows);
+    // clone required: invoke_from_event_loop closure must be 'static
+    let _ = slint::invoke_from_event_loop(move || {
+        with_ui(&ww, |ui| {
+            let model = Rc::new(slint::VecModel::from(entries));
+            ui.set_history_entries(model.into());
+            ui.set_show_history(true);
         });
     });
 }
