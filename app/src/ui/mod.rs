@@ -10,6 +10,7 @@ mod query;
 mod snippet;
 mod tabs;
 mod tabs_state;
+mod undo;
 
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
@@ -561,7 +562,21 @@ impl UI {
         window
             .global::<crate::UiState>()
             .set_highlight_spans(hl_model.clone().into());
-        query::register_formatter_callback(&window, hl_model.clone());
+        // Create the shared undo state before registering any callbacks that touch it.
+        let initial_editor_text = {
+            let ts = tabs_state.borrow();
+            match ts.active_tab().map(|t| &t.kind) {
+                Some(tabs_state::TabKind::SqlEditor { query_text }) => query_text.clone(),
+                _ => String::new(),
+            }
+        };
+        let undo_state = undo::TextUndoState::new(initial_editor_text);
+        query::register_formatter_callback(
+            &window,
+            hl_model.clone(),
+            Rc::clone(&tabs_state),
+            Rc::clone(&undo_state),
+        );
         query::register_export_callbacks(&window, Arc::clone(&original_data), state.clone());
         appearance::register_theme_callback(&window, state.clone(), tx_cmd.clone());
         appearance::register_reduce_motion_callback(&window, tx_cmd.clone());
@@ -573,6 +588,7 @@ impl UI {
             Rc::clone(&tabs_state),
             Arc::clone(&sidebar_state),
             hl_model.clone(),
+            Rc::clone(&undo_state),
         );
         // Set initial page size and theme on the Slint window from shared state.
         let ui_global = window.global::<crate::UiState>();
@@ -606,6 +622,9 @@ impl UI {
             let slint_tabs = tabs::tabs_to_slint(&ts.tabs);
             ui_global.set_tabs(Rc::new(slint::VecModel::from(slint_tabs)).into());
             ui_global.set_active_tab_index(ts.active_index as i32);
+            if let Some(tab) = ts.active_tab() {
+                ui_global.set_editor_active_tab_id(tab.id.clone().into());
+            }
             match ts.active_tab().map(|t| t.kind.clone()) {
                 Some(tabs_state::TabKind::SqlEditor { query_text }) => {
                     ui_global.set_editor_text(query_text.into());
@@ -651,8 +670,18 @@ impl UI {
         );
         appearance::register_language_callback(&window, tx_cmd.clone());
         find_replace::register_find_replace_callbacks(&window, find_history_svc);
-        history::register_history_callbacks(&window, tx_cmd.clone());
-        snippet::register_snippet_callbacks(&window, Arc::clone(&snippet_repo));
+        history::register_history_callbacks(
+            &window,
+            tx_cmd.clone(),
+            Rc::clone(&tabs_state),
+            Rc::clone(&undo_state),
+        );
+        snippet::register_snippet_callbacks(
+            &window,
+            Arc::clone(&snippet_repo),
+            Rc::clone(&tabs_state),
+            Rc::clone(&undo_state),
+        );
         metadata_search::register_metadata_search_callbacks(&window, Arc::clone(&sidebar_state));
         palette::register_command_palette_callbacks(
             &window,
@@ -660,7 +689,12 @@ impl UI {
             tx_cmd.clone(),
             enc_key,
         );
-        appearance::register_editor_prefs_callbacks(&window, tx_cmd.clone());
+        appearance::register_editor_prefs_callbacks(
+            &window,
+            tx_cmd.clone(),
+            Rc::clone(&tabs_state),
+            Rc::clone(&undo_state),
+        );
         appearance::register_highlight_callbacks(&window, hl_model.clone());
 
         // Highlight the editor text that was already set from session / tab restore.
@@ -689,6 +723,23 @@ impl UI {
                 .unwrap_or((0.0, 100.0));
             ui_global.set_snippet_bar_x(bx);
             ui_global.set_snippet_bar_y(by);
+        }
+
+        // Register text undo/redo callbacks (debounce snapshots + Ctrl+Z/Ctrl+Shift+Z).
+        undo::register_undo_callbacks(&window, Rc::clone(&tabs_state), Rc::clone(&undo_state));
+
+        // Register sidebar undo/redo — routed via Command channel to the controller.
+        {
+            let tx = tx_cmd.clone(); // clone required: on_sidebar_undo closure
+            window.global::<crate::UiState>().on_sidebar_undo(move || {
+                send_cmd(&tx, Command::UndoGroupAction);
+            });
+        }
+        {
+            let tx = tx_cmd.clone(); // clone required: on_sidebar_redo closure
+            window.global::<crate::UiState>().on_sidebar_redo(move || {
+                send_cmd(&tx, Command::RedoGroupAction);
+            });
         }
 
         event::spawn_event_handler(

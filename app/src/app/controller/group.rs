@@ -2,7 +2,7 @@ use tracing::warn;
 use uuid::Uuid;
 use wf_config::models::GroupConfig;
 
-use crate::app::event::Event;
+use crate::app::{event::Event, group_undo::GroupOp};
 
 use super::AppController;
 
@@ -19,6 +19,17 @@ impl AppController {
             warn!(error = %e, "failed to create group");
             return;
         }
+        self.group_undo
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .push(
+                GroupOp::DeleteGroup {
+                    id: group.id.clone(),
+                },
+                GroupOp::CreateGroup {
+                    group: group.clone(),
+                },
+            );
         let groups = self.group_repo.all().await.unwrap_or_default();
         let connections = self.repo.all().await.unwrap_or_default();
         let _ = self
@@ -33,13 +44,28 @@ impl AppController {
 
     pub(super) async fn handle_rename_group(&self, id: String, name: String) {
         let groups = self.group_repo.all().await.unwrap_or_default();
-        if let Some(mut g) = groups.iter().find(|g| g.id == id).cloned() {
-            g.name = name;
-            if let Err(e) = self.group_repo.upsert(&g).await {
-                warn!(error = %e, "failed to rename group");
-                return;
-            }
+        let Some(mut g) = groups.into_iter().find(|g| g.id == id) else {
+            return;
+        };
+        let old_name = g.name.clone();
+        g.name = name.clone();
+        if let Err(e) = self.group_repo.upsert(&g).await {
+            warn!(error = %e, "failed to rename group");
+            return;
         }
+        self.group_undo
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .push(
+                GroupOp::RenameGroup {
+                    id: id.clone(),
+                    name: old_name,
+                },
+                GroupOp::RenameGroup {
+                    id: id.clone(),
+                    name: name.clone(),
+                },
+            );
         let groups = self.group_repo.all().await.unwrap_or_default();
         let connections = self.repo.all().await.unwrap_or_default();
         let _ = self
@@ -52,8 +78,17 @@ impl AppController {
     }
 
     pub(super) async fn handle_delete_group(&self, id: String) {
-        // Ungroup all connections that belonged to this group.
+        // Capture state before deletion for undo purposes.
+        let all_groups = self.group_repo.all().await.unwrap_or_default();
+        let group_config = all_groups.iter().find(|g| g.id == id).cloned();
         let connections = self.repo.all().await.unwrap_or_default();
+        let member_conn_ids: Vec<String> = connections
+            .iter()
+            .filter(|c| c.group_id.as_deref() == Some(&id))
+            .map(|c| c.id.clone())
+            .collect();
+
+        // Ungroup all connections that belonged to this group.
         for mut cc in connections {
             if cc.group_id.as_deref() == Some(&id) {
                 cc.group_id = None;
@@ -65,6 +100,18 @@ impl AppController {
         if let Err(e) = self.group_repo.delete(&id).await {
             warn!(error = %e, "failed to delete group");
             return;
+        }
+        if let Some(gc) = group_config {
+            self.group_undo
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .push(
+                    GroupOp::RestoreGroup {
+                        group: gc,
+                        member_conn_ids,
+                    },
+                    GroupOp::DeleteGroup { id: id.clone() },
+                );
         }
         let groups = self.group_repo.all().await.unwrap_or_default();
         let connections = self.repo.all().await.unwrap_or_default();
@@ -83,13 +130,28 @@ impl AppController {
         group_id: Option<String>,
     ) {
         let connections = self.repo.all().await.unwrap_or_default();
-        if let Some(mut cc) = connections.iter().find(|c| c.id == conn_id).cloned() {
-            cc.group_id = group_id;
-            if let Err(e) = self.repo.upsert(&cc).await {
-                warn!(conn_id = %conn_id, error = %e, "failed to move connection to group");
-                return;
-            }
+        let Some(mut cc) = connections.into_iter().find(|c| c.id == conn_id) else {
+            return;
+        };
+        let old_group_id = cc.group_id.clone();
+        cc.group_id = group_id.clone();
+        if let Err(e) = self.repo.upsert(&cc).await {
+            warn!(conn_id = %conn_id, error = %e, "failed to move connection to group");
+            return;
         }
+        self.group_undo
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .push(
+                GroupOp::MoveConnectionToGroup {
+                    conn_id: conn_id.clone(),
+                    group_id: old_group_id,
+                },
+                GroupOp::MoveConnectionToGroup {
+                    conn_id: conn_id.clone(),
+                    group_id: group_id.clone(),
+                },
+            );
         let groups = self.group_repo.all().await.unwrap_or_default();
         let connections = self.repo.all().await.unwrap_or_default();
         let _ = self
@@ -103,13 +165,28 @@ impl AppController {
 
     pub(super) async fn handle_set_group_color(&self, group_id: String, color: String) {
         let groups = self.group_repo.all().await.unwrap_or_default();
-        if let Some(mut g) = groups.iter().find(|g| g.id == group_id).cloned() {
-            g.color = color;
-            if let Err(e) = self.group_repo.upsert(&g).await {
-                warn!(error = %e, "failed to set group color");
-                return;
-            }
+        let Some(mut g) = groups.into_iter().find(|g| g.id == group_id) else {
+            return;
+        };
+        let old_color = g.color.clone();
+        g.color = color.clone();
+        if let Err(e) = self.group_repo.upsert(&g).await {
+            warn!(error = %e, "failed to set group color");
+            return;
         }
+        self.group_undo
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .push(
+                GroupOp::SetGroupColor {
+                    id: group_id.clone(),
+                    color: old_color,
+                },
+                GroupOp::SetGroupColor {
+                    id: group_id.clone(),
+                    color: color.clone(),
+                },
+            );
         let groups = self.group_repo.all().await.unwrap_or_default();
         let connections = self.repo.all().await.unwrap_or_default();
         let _ = self

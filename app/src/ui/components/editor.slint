@@ -116,6 +116,11 @@ export component Editor inherits Rectangle {
     in-out property <int> find-sel-start: -1;
     in-out property <int> find-sel-end:   -1;
 
+    /// Fired when the user presses Ctrl+Z to undo text.
+    callback editor-undo();
+    /// Fired when the user presses Ctrl+Shift+Z to redo text.
+    callback editor-redo();
+
     /// Syntax highlight spans; updated by Rust on every text edit.
     in property <[HighlightSpan]> highlight-spans: [];
 
@@ -615,6 +620,15 @@ export component Editor inherits Rectangle {
                         && !event.modifiers.control
                         && !event.modifiers.alt) {
                     root.tab-key-pressed(inner-input.cursor-position-byte-offset);
+                    EventResult.accept
+                } else if (event.modifiers.control
+                        && !event.modifiers.alt
+                        && (event.text == "z" || event.text == "Z")) {
+                    if (event.modifiers.shift) {
+                        root.editor-redo();
+                    } else {
+                        root.editor-undo();
+                    }
                     EventResult.accept
                 } else {
                     EventResult.reject

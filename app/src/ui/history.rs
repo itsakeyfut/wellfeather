@@ -6,9 +6,16 @@ use tokio::sync::mpsc;
 
 use crate::app::command::Command;
 
+use super::tabs_state::TabsState;
+use super::undo::TextUndoState;
 use super::{send_cmd, with_ui};
 
-pub(super) fn register_history_callbacks(window: &crate::AppWindow, tx_cmd: mpsc::Sender<Command>) {
+pub(super) fn register_history_callbacks(
+    window: &crate::AppWindow,
+    tx_cmd: mpsc::Sender<Command>,
+    tabs_state: Rc<RefCell<TabsState>>,
+    undo_state: Rc<TextUndoState>,
+) {
     let ui = window.global::<crate::UiState>();
 
     // history-open: send SearchHistory with empty keyword to load recent 100 rows.
@@ -58,12 +65,20 @@ pub(super) fn register_history_callbacks(window: &crate::AppWindow, tx_cmd: mpsc
     // history-insert-sql: insert full SQL at the editor cursor position.
     {
         let ww = window.as_weak();
+        let tabs_state = Rc::clone(&tabs_state); // clone required: on_history_insert_sql closure
+        let undo_state = Rc::clone(&undo_state); // clone required: on_history_insert_sql closure
         ui.on_history_insert_sql(move |sql, cursor_pos| {
             with_ui(&ww, |ui| {
                 let current = ui.get_editor_text().to_string();
+                let tab_id = ui.get_editor_active_tab_id().to_string();
+                undo_state.flush_before_programmatic_change(&mut tabs_state.borrow_mut(), &tab_id);
+                tabs_state
+                    .borrow_mut()
+                    .push_undo_snapshot(&tab_id, current.clone());
                 let pos = (cursor_pos as usize).min(current.len());
                 let new_text = format!("{}{}{}", &current[..pos], sql, &current[pos..]);
                 let new_cursor = (pos + sql.len()) as i32;
+                *undo_state.last_known.borrow_mut() = new_text.clone();
                 ui.set_editor_text(new_text.clone().into());
                 ui.invoke_update_highlight(new_text.into());
                 ui.set_editor_cursor_target(new_cursor);
@@ -75,9 +90,16 @@ pub(super) fn register_history_callbacks(window: &crate::AppWindow, tx_cmd: mpsc
     // history-execute-sql: replace editor text and execute immediately.
     {
         let ww = window.as_weak();
+        let tabs_state = Rc::clone(&tabs_state); // clone required: on_history_execute_sql closure
+        let undo_state = Rc::clone(&undo_state); // clone required: on_history_execute_sql closure
         ui.on_history_execute_sql(move |sql| {
             let Some(w) = ww.upgrade() else { return };
             let ui = w.global::<crate::UiState>();
+            let current = ui.get_editor_text().to_string();
+            let tab_id = ui.get_editor_active_tab_id().to_string();
+            undo_state.flush_before_programmatic_change(&mut tabs_state.borrow_mut(), &tab_id);
+            tabs_state.borrow_mut().push_undo_snapshot(&tab_id, current);
+            *undo_state.last_known.borrow_mut() = sql.to_string();
             ui.set_editor_text(sql.clone());
             ui.invoke_update_highlight(sql.clone());
             ui.invoke_run_query(sql);

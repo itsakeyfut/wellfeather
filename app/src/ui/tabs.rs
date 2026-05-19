@@ -8,6 +8,7 @@ use tokio::sync::mpsc;
 use crate::app::command::Command;
 
 use super::appearance::{apply_highlight_spans, compute_highlight_spans};
+use super::undo::TextUndoState;
 use super::{SidebarUiState, send_cmd, tabs_state, with_sidebar, with_ui};
 
 pub(super) fn tabs_to_slint(tabs: &[tabs_state::TabEntry]) -> Vec<crate::TabEntry> {
@@ -39,6 +40,7 @@ pub(super) fn register_tab_callbacks(
     tabs_state: Rc<RefCell<tabs_state::TabsState>>,
     sidebar_state: Arc<Mutex<SidebarUiState>>,
     hl_model: Rc<slint::VecModel<crate::HighlightSpan>>,
+    undo_state: Rc<TextUndoState>,
 ) {
     let ui = window.global::<crate::UiState>();
 
@@ -46,6 +48,7 @@ pub(super) fn register_tab_callbacks(
     {
         let window_weak = window.as_weak();
         let tabs_state = Rc::clone(&tabs_state); // clone required: callback closure needs owned tabs_state
+        let undo_state = Rc::clone(&undo_state); // clone required: on_new_tab closure
         ui.on_new_tab(move || {
             let current_text = window_weak
                 .upgrade()
@@ -55,18 +58,25 @@ pub(super) fn register_tab_callbacks(
                 .upgrade()
                 .map(|w| w.global::<crate::UiState>().get_tv_sub_tab() as usize)
                 .unwrap_or(0);
-            let (slint_tabs, active_idx) = {
+            let (slint_tabs, active_idx, new_tab_id) = {
                 let mut ts = tabs_state.borrow_mut();
                 ts.save_current_text(&current_text);
                 ts.save_tv_sub_tab(current_sub_tab);
-                ts.add_sql_editor();
-                (tabs_to_slint(&ts.tabs), ts.active_index as i32)
+                let (id, _) = ts.add_sql_editor();
+                let slint_tabs = tabs_to_slint(&ts.tabs);
+                let active_idx = ts.active_index as i32;
+                (slint_tabs, active_idx, id)
             };
+            // Reset undo debounce state when switching to a fresh tab.
+            *undo_state.debounce.borrow_mut() = None;
+            *undo_state.burst_start.borrow_mut() = None;
+            *undo_state.last_known.borrow_mut() = String::new();
             with_ui(&window_weak, |ui| {
                 ui.set_tabs(Rc::new(slint::VecModel::from(slint_tabs)).into());
                 ui.set_active_tab_index(active_idx);
                 ui.set_active_tab_kind_sql(true);
                 ui.set_editor_text("".into());
+                ui.set_editor_active_tab_id(new_tab_id.into());
             });
         });
     }
@@ -77,6 +87,7 @@ pub(super) fn register_tab_callbacks(
         let tabs_state = Rc::clone(&tabs_state); // clone required: callback closure needs owned tabs_state
         let sidebar_state = Arc::clone(&sidebar_state); // clone required: callback closure needs owned sidebar_state
         let hl_model = Rc::clone(&hl_model); // clone required: on_switch_tab closure
+        let undo_state = Rc::clone(&undo_state); // clone required: on_switch_tab closure
         ui.on_switch_tab(move |i| {
             let i = i as usize;
             let current_text = window_weak
@@ -87,17 +98,28 @@ pub(super) fn register_tab_callbacks(
                 .upgrade()
                 .map(|w| w.global::<crate::UiState>().get_tv_sub_tab() as usize)
                 .unwrap_or(0);
-            let (slint_tabs, active_idx, kind_sql, editor_text, tv_name, tv_cols, tv_sub_tab) = {
+            let (
+                slint_tabs,
+                active_idx,
+                tab_id,
+                kind_sql,
+                editor_text,
+                tv_name,
+                tv_cols,
+                tv_sub_tab,
+            ) = {
                 let mut ts = tabs_state.borrow_mut();
                 ts.save_current_text(&current_text);
                 ts.save_tv_sub_tab(current_sub_tab);
                 ts.set_active(i);
                 let slint_tabs = tabs_to_slint(&ts.tabs);
                 let active_idx = ts.active_index as i32;
+                let tab_id = ts.active_tab().map(|t| t.id.clone()).unwrap_or_default();
                 match ts.active_tab().map(|t| t.kind.clone()) {
                     Some(tabs_state::TabKind::SqlEditor { query_text }) => (
                         slint_tabs,
                         active_idx,
+                        tab_id,
                         true,
                         query_text,
                         String::new(),
@@ -124,6 +146,7 @@ pub(super) fn register_tab_callbacks(
                         (
                             slint_tabs,
                             active_idx,
+                            tab_id,
                             false,
                             String::new(),
                             table_name,
@@ -134,6 +157,7 @@ pub(super) fn register_tab_callbacks(
                     None => (
                         slint_tabs,
                         active_idx,
+                        tab_id,
                         true,
                         String::new(),
                         String::new(),
@@ -142,6 +166,11 @@ pub(super) fn register_tab_callbacks(
                     ),
                 }
             };
+            // Reset undo debounce when switching tabs — next keystroke's burst_start
+            // must capture the new tab's text, not the old tab's.
+            *undo_state.debounce.borrow_mut() = None;
+            *undo_state.burst_start.borrow_mut() = None;
+            *undo_state.last_known.borrow_mut() = editor_text.clone();
             let spans = if kind_sql {
                 compute_highlight_spans(&editor_text)
             } else {
@@ -151,6 +180,7 @@ pub(super) fn register_tab_callbacks(
                 ui.set_tabs(Rc::new(slint::VecModel::from(slint_tabs)).into());
                 ui.set_active_tab_index(active_idx);
                 ui.set_active_tab_kind_sql(kind_sql);
+                ui.set_editor_active_tab_id(tab_id.into());
                 if kind_sql {
                     ui.set_editor_text(editor_text.into());
                     apply_highlight_spans(&hl_model, spans);
@@ -168,6 +198,7 @@ pub(super) fn register_tab_callbacks(
         let window_weak = window.as_weak();
         let tabs_state = Rc::clone(&tabs_state); // clone required: callback closure needs owned tabs_state
         let hl_model = Rc::clone(&hl_model); // clone required: on_close_tab closure
+        let undo_state = Rc::clone(&undo_state); // clone required: on_close_tab closure
         ui.on_close_tab(move |i| {
             let i = i as usize;
             let current_text = window_weak
@@ -183,11 +214,19 @@ pub(super) fn register_tab_callbacks(
             }
             let slint_tabs = tabs_to_slint(&ts.tabs);
             let active_idx = ts.active_index as i32;
-            let (kind_sql, editor_text) = match ts.active_tab().map(|t| t.kind.clone()) {
-                Some(tabs_state::TabKind::SqlEditor { query_text }) => (true, query_text),
-                _ => (false, String::new()),
+            let (tab_id, kind_sql, editor_text) = match ts
+                .active_tab()
+                .map(|t| (t.id.clone(), t.kind.clone()))
+            {
+                Some((id, tabs_state::TabKind::SqlEditor { query_text })) => (id, true, query_text),
+                Some((id, _)) => (id, false, String::new()),
+                None => (String::new(), true, String::new()),
             };
             drop(ts);
+            // Reset undo debounce for the newly active tab.
+            *undo_state.debounce.borrow_mut() = None;
+            *undo_state.burst_start.borrow_mut() = None;
+            *undo_state.last_known.borrow_mut() = editor_text.clone();
             let spans = if kind_sql {
                 compute_highlight_spans(&editor_text)
             } else {
@@ -197,6 +236,7 @@ pub(super) fn register_tab_callbacks(
                 ui.set_tabs(Rc::new(slint::VecModel::from(slint_tabs)).into());
                 ui.set_active_tab_index(active_idx);
                 ui.set_active_tab_kind_sql(kind_sql);
+                ui.set_editor_active_tab_id(tab_id.into());
                 if kind_sql {
                     ui.set_editor_text(editor_text.into());
                     apply_highlight_spans(&hl_model, spans);

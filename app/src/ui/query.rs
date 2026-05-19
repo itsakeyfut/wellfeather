@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -8,6 +9,8 @@ use crate::app::command::{Command, ConfigUpdate};
 use crate::state::SharedState;
 
 use super::appearance::{apply_highlight_spans, compute_highlight_spans};
+use super::tabs_state::TabsState;
+use super::undo::TextUndoState;
 use super::{
     DEFAULT_COLUMN_WIDTH, OriginalQueryData, SharedOriginalData, check_safe_dml, send_cmd,
     set_status, with_ui,
@@ -222,15 +225,23 @@ pub(super) fn register_editor_callbacks(window: &crate::AppWindow, tx_cmd: mpsc:
 pub(super) fn register_formatter_callback(
     window: &crate::AppWindow,
     hl_model: Rc<slint::VecModel<crate::HighlightSpan>>,
+    tabs_state: Rc<RefCell<TabsState>>,
+    undo_state: Rc<TextUndoState>,
 ) {
     let ui = window.global::<crate::UiState>();
     let window_weak = window.as_weak(); // clone required: on_format_sql closure
     ui.on_format_sql(move || {
         with_ui(&window_weak, |ui| {
             let text = ui.get_editor_text().to_string();
+            let tab_id = ui.get_editor_active_tab_id().to_string();
+            undo_state.flush_before_programmatic_change(&mut tabs_state.borrow_mut(), &tab_id);
+            tabs_state
+                .borrow_mut()
+                .push_undo_snapshot(&tab_id, text.clone());
             let formatted = wf_query::formatter::format_sql(&text);
             tracing::debug!(input = %text, output = %formatted, "on_format_sql called");
             let spans = compute_highlight_spans(&formatted);
+            *undo_state.last_known.borrow_mut() = formatted.clone();
             ui.set_editor_text(formatted.into());
             apply_highlight_spans(&hl_model, spans);
         });
