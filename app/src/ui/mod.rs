@@ -3,6 +3,7 @@ mod completion;
 mod connection;
 mod event;
 mod find_replace;
+mod history;
 mod metadata_search;
 mod palette;
 mod query;
@@ -650,6 +651,7 @@ impl UI {
         );
         appearance::register_language_callback(&window, tx_cmd.clone());
         find_replace::register_find_replace_callbacks(&window, find_history_svc);
+        history::register_history_callbacks(&window, tx_cmd.clone());
         snippet::register_snippet_callbacks(&window, Arc::clone(&snippet_repo));
         metadata_search::register_metadata_search_callbacks(&window, Arc::clone(&sidebar_state));
         palette::register_command_palette_callbacks(

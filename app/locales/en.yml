@@ -27,3 +27,7 @@ error:
   group_create_failed: "Failed to create group: %{reason}"
   group_rename_failed: "Failed to rename group: %{reason}"
   group_delete_failed: "Failed to delete group: %{reason}"
+history:
+  title: "Query History"
+  placeholder: "Search history..."
+  empty: "No history yet"

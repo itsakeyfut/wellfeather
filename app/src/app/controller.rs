@@ -16,6 +16,7 @@
 mod config;
 mod connection;
 mod group;
+mod history;
 mod metadata;
 mod query;
 
@@ -147,6 +148,9 @@ impl AppController {
                 }
                 Command::SetGroupExpanded { id, expanded } => {
                     this.handle_set_group_expanded(id, expanded).await
+                }
+                Command::SearchHistory { keyword, conn_id } => {
+                    this.handle_search_history(keyword, conn_id).await
                 }
             }
         }
