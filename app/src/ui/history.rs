@@ -64,7 +64,8 @@ pub(super) fn register_history_callbacks(window: &crate::AppWindow, tx_cmd: mpsc
                 let pos = (cursor_pos as usize).min(current.len());
                 let new_text = format!("{}{}{}", &current[..pos], sql, &current[pos..]);
                 let new_cursor = (pos + sql.len()) as i32;
-                ui.set_editor_text(new_text.into());
+                ui.set_editor_text(new_text.clone().into());
+                ui.invoke_update_highlight(new_text.into());
                 ui.set_editor_cursor_target(new_cursor);
                 ui.set_show_history(false);
             });
@@ -78,6 +79,7 @@ pub(super) fn register_history_callbacks(window: &crate::AppWindow, tx_cmd: mpsc
             let Some(w) = ww.upgrade() else { return };
             let ui = w.global::<crate::UiState>();
             ui.set_editor_text(sql.clone());
+            ui.invoke_update_highlight(sql.clone());
             ui.invoke_run_query(sql);
         });
     }
