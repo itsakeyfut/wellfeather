@@ -59,9 +59,9 @@ pub(super) fn register_undo_callbacks(
 
     // ── text-changed: debounce 500ms, snapshot pre-burst text ────────────────
     {
-        let undo_state2 = Rc::clone(&undo_state);
-        let tabs_state2 = Rc::clone(&tabs_state);
-        let ww2 = ww.clone();
+        let undo_state2 = Rc::clone(&undo_state); // clone required: on_text_changed closure
+        let tabs_state2 = Rc::clone(&tabs_state); // clone required: on_text_changed closure
+        let ww2 = ww.clone(); // clone required: on_text_changed closure
         ui.on_text_changed(move |new_text| {
             let new_text = new_text.to_string();
             let is_first_of_burst = undo_state2.debounce.borrow().is_none();
@@ -83,7 +83,7 @@ pub(super) fn register_undo_callbacks(
             // Reset debounce timer.
             *undo_state2.debounce.borrow_mut() = None; // cancel previous
             let undo_state3 = Rc::clone(&undo_state2); // clone required: SingleShot timer closure
-            let tabs_state3 = Rc::clone(&tabs_state2);
+            let tabs_state3 = Rc::clone(&tabs_state2); // clone required: SingleShot timer closure
             let timer = slint::Timer::default();
             timer.start(
                 slint::TimerMode::SingleShot,
@@ -105,9 +105,9 @@ pub(super) fn register_undo_callbacks(
 
     // ── editor-undo: restore previous text snapshot ───────────────────────────
     {
-        let undo_state2 = Rc::clone(&undo_state);
-        let tabs_state2 = Rc::clone(&tabs_state);
-        let ww2 = ww.clone();
+        let undo_state2 = Rc::clone(&undo_state); // clone required: on_editor_undo closure
+        let tabs_state2 = Rc::clone(&tabs_state); // clone required: on_editor_undo closure
+        let ww2 = ww.clone(); // clone required: on_editor_undo closure
         ui.on_editor_undo(move || {
             with_ui(&ww2, |ui| {
                 let tab_id = ui.get_editor_active_tab_id().to_string();
@@ -137,9 +137,9 @@ pub(super) fn register_undo_callbacks(
 
     // ── editor-redo: restore next text snapshot ───────────────────────────────
     {
-        let undo_state2 = Rc::clone(&undo_state);
-        let tabs_state2 = Rc::clone(&tabs_state);
-        let ww2 = ww.clone();
+        let undo_state2 = Rc::clone(&undo_state); // clone required: on_editor_redo closure
+        let tabs_state2 = Rc::clone(&tabs_state); // clone required: on_editor_redo closure
+        let ww2 = ww.clone(); // clone required: on_editor_redo closure
         ui.on_editor_redo(move || {
             with_ui(&ww2, |ui| {
                 let tab_id = ui.get_editor_active_tab_id().to_string();

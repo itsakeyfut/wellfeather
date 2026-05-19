@@ -44,17 +44,14 @@ impl AppController {
 
     pub(super) async fn handle_rename_group(&self, id: String, name: String) {
         let groups = self.group_repo.all().await.unwrap_or_default();
-        let old_name = groups
-            .iter()
-            .find(|g| g.id == id)
-            .map(|g| g.name.clone())
-            .unwrap_or_default();
-        if let Some(mut g) = groups.iter().find(|g| g.id == id).cloned() {
-            g.name = name.clone();
-            if let Err(e) = self.group_repo.upsert(&g).await {
-                warn!(error = %e, "failed to rename group");
-                return;
-            }
+        let Some(mut g) = groups.into_iter().find(|g| g.id == id) else {
+            return;
+        };
+        let old_name = g.name.clone();
+        g.name = name.clone();
+        if let Err(e) = self.group_repo.upsert(&g).await {
+            warn!(error = %e, "failed to rename group");
+            return;
         }
         self.group_undo
             .lock()
@@ -133,16 +130,14 @@ impl AppController {
         group_id: Option<String>,
     ) {
         let connections = self.repo.all().await.unwrap_or_default();
-        let old_group_id = connections
-            .iter()
-            .find(|c| c.id == conn_id)
-            .and_then(|c| c.group_id.clone());
-        if let Some(mut cc) = connections.iter().find(|c| c.id == conn_id).cloned() {
-            cc.group_id = group_id.clone();
-            if let Err(e) = self.repo.upsert(&cc).await {
-                warn!(conn_id = %conn_id, error = %e, "failed to move connection to group");
-                return;
-            }
+        let Some(mut cc) = connections.into_iter().find(|c| c.id == conn_id) else {
+            return;
+        };
+        let old_group_id = cc.group_id.clone();
+        cc.group_id = group_id.clone();
+        if let Err(e) = self.repo.upsert(&cc).await {
+            warn!(conn_id = %conn_id, error = %e, "failed to move connection to group");
+            return;
         }
         self.group_undo
             .lock()
@@ -170,17 +165,14 @@ impl AppController {
 
     pub(super) async fn handle_set_group_color(&self, group_id: String, color: String) {
         let groups = self.group_repo.all().await.unwrap_or_default();
-        let old_color = groups
-            .iter()
-            .find(|g| g.id == group_id)
-            .map(|g| g.color.clone())
-            .unwrap_or_default();
-        if let Some(mut g) = groups.iter().find(|g| g.id == group_id).cloned() {
-            g.color = color.clone();
-            if let Err(e) = self.group_repo.upsert(&g).await {
-                warn!(error = %e, "failed to set group color");
-                return;
-            }
+        let Some(mut g) = groups.into_iter().find(|g| g.id == group_id) else {
+            return;
+        };
+        let old_color = g.color.clone();
+        g.color = color.clone();
+        if let Err(e) = self.group_repo.upsert(&g).await {
+            warn!(error = %e, "failed to set group color");
+            return;
         }
         self.group_undo
             .lock()
