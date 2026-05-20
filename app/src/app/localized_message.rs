@@ -23,6 +23,7 @@ impl LocalizedMessage for DbError {
             .to_string(),
             DbError::KnownHostsWrite(s) => t!("error.ssh_tunnel_failed", reason = s).to_string(),
             DbError::SslError(s) => t!("error.ssl_error", reason = s).to_string(),
+            DbError::Timeout => t!("error.query_timeout").to_string(),
         }
     }
 }

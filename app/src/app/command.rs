@@ -16,6 +16,8 @@ pub enum ConfigUpdate {
     },
     ReduceMotion(bool),
     TabWidth(u32),
+    /// Set the query execution timeout (seconds; 0 = disabled).
+    QueryTimeout(u64),
 }
 
 /// UI → Controller channel messages.

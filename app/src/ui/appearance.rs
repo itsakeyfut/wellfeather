@@ -214,11 +214,20 @@ pub(super) fn register_editor_prefs_callbacks(
         ui.invoke_update_highlight(shared);
     });
 
-    let tx_cmd = tx_cmd.clone(); // clone required: on_set_tab_width closure
-    ui.on_set_tab_width(move |width| {
+    {
+        let tx_cmd = tx_cmd.clone(); // clone required: on_set_tab_width closure
+        ui.on_set_tab_width(move |width| {
+            send_cmd(
+                &tx_cmd,
+                Command::UpdateConfig(ConfigUpdate::TabWidth(width as u32)),
+            );
+        });
+    }
+
+    ui.on_set_query_timeout_secs(move |secs| {
         send_cmd(
             &tx_cmd,
-            Command::UpdateConfig(ConfigUpdate::TabWidth(width as u32)),
+            Command::UpdateConfig(ConfigUpdate::QueryTimeout(secs.max(0) as u64)),
         );
     });
 }

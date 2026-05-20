@@ -9,6 +9,7 @@ use wf_config::models::Theme;
 struct UiData {
     theme: Theme,
     page_size: usize,
+    query_timeout_secs: u64,
 }
 
 impl Default for UiData {
@@ -16,6 +17,7 @@ impl Default for UiData {
         Self {
             theme: Theme::Dark,
             page_size: 500,
+            query_timeout_secs: 0,
         }
     }
 }
@@ -69,5 +71,21 @@ impl UiState {
             .write()
             .unwrap_or_else(|p| p.into_inner())
             .page_size = size;
+    }
+
+    /// Returns the current query timeout in seconds (0 = disabled).
+    pub fn query_timeout_secs(&self) -> u64 {
+        self.data
+            .read()
+            .unwrap_or_else(|p| p.into_inner())
+            .query_timeout_secs
+    }
+
+    /// Updates the query timeout.
+    pub fn set_query_timeout_secs(&self, secs: u64) {
+        self.data
+            .write()
+            .unwrap_or_else(|p| p.into_inner())
+            .query_timeout_secs = secs;
     }
 }

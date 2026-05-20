@@ -33,6 +33,9 @@ pub enum DbError {
 
     #[error("SSL/TLS error: {0}")]
     SslError(String),
+
+    #[error("query timed out")]
+    Timeout,
 }
 
 // ---------------------------------------------------------------------------
@@ -58,5 +61,10 @@ mod tests {
     fn db_error_query_error_should_include_message() {
         let e = DbError::QueryError("syntax error".to_string());
         assert_eq!(e.to_string(), "query execution error: syntax error");
+    }
+
+    #[test]
+    fn db_error_timeout_should_display_correctly() {
+        assert_eq!(DbError::Timeout.to_string(), "query timed out");
     }
 }

@@ -64,6 +64,12 @@ impl AppController {
                     warn!(error = %e, "failed to persist tab_width to config");
                 }
             }
+            ConfigUpdate::QueryTimeout(secs) => {
+                self.state.ui.set_query_timeout_secs(secs);
+                if let Err(e) = self.session.save_query_timeout(secs) {
+                    warn!(error = %e, "failed to persist query_timeout_secs to config");
+                }
+            }
         }
     }
 }

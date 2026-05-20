@@ -23,6 +23,7 @@ error:
   ssh_fingerprint_mismatch: "SSHホスト鍵が一致しません — 期待値: %{expected}、実際値: %{actual}"
   ssh_conn_string_unsupported: "接続文字列モードではSSHトンネルはサポートされていません。Individual Fieldsに切り替えてください。"
   ssl_error: "SSL/TLSエラー: %{reason}"
+  query_timeout: "クエリがタイムアウトしました"
   ssl_cert_copy_failed: "証明書ファイルのコピーに失敗しました: %{reason}"
   group_create_failed: "グループの作成に失敗しました: %{reason}"
   group_rename_failed: "グループの名前変更に失敗しました: %{reason}"

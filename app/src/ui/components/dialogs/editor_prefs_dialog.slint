@@ -3,9 +3,11 @@ import { ActionButton, ModalOverlay } from "../common.slint";
 
 export component EditorPrefsDialog inherits ModalOverlay {
     callback cancel-clicked;
-    callback apply-clicked(int);
+    // tab-width, query-timeout-secs
+    callback apply-clicked(int, int);
 
     in-out property <int> tab-width: 2;
+    in-out property <int> query-timeout-secs: 0;
 
     VerticalLayout {
         padding: Layout.padding-2xl;
@@ -89,6 +91,93 @@ export component EditorPrefsDialog inherits ModalOverlay {
             }
         }
 
+        // Query-timeout selector row
+        HorizontalLayout {
+            spacing: Layout.spacing-lg;
+            alignment: start;
+
+            Text {
+                text: @tr("Query Timeout");
+                color: Colors.subtext1;
+                font-size: Typography.size-base;
+                vertical-alignment: center;
+                width: 90px;
+            }
+
+            // Four segmented buttons: Off / 10s / 30s / 60s
+            HorizontalLayout {
+                spacing: Layout.spacing-sm;
+
+                qt0 := Rectangle {
+                    width: 44px;
+                    height: 28px;
+                    border-radius: 4px;
+                    border-width: 1px;
+                    border-color: root.query-timeout-secs == 0 ? Colors.blue : Colors.surface2;
+                    background: root.query-timeout-secs == 0 ? Colors.blue : Colors.surface1;
+                    Text {
+                        text: @tr("Off");
+                        color: root.query-timeout-secs == 0 ? Colors.base : Colors.text;
+                        font-size: Typography.size-sm;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                    TouchArea { clicked => { root.query-timeout-secs = 0; } }
+                }
+
+                qt10 := Rectangle {
+                    width: 44px;
+                    height: 28px;
+                    border-radius: 4px;
+                    border-width: 1px;
+                    border-color: root.query-timeout-secs == 10 ? Colors.blue : Colors.surface2;
+                    background: root.query-timeout-secs == 10 ? Colors.blue : Colors.surface1;
+                    Text {
+                        text: "10s";
+                        color: root.query-timeout-secs == 10 ? Colors.base : Colors.text;
+                        font-size: Typography.size-sm;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                    TouchArea { clicked => { root.query-timeout-secs = 10; } }
+                }
+
+                qt30 := Rectangle {
+                    width: 44px;
+                    height: 28px;
+                    border-radius: 4px;
+                    border-width: 1px;
+                    border-color: root.query-timeout-secs == 30 ? Colors.blue : Colors.surface2;
+                    background: root.query-timeout-secs == 30 ? Colors.blue : Colors.surface1;
+                    Text {
+                        text: "30s";
+                        color: root.query-timeout-secs == 30 ? Colors.base : Colors.text;
+                        font-size: Typography.size-sm;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                    TouchArea { clicked => { root.query-timeout-secs = 30; } }
+                }
+
+                qt60 := Rectangle {
+                    width: 44px;
+                    height: 28px;
+                    border-radius: 4px;
+                    border-width: 1px;
+                    border-color: root.query-timeout-secs == 60 ? Colors.blue : Colors.surface2;
+                    background: root.query-timeout-secs == 60 ? Colors.blue : Colors.surface1;
+                    Text {
+                        text: "60s";
+                        color: root.query-timeout-secs == 60 ? Colors.base : Colors.text;
+                        font-size: Typography.size-sm;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                    TouchArea { clicked => { root.query-timeout-secs = 60; } }
+                }
+            }
+        }
+
         HorizontalLayout {
             spacing: Layout.spacing-lg;
             alignment: end;
@@ -102,7 +191,7 @@ export component EditorPrefsDialog inherits ModalOverlay {
                 text: @tr("Apply");
                 bg: Colors.blue;
                 fg: Colors.base;
-                clicked => { root.apply-clicked(root.tab-width); }
+                clicked => { root.apply-clicked(root.tab-width, root.query-timeout-secs); }
             }
         }
     }

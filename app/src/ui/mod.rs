@@ -601,6 +601,7 @@ impl UI {
         ui_global.set_font_size(config.appearance.font_size as i32);
         ui_global.set_reduce_motion(config.appearance.reduce_motion);
         ui_global.set_tab_width(config.editor.tab_width as i32);
+        ui_global.set_query_timeout_secs(config.editor.query_timeout_secs as i32);
         // Apply locale after the Slint component exists — select_bundled_translation
         // requires a live component and is a no-op if called before one is created.
         let lang = &config.ui.language;
