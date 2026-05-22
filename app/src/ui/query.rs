@@ -19,9 +19,9 @@ use super::{
 /// Convert one raw result row (`Option<String>` cells) into a Slint `RowData`.
 /// `None` → `RowCellData { value: "", is_null: true }`
 /// `Some(s)` → `RowCellData { value: s, is_null: false }`
-fn rows_to_ui(cells: Vec<Option<String>>) -> crate::RowData {
+fn rows_to_ui(cells: &[Option<String>]) -> crate::RowData {
     let cell_data: Vec<crate::RowCellData> = cells
-        .into_iter()
+        .iter()
         .map(|c| crate::RowCellData {
             value: c.as_deref().unwrap_or("").into(),
             is_null: c.is_none(),
@@ -54,7 +54,7 @@ pub(crate) fn result_to_tsv(columns: &[&str], rows: &[Vec<Option<String>>]) -> S
 /// Sort `rows` in-place by column `col`.
 /// - Tries numeric (`f64`) comparison first; falls back to lexicographic.
 /// - `None` (SQL NULL) always sorts last regardless of direction.
-pub(crate) fn sort_rows(rows: &mut [Vec<Option<String>>], col: usize, ascending: bool) {
+pub(crate) fn sort_rows(rows: &mut [&Vec<Option<String>>], col: usize, ascending: bool) {
     rows.sort_by(|a, b| {
         let av = a.get(col).and_then(|v| v.as_deref());
         let bv = b.get(col).and_then(|v| v.as_deref());
@@ -74,6 +74,25 @@ pub(crate) fn sort_rows(rows: &mut [Vec<Option<String>>], col: usize, ascending:
     });
 }
 
+/// Case-insensitive ASCII substring search with zero heap allocation.
+///
+/// `needle` must already be lowercased (via `str::to_lowercase`). Non-ASCII bytes
+/// in `haystack` pass through `to_ascii_lowercase()` unchanged, so non-ASCII
+/// uppercase letters (e.g. "É") will not match their lowercase equivalents ("é").
+/// This is an acceptable trade-off for SQL data, which is almost entirely ASCII.
+fn contains_case_insensitive_ascii(haystack: &str, needle: &str) -> bool {
+    if needle.is_empty() {
+        return true;
+    }
+    let h = haystack.as_bytes();
+    let n = needle.as_bytes();
+    if n.len() > h.len() {
+        return false;
+    }
+    h.windows(n.len())
+        .any(|w| w.iter().zip(n).all(|(a, b)| a.to_ascii_lowercase() == *b))
+}
+
 /// Filter `rows` according to `query`:
 ///
 /// * Empty query → return all rows.
@@ -81,14 +100,16 @@ pub(crate) fn sort_rows(rows: &mut [Vec<Option<String>>], col: usize, ascending:
 ///   NULL cells never match an `= 'value'` predicate.
 /// * Anything else → case-insensitive substring match across all columns
 ///   (NULL cells are treated as empty string for substring matching).
-pub(crate) fn filter_rows(
+///
+/// Returns references into the original slice — no String cloning per cell.
+pub(crate) fn filter_rows<'a>(
     columns: &[slint::SharedString],
-    rows: &[Vec<Option<String>>],
+    rows: &'a [Vec<Option<String>>],
     query: &str,
-) -> Vec<Vec<Option<String>>> {
+) -> Vec<&'a Vec<Option<String>>> {
     let query = query.trim();
     if query.is_empty() {
-        return rows.to_vec();
+        return rows.iter().collect();
     }
     if let Some((col_name, value)) = parse_col_eq(query) {
         let col_idx = columns
@@ -98,7 +119,6 @@ pub(crate) fn filter_rows(
             Some(idx) => rows
                 .iter()
                 .filter(|row| row.get(idx).is_some_and(|v| v.as_deref() == Some(value)))
-                .cloned()
                 .collect(),
             None => vec![],
         }
@@ -107,13 +127,9 @@ pub(crate) fn filter_rows(
         rows.iter()
             .filter(|row| {
                 row.iter().any(|cell| {
-                    cell.as_deref()
-                        .unwrap_or("")
-                        .to_lowercase()
-                        .contains(&query_lower)
+                    contains_case_insensitive_ascii(cell.as_deref().unwrap_or(""), &query_lower)
                 })
             })
-            .cloned()
             .collect()
     }
 }
@@ -425,7 +441,8 @@ pub(super) fn register_result_callbacks(
                     sort_rows(&mut filtered, col, data.sort_asc);
                 }
                 let row_count = filtered.len() as i32;
-                let rows: Vec<crate::RowData> = filtered.into_iter().map(rows_to_ui).collect();
+                let rows: Vec<crate::RowData> =
+                    filtered.into_iter().map(|r| rows_to_ui(r)).collect();
                 ui.set_result_rows(Rc::new(slint::VecModel::from(rows)).into());
                 ui.set_result_row_count(row_count);
                 ui.set_result_active_filter(query);
@@ -444,12 +461,13 @@ pub(super) fn register_result_callbacks(
                 let Some(ref data) = *orig else {
                     return;
                 };
-                let mut rows: Vec<Vec<Option<String>>> = data.rows.clone();
+                let mut rows: Vec<&Vec<Option<String>>> = data.rows.iter().collect();
                 if let Some(col) = data.sort_col {
                     sort_rows(&mut rows, col, data.sort_asc);
                 }
                 let row_count = rows.len() as i32;
-                let ui_rows: Vec<crate::RowData> = rows.into_iter().map(rows_to_ui).collect();
+                let ui_rows: Vec<crate::RowData> =
+                    rows.into_iter().map(|r| rows_to_ui(r)).collect();
                 ui.set_result_rows(Rc::new(slint::VecModel::from(ui_rows)).into());
                 ui.set_result_row_count(row_count);
                 ui.set_result_active_filter("".into());
@@ -637,7 +655,9 @@ pub(super) fn register_result_callbacks(
         ui_state.on_sort_result_col(move |col_i| {
             with_ui(&window_weak, |ui| {
                 let filter_q = ui.get_result_active_filter().to_string();
-                let (new_col, new_asc, mut rows) = {
+                // filter_rows returns references into orig's data, so sort and conversion
+                // must happen inside the lock block before the MutexGuard drops.
+                let (new_col, new_asc, row_count, ui_rows) = {
                     let mut orig = original_data.lock().unwrap_or_else(|p| p.into_inner());
                     let Some(ref mut data) = *orig else {
                         return;
@@ -650,14 +670,15 @@ pub(super) fn register_result_callbacks(
                     };
                     data.sort_col = new_col;
                     data.sort_asc = new_asc;
-                    let filtered = filter_rows(&data.columns, &data.rows, &filter_q);
-                    (new_col, new_asc, filtered)
+                    let mut filtered = filter_rows(&data.columns, &data.rows, &filter_q);
+                    if let Some(c) = new_col {
+                        sort_rows(&mut filtered, c, new_asc);
+                    }
+                    let row_count = filtered.len() as i32;
+                    let ui_rows: Vec<crate::RowData> =
+                        filtered.into_iter().map(|r| rows_to_ui(r)).collect();
+                    (new_col, new_asc, row_count, ui_rows)
                 };
-                if let Some(col) = new_col {
-                    sort_rows(&mut rows, col, new_asc);
-                }
-                let row_count = rows.len() as i32;
-                let ui_rows: Vec<crate::RowData> = rows.into_iter().map(rows_to_ui).collect();
                 ui.set_result_rows(Rc::new(slint::VecModel::from(ui_rows)).into());
                 ui.set_result_row_count(row_count);
                 ui.set_result_sort_col(new_col.map(|c| c as i32).unwrap_or(-1));
@@ -697,7 +718,7 @@ pub(super) fn handle_query_finished(
             ui.set_result_sort_asc(true);
             let col_model = Rc::new(slint::VecModel::from(columns));
             ui.set_result_columns(col_model.into());
-            let rows: Vec<crate::RowData> = raw_rows.into_iter().map(rows_to_ui).collect();
+            let rows: Vec<crate::RowData> = raw_rows.iter().map(|r| rows_to_ui(r)).collect();
             ui.set_result_rows(Rc::new(slint::VecModel::from(rows)).into());
             ui.set_result_row_count(row_count);
             ui.set_result_total_rows(row_count);
@@ -732,7 +753,7 @@ pub(super) fn handle_table_data_loaded(
             ui.set_tv_data_error("".into());
             let col_model = Rc::new(slint::VecModel::from(columns));
             ui.set_result_columns(col_model.into());
-            let rows: Vec<crate::RowData> = raw_rows.into_iter().map(rows_to_ui).collect();
+            let rows: Vec<crate::RowData> = raw_rows.iter().map(|r| rows_to_ui(r)).collect();
             ui.set_result_rows(Rc::new(slint::VecModel::from(rows)).into());
             ui.set_result_row_count(row_count);
             let widths: Vec<f32> = vec![DEFAULT_COLUMN_WIDTH; col_count];
@@ -821,11 +842,33 @@ mod tests {
         assert_eq!(result[0][0].as_deref(), Some("Alice"));
     }
 
+    #[test]
+    fn filter_rows_should_return_all_on_empty_query() {
+        let cols = vec![ss("id"), ss("name")];
+        let rows = vec![vec![sv("1"), sv("Alice")], vec![sv("2"), sv("Bob")]];
+        assert_eq!(filter_rows(&cols, &rows, "").len(), 2);
+    }
+
+    #[test]
+    fn filter_rows_should_match_case_insensitively() {
+        let cols = vec![ss("name")];
+        let rows = vec![vec![sv("Alice")], vec![sv("BOB")], vec![sv("charlie")]];
+        let r = filter_rows(&cols, &rows, "ALICE");
+        assert_eq!(r.len(), 1);
+        assert_eq!(r[0][0].as_deref(), Some("Alice"));
+        let r = filter_rows(&cols, &rows, "bob");
+        assert_eq!(r.len(), 1);
+        assert_eq!(r[0][0].as_deref(), Some("BOB"));
+    }
+
     // ── sort_rows ─────────────────────────────────────────────────────────────
 
     #[test]
     fn sort_rows_should_sort_strings_ascending() {
-        let mut rows = vec![vec![sv("banana")], vec![sv("apple")], vec![sv("cherry")]];
+        let r0 = vec![sv("banana")];
+        let r1 = vec![sv("apple")];
+        let r2 = vec![sv("cherry")];
+        let mut rows = vec![&r0, &r1, &r2];
         sort_rows(&mut rows, 0, true);
         assert_eq!(rows[0][0].as_deref(), Some("apple"));
         assert_eq!(rows[1][0].as_deref(), Some("banana"));
@@ -834,7 +877,10 @@ mod tests {
 
     #[test]
     fn sort_rows_should_sort_strings_descending() {
-        let mut rows = vec![vec![sv("banana")], vec![sv("apple")], vec![sv("cherry")]];
+        let r0 = vec![sv("banana")];
+        let r1 = vec![sv("apple")];
+        let r2 = vec![sv("cherry")];
+        let mut rows = vec![&r0, &r1, &r2];
         sort_rows(&mut rows, 0, false);
         assert_eq!(rows[0][0].as_deref(), Some("cherry"));
         assert_eq!(rows[1][0].as_deref(), Some("banana"));
@@ -843,7 +889,10 @@ mod tests {
 
     #[test]
     fn sort_rows_should_sort_numerically_when_values_are_numbers() {
-        let mut rows = vec![vec![sv("10")], vec![sv("2")], vec![sv("20")]];
+        let r0 = vec![sv("10")];
+        let r1 = vec![sv("2")];
+        let r2 = vec![sv("20")];
+        let mut rows = vec![&r0, &r1, &r2];
         sort_rows(&mut rows, 0, true);
         assert_eq!(rows[0][0].as_deref(), Some("2"));
         assert_eq!(rows[1][0].as_deref(), Some("10"));
@@ -852,7 +901,10 @@ mod tests {
 
     #[test]
     fn sort_rows_should_put_nulls_last_ascending() {
-        let mut rows = vec![vec![None], vec![sv("b")], vec![sv("a")]];
+        let r0: Vec<Option<String>> = vec![None];
+        let r1 = vec![sv("b")];
+        let r2 = vec![sv("a")];
+        let mut rows = vec![&r0, &r1, &r2];
         sort_rows(&mut rows, 0, true);
         assert_eq!(rows[0][0].as_deref(), Some("a"));
         assert_eq!(rows[1][0].as_deref(), Some("b"));
@@ -861,7 +913,10 @@ mod tests {
 
     #[test]
     fn sort_rows_should_put_nulls_last_descending() {
-        let mut rows = vec![vec![None], vec![sv("b")], vec![sv("a")]];
+        let r0: Vec<Option<String>> = vec![None];
+        let r1 = vec![sv("b")];
+        let r2 = vec![sv("a")];
+        let mut rows = vec![&r0, &r1, &r2];
         sort_rows(&mut rows, 0, false);
         assert_eq!(rows[0][0].as_deref(), Some("b"));
         assert_eq!(rows[1][0].as_deref(), Some("a"));
