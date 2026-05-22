@@ -138,6 +138,20 @@ impl SessionManager {
             .context("failed to save reduce_motion")?;
         Ok(())
     }
+
+    /// Persist `secs` as `[editor].query_timeout_secs` in `config.toml`.
+    pub fn save_query_timeout(&self, secs: u64) -> anyhow::Result<()> {
+        let mut config = self
+            .config_manager
+            .load()
+            .context("failed to load config for query_timeout_secs save")?;
+        config.editor.query_timeout_secs = secs;
+        self.config_manager
+            .save(&config)
+            .context("failed to save query_timeout_secs")?;
+        info!(query_timeout_secs = secs, "query_timeout_secs saved");
+        Ok(())
+    }
 }
 
 impl Default for SessionManager {
@@ -313,6 +327,20 @@ mod tests {
             .load()
             .unwrap();
         assert_eq!(cfg.editor.tab_width, 4);
+    }
+
+    #[test]
+    fn save_query_timeout_should_persist_to_config() {
+        let dir = tempdir().unwrap();
+        let sm = SessionManager::with_config_manager(ConfigManager::with_path(
+            dir.path().join("config.toml"),
+        ));
+        sm.save_query_timeout(30).unwrap();
+
+        let cfg = ConfigManager::with_path(dir.path().join("config.toml"))
+            .load()
+            .unwrap();
+        assert_eq!(cfg.editor.query_timeout_secs, 30);
     }
 
     #[test]

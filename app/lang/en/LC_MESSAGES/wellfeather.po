@@ -441,6 +441,34 @@ msgctxt "MenuBar"
 msgid "Show Snippets"
 msgstr "Show Snippets"
 
+msgctxt "MenuBar"
+msgid "Editor Preferences…"
+msgstr "Editor Preferences…"
+
+msgctxt "EditorPrefsDialog"
+msgid "Editor Preferences"
+msgstr "Editor Preferences"
+
+msgctxt "EditorPrefsDialog"
+msgid "Tab Width"
+msgstr "Tab Width"
+
+msgctxt "EditorPrefsDialog"
+msgid "Query Timeout"
+msgstr "Query Timeout"
+
+msgctxt "EditorPrefsDialog"
+msgid "Off"
+msgstr "Off"
+
+msgctxt "EditorPrefsDialog"
+msgid "Cancel"
+msgstr "Cancel"
+
+msgctxt "EditorPrefsDialog"
+msgid "Apply"
+msgstr "Apply"
+
 msgctxt "SnippetSaveDialog"
 msgid "Save Snippet"
 msgstr "Save Snippet"

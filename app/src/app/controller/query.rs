@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use chrono::Utc;
 use rust_i18n::t;
 use tokio_util::sync::CancellationToken;
@@ -49,6 +51,7 @@ impl AppController {
         let _ = self.tx_event.send(Event::QueryStarted).await;
 
         let page_size = self.state.ui.page_size();
+        let timeout_secs = self.state.ui.query_timeout_secs();
         let sql_to_run = super::apply_limit(&sql, page_size);
 
         let db = self.db.clone(); // clone required: tokio::spawn needs 'static
@@ -58,7 +61,23 @@ impl AppController {
         let conn_id_hist = conn_id.clone(); // clone required: history record needs owned id
         tokio::spawn(async move {
             let now = Utc::now().timestamp();
-            match db.execute_with_cancel(&conn_id, &sql_to_run, token).await {
+            let result = if timeout_secs > 0 {
+                match tokio::time::timeout(
+                    Duration::from_secs(timeout_secs),
+                    db.execute_with_cancel(&conn_id, &sql_to_run, token.clone()),
+                )
+                .await
+                {
+                    Ok(r) => r,
+                    Err(_elapsed) => {
+                        token.cancel();
+                        Err(DbError::Timeout)
+                    }
+                }
+            } else {
+                db.execute_with_cancel(&conn_id, &sql_to_run, token).await
+            };
+            match result {
                 Ok(result) => {
                     let exec = wf_db::models::QueryExecution {
                         id: 0,
@@ -142,6 +161,7 @@ impl AppController {
         let _ = self.tx_event.send(Event::QueryStarted).await;
 
         let page_size = self.state.ui.page_size();
+        let timeout_secs = self.state.ui.query_timeout_secs();
         let db = self.db.clone(); // clone required: tokio::spawn needs 'static
         let tx = self.tx_event.clone(); // clone required: tokio::spawn needs 'static
         let history = self.history.clone(); // clone required: tokio::spawn needs 'static
@@ -154,10 +174,25 @@ impl AppController {
                 let sql_to_run = super::apply_limit(stmt, page_size);
                 let is_last = i == stmts.len() - 1;
 
-                match db
-                    .execute_with_cancel(&conn_id, &sql_to_run, token.clone())
+                let stmt_result = if timeout_secs > 0 {
+                    match tokio::time::timeout(
+                        Duration::from_secs(timeout_secs),
+                        db.execute_with_cancel(&conn_id, &sql_to_run, token.clone()),
+                    )
                     .await
-                {
+                    {
+                        Ok(r) => r,
+                        Err(_elapsed) => {
+                            token.cancel();
+                            Err(DbError::Timeout)
+                        }
+                    }
+                } else {
+                    db.execute_with_cancel(&conn_id, &sql_to_run, token.clone())
+                        .await
+                };
+
+                match stmt_result {
                     Ok(result) => {
                         if is_last {
                             let exec = wf_db::models::QueryExecution {

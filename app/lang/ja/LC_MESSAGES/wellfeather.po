@@ -441,6 +441,34 @@ msgctxt "MenuBar"
 msgid "Show Snippets"
 msgstr "スニペットを表示"
 
+msgctxt "MenuBar"
+msgid "Editor Preferences…"
+msgstr "エディター設定…"
+
+msgctxt "EditorPrefsDialog"
+msgid "Editor Preferences"
+msgstr "エディター設定"
+
+msgctxt "EditorPrefsDialog"
+msgid "Tab Width"
+msgstr "タブ幅"
+
+msgctxt "EditorPrefsDialog"
+msgid "Query Timeout"
+msgstr "クエリタイムアウト"
+
+msgctxt "EditorPrefsDialog"
+msgid "Off"
+msgstr "オフ"
+
+msgctxt "EditorPrefsDialog"
+msgid "Cancel"
+msgstr "キャンセル"
+
+msgctxt "EditorPrefsDialog"
+msgid "Apply"
+msgstr "適用"
+
 msgctxt "SnippetSaveDialog"
 msgid "Save Snippet"
 msgstr "スニペットを保存"

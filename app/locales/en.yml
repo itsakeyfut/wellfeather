@@ -23,6 +23,7 @@ error:
   ssh_fingerprint_mismatch: "SSH host key mismatch — expected: %{expected}, got: %{actual}"
   ssh_conn_string_unsupported: "SSH tunnel is not supported with connection string mode. Switch to Individual Fields."
   ssl_error: "SSL/TLS error: %{reason}"
+  query_timeout: "Query timed out"
   ssl_cert_copy_failed: "Failed to copy certificate file: %{reason}"
   group_create_failed: "Failed to create group: %{reason}"
   group_rename_failed: "Failed to rename group: %{reason}"

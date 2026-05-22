@@ -317,6 +317,10 @@ export global UiState {
     in-out property <int> tab-width: 2;
     /// Persist a new tab-width; Rust sends Command::UpdateConfig.
     callback set-tab-width(int);
+    /// Query execution timeout in seconds (0 = disabled). Persisted in config.toml.
+    in-out property <int> query-timeout-secs: 0;
+    /// Persist a new query-timeout-secs; Rust sends Command::UpdateConfig.
+    callback set-query-timeout-secs(int);
     /// Open the editor-preferences dialog.
     in-out property <bool> show-editor-prefs: false;
     /// Fired when plain Tab is pressed; Rust inserts spaces and updates editor-text + cursor.
@@ -1422,11 +1426,15 @@ export component AppWindow inherits Window {
         if _editor-prefs-alive: EditorPrefsDialog {
             x: 0; y: 0;
             width: root.width; height: root.height;
-            show:      UiState.show-editor-prefs;
-            tab-width: UiState.tab-width;
+            show:               UiState.show-editor-prefs;
+            tab-width:          UiState.tab-width;
+            query-timeout-secs: UiState.query-timeout-secs;
             cancel-clicked => { UiState.show-editor-prefs = false; }
-            apply-clicked(w) => {
+            apply-clicked(w, t) => {
+                UiState.tab-width = w;
                 UiState.set-tab-width(w);
+                UiState.query-timeout-secs = t;
+                UiState.set-query-timeout-secs(t);
                 UiState.show-editor-prefs = false;
             }
             exited => { _editor-prefs-alive = false; }

@@ -98,6 +98,9 @@ fn main() -> anyhow::Result<()> {
         state
             .ui
             .set_page_size(u32::from(config.editor.page_size) as usize);
+        state
+            .ui
+            .set_query_timeout_secs(config.editor.query_timeout_secs);
         // On first launch (no saved config): auto-detect the system dark/light mode.
         // On subsequent launches: respect the theme the user explicitly chose and saved.
         let theme = if config_file_exists {

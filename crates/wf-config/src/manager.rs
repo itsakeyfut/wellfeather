@@ -159,6 +159,7 @@ mod tests {
             editor: EditorConfig {
                 page_size: PageSize::Rows100,
                 tab_width: 2,
+                query_timeout_secs: 0,
             },
             ..Config::default()
         };

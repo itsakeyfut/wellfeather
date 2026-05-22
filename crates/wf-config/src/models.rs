@@ -101,6 +101,8 @@ impl Default for AppearanceConfig {
 pub struct EditorConfig {
     pub page_size: PageSize,
     pub tab_width: u32,
+    /// Query timeout in seconds. `0` means no timeout.
+    pub query_timeout_secs: u64,
 }
 
 impl Default for EditorConfig {
@@ -108,6 +110,7 @@ impl Default for EditorConfig {
         Self {
             page_size: PageSize::default(),
             tab_width: 2,
+            query_timeout_secs: 0,
         }
     }
 }
@@ -294,6 +297,7 @@ mod tests {
         assert!(!cfg.appearance.reduce_motion);
         assert_eq!(cfg.editor.page_size, PageSize::Rows500);
         assert_eq!(cfg.editor.tab_width, 2);
+        assert_eq!(cfg.editor.query_timeout_secs, 0);
         assert_eq!(cfg.session.last_query, None);
         assert_eq!(cfg.ui.language, "en");
     }
@@ -526,6 +530,7 @@ language = "ja"
             editor: EditorConfig {
                 page_size: PageSize::Rows100,
                 tab_width: 4,
+                query_timeout_secs: 30,
             },
             session: SessionConfig {
                 last_query: Some("SELECT 1".to_string()),
