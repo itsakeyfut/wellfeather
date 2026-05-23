@@ -282,8 +282,12 @@ export global UiState {
     callback fetch-completion(string, int);
     /// Fired by Ctrl+Space; Rust sends Command::FetchCompletion immediately.
     callback trigger-completion(string, int);
-    /// Fired by Ctrl+Shift+F; Rust reformats editor-text in place.
+    /// Fired by Ctrl+Shift+F; Rust offloads formatting to spawn_blocking.
     callback format-sql();
+    /// True while async SQL formatting is running in the background.
+    in property <bool> is-formatting: false;
+    /// Called by Rust when background formatting finishes (tab-id, formatted-sql).
+    callback format-sql-complete(string, string);
 
     // ── Completion popup state ─────────────────────────────────────────────
     in property    <[CompletionRow]> completion-items:    [];
