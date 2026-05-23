@@ -245,23 +245,67 @@ pub(super) fn register_formatter_callback(
     undo_state: Rc<TextUndoState>,
 ) {
     let ui = window.global::<crate::UiState>();
-    let window_weak = window.as_weak(); // clone required: on_format_sql closure
-    ui.on_format_sql(move || {
-        with_ui(&window_weak, |ui| {
-            let text = ui.get_editor_text().to_string();
-            let tab_id = ui.get_editor_active_tab_id().to_string();
-            undo_state.flush_before_programmatic_change(&mut tabs_state.borrow_mut(), &tab_id);
-            tabs_state
-                .borrow_mut()
-                .push_undo_snapshot(&tab_id, text.clone());
-            let formatted = wf_query::formatter::format_sql(&text);
-            tracing::debug!(input = %text, output = %formatted, "on_format_sql called");
-            let spans = compute_highlight_spans(&formatted);
-            *undo_state.last_known.borrow_mut() = formatted.clone();
-            ui.set_editor_text(formatted.into());
-            apply_highlight_spans(&hl_model, spans);
+
+    // Registered first so the handler is ready before on_format_sql can fire.
+    {
+        let undo_state = Rc::clone(&undo_state); // clone required: on_format_sql_complete closure
+        let hl_model = Rc::clone(&hl_model); // clone required: on_format_sql_complete closure
+        let window_weak = window.as_weak();
+        ui.on_format_sql_complete(move |tab_id, formatted| {
+            with_ui(&window_weak, |ui| {
+                ui.set_is_formatting(false);
+                ui.set_status_message("".into());
+                // Discard if user switched tabs while formatting was running.
+                if ui.get_editor_active_tab_id() != tab_id {
+                    return;
+                }
+                let formatted_str = formatted.to_string();
+                let spans = compute_highlight_spans(&formatted_str);
+                *undo_state.last_known.borrow_mut() = formatted_str.clone();
+                ui.set_editor_text(formatted_str.into());
+                apply_highlight_spans(&hl_model, spans);
+            });
         });
-    });
+    }
+
+    // ── on_format_sql: fire-and-forget; only Send types cross the thread ──────
+    {
+        let undo_state = Rc::clone(&undo_state); // clone required: on_format_sql closure
+        let tabs_state = Rc::clone(&tabs_state); // clone required: on_format_sql closure
+        let window_weak = window.as_weak();
+        ui.on_format_sql(move || {
+            with_ui(&window_weak, |ui| {
+                // Guard: ignore if a format is already in flight.
+                if ui.get_is_formatting() {
+                    return;
+                }
+                let text = ui.get_editor_text().to_string();
+                let tab_id = ui.get_editor_active_tab_id().to_string();
+                undo_state.flush_before_programmatic_change(&mut tabs_state.borrow_mut(), &tab_id);
+                tabs_state
+                    .borrow_mut()
+                    .push_undo_snapshot(&tab_id, text.clone());
+                ui.set_is_formatting(true);
+                ui.set_status_message("Formatting\u{2026}".into());
+                // Preserve original text in case spawn_blocking panics.
+                let text_clone = text.clone(); // clone required: JoinError fallback
+                let ww = window_weak.clone(); // clone required: tokio::spawn 'static
+                tokio::spawn(async move {
+                    let formatted =
+                        tokio::task::spawn_blocking(move || wf_query::formatter::format_sql(&text))
+                            .await
+                            .unwrap_or(text_clone);
+                    tracing::debug!(chars = formatted.len(), "format_sql complete");
+                    let _ = slint::invoke_from_event_loop(move || {
+                        if let Some(w) = ww.upgrade() {
+                            w.global::<crate::UiState>()
+                                .invoke_format_sql_complete(tab_id.into(), formatted.into());
+                        }
+                    });
+                });
+            });
+        });
+    }
 }
 
 const CSV_DEFAULT_FILENAME: &str = "query_result.csv";
