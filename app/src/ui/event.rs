@@ -54,11 +54,7 @@ pub(super) fn spawn_event_handler(
                         Arc::clone(&sidebar_state),
                     );
                     // Refresh snippets to include per-connection entries.
-                    let bk_repo = Arc::clone(&snippet_repo);
-                    let bk_ww = window_weak.clone();
-                    tokio::spawn(async move {
-                        do_refresh_snippets(&bk_ww, &bk_repo, Some(&conn_id)).await;
-                    });
+                    do_refresh_snippets(&window_weak, &snippet_repo, Some(&conn_id)).await;
                 }
                 Event::TestConnectionOk => handle_test_ok(window_weak.clone()),
                 Event::TestConnectionFailed(msg) => handle_test_failed(msg, window_weak.clone()),
@@ -72,11 +68,7 @@ pub(super) fn spawn_event_handler(
                 Event::Disconnected(id) => {
                     handle_disconnected(id, window_weak.clone());
                     // Drop per-connection snippets; show global only.
-                    let bk_repo = Arc::clone(&snippet_repo);
-                    let bk_ww = window_weak.clone();
-                    tokio::spawn(async move {
-                        do_refresh_snippets(&bk_ww, &bk_repo, None).await;
-                    });
+                    do_refresh_snippets(&window_weak, &snippet_repo, None).await;
                 }
                 Event::ConnectionRemoved(id) => {
                     handle_connection_removed(id, window_weak.clone(), Arc::clone(&sidebar_state))
