@@ -153,6 +153,32 @@ impl SessionManager {
         Ok(())
     }
 
+    pub fn save_font_family(&self, family: &str) -> anyhow::Result<()> {
+        let mut config = self
+            .config_manager
+            .load()
+            .context("failed to load config for font_family save")?;
+        config.appearance.font_family = family.to_string();
+        self.config_manager
+            .save(&config)
+            .context("failed to save font_family")?;
+        info!(%family, "font_family saved");
+        Ok(())
+    }
+
+    pub fn save_font_size(&self, size: u32) -> anyhow::Result<()> {
+        let mut config = self
+            .config_manager
+            .load()
+            .context("failed to load config for font_size save")?;
+        config.appearance.font_size = size;
+        self.config_manager
+            .save(&config)
+            .context("failed to save font_size")?;
+        info!(font_size = size, "font_size saved");
+        Ok(())
+    }
+
     /// Persist `ms` as `[editor].slow_query_threshold_ms` in `config.toml`.
     pub fn save_slow_query_threshold(&self, ms: u64) -> anyhow::Result<()> {
         let mut config = self
@@ -331,6 +357,34 @@ mod tests {
 
     use super::{SessionManager, config_to_db_conn, db_to_config_conn};
     use wf_config::models::{ConnectionConfig, DbTypeName};
+
+    #[test]
+    fn save_font_family_should_persist_to_config() {
+        let dir = tempdir().unwrap();
+        let sm = SessionManager::with_config_manager(ConfigManager::with_path(
+            dir.path().join("config.toml"),
+        ));
+        sm.save_font_family("Fira Code").unwrap();
+
+        let cfg = ConfigManager::with_path(dir.path().join("config.toml"))
+            .load()
+            .unwrap();
+        assert_eq!(cfg.appearance.font_family, "Fira Code");
+    }
+
+    #[test]
+    fn save_font_size_should_persist_to_config() {
+        let dir = tempdir().unwrap();
+        let sm = SessionManager::with_config_manager(ConfigManager::with_path(
+            dir.path().join("config.toml"),
+        ));
+        sm.save_font_size(18).unwrap();
+
+        let cfg = ConfigManager::with_path(dir.path().join("config.toml"))
+            .load()
+            .unwrap();
+        assert_eq!(cfg.appearance.font_size, 18);
+    }
 
     #[test]
     fn save_tab_width_should_persist_to_config() {

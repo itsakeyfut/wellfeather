@@ -20,6 +20,10 @@ pub enum ConfigUpdate {
     QueryTimeout(u64),
     /// Set the slow query warning threshold (milliseconds; 0 = disabled).
     SlowQueryThreshold(u64),
+    /// Set the editor font family name.
+    FontFamily(String),
+    /// Set the editor font size in logical pixels.
+    FontSize(u32),
 }
 
 /// UI → Controller channel messages.
