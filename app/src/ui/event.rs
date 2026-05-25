@@ -419,6 +419,7 @@ fn handle_query_started(ww: slint::Weak<crate::AppWindow>) {
             ui.set_is_loading(true);
             ui.set_error_message("".into());
             ui.set_status_message(t!("status.running").to_string().into());
+            ui.set_slow_query_warning("".into());
             ui.set_result_panel_open(true);
         });
     });

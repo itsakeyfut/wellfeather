@@ -18,6 +18,8 @@ pub enum ConfigUpdate {
     TabWidth(u32),
     /// Set the query execution timeout (seconds; 0 = disabled).
     QueryTimeout(u64),
+    /// Set the slow query warning threshold (milliseconds; 0 = disabled).
+    SlowQueryThreshold(u64),
 }
 
 /// UI → Controller channel messages.

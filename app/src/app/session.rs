@@ -152,6 +152,23 @@ impl SessionManager {
         info!(query_timeout_secs = secs, "query_timeout_secs saved");
         Ok(())
     }
+
+    /// Persist `ms` as `[editor].slow_query_threshold_ms` in `config.toml`.
+    pub fn save_slow_query_threshold(&self, ms: u64) -> anyhow::Result<()> {
+        let mut config = self
+            .config_manager
+            .load()
+            .context("failed to load config for slow_query_threshold_ms save")?;
+        config.editor.slow_query_threshold_ms = ms;
+        self.config_manager
+            .save(&config)
+            .context("failed to save slow_query_threshold_ms")?;
+        info!(
+            slow_query_threshold_ms = ms,
+            "slow_query_threshold_ms saved"
+        );
+        Ok(())
+    }
 }
 
 impl Default for SessionManager {

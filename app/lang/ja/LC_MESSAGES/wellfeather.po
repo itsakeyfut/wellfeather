@@ -454,6 +454,22 @@ msgid "Tab Width"
 msgstr "タブ幅"
 
 msgctxt "EditorPrefsDialog"
+msgid "Slow Query"
+msgstr "低速クエリ"
+
+msgctxt "EditorPrefsDialog"
+msgid "500ms"
+msgstr "500ms"
+
+msgctxt "EditorPrefsDialog"
+msgid "1s"
+msgstr "1秒"
+
+msgctxt "EditorPrefsDialog"
+msgid "5s"
+msgstr "5秒"
+
+msgctxt "EditorPrefsDialog"
 msgid "Query Timeout"
 msgstr "クエリタイムアウト"
 

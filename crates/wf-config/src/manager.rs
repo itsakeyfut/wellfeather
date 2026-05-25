@@ -160,6 +160,7 @@ mod tests {
                 page_size: PageSize::Rows100,
                 tab_width: 2,
                 query_timeout_secs: 0,
+                slow_query_threshold_ms: 0,
             },
             ..Config::default()
         };

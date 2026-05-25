@@ -224,10 +224,20 @@ pub(super) fn register_editor_prefs_callbacks(
         });
     }
 
-    ui.on_set_query_timeout_secs(move |secs| {
+    {
+        let tx_cmd = tx_cmd.clone(); // clone required: on_set_query_timeout_secs closure
+        ui.on_set_query_timeout_secs(move |secs| {
+            send_cmd(
+                &tx_cmd,
+                Command::UpdateConfig(ConfigUpdate::QueryTimeout(secs.max(0) as u64)),
+            );
+        });
+    }
+
+    ui.on_set_slow_query_threshold_ms(move |ms| {
         send_cmd(
             &tx_cmd,
-            Command::UpdateConfig(ConfigUpdate::QueryTimeout(secs.max(0) as u64)),
+            Command::UpdateConfig(ConfigUpdate::SlowQueryThreshold(ms.max(0) as u64)),
         );
     });
 }
