@@ -462,6 +462,18 @@ msgid "20"
 msgstr "20"
 
 msgctxt "EditorPrefsDialog"
+msgid "2"
+msgstr "2"
+
+msgctxt "EditorPrefsDialog"
+msgid "4"
+msgstr "4"
+
+msgctxt "EditorPrefsDialog"
+msgid "8"
+msgstr "8"
+
+msgctxt "EditorPrefsDialog"
 msgid "Theme"
 msgstr "テーマ"
 
