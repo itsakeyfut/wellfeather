@@ -1,6 +1,7 @@
 status:
   running: "Running…"
   query_finished: "%{ms} ms  ·  %{rows} rows"
+  slow_query: "⚠ Slow query: %{ms}ms"
   cancelled: "Cancelled"
   error: "Error: %{msg}"
   disconnected: "Disconnected: %{id}"

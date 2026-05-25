@@ -1,6 +1,7 @@
 status:
   running: "実行中…"
   query_finished: "%{ms} ms  ·  %{rows} 行"
+  slow_query: "⚠ 低速クエリ: %{ms}ms"
   cancelled: "キャンセルしました"
   error: "エラー: %{msg}"
   disconnected: "切断しました: %{id}"

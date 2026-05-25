@@ -70,6 +70,11 @@ impl AppController {
                     warn!(error = %e, "failed to persist query_timeout_secs to config");
                 }
             }
+            ConfigUpdate::SlowQueryThreshold(ms) => {
+                if let Err(e) = self.session.save_slow_query_threshold(ms) {
+                    warn!(error = %e, "failed to persist slow_query_threshold_ms to config");
+                }
+            }
         }
     }
 }

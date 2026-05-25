@@ -103,6 +103,8 @@ pub struct EditorConfig {
     pub tab_width: u32,
     /// Query timeout in seconds. `0` means no timeout.
     pub query_timeout_secs: u64,
+    /// Slow query warning threshold in milliseconds. `0` means disabled.
+    pub slow_query_threshold_ms: u64,
 }
 
 impl Default for EditorConfig {
@@ -111,6 +113,7 @@ impl Default for EditorConfig {
             page_size: PageSize::default(),
             tab_width: 2,
             query_timeout_secs: 0,
+            slow_query_threshold_ms: 0,
         }
     }
 }
@@ -531,6 +534,7 @@ language = "ja"
                 page_size: PageSize::Rows100,
                 tab_width: 4,
                 query_timeout_secs: 30,
+                slow_query_threshold_ms: 0,
             },
             session: SessionConfig {
                 last_query: Some("SELECT 1".to_string()),

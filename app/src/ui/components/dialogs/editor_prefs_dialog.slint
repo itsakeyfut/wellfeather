@@ -3,11 +3,12 @@ import { ActionButton, ModalOverlay } from "../common.slint";
 
 export component EditorPrefsDialog inherits ModalOverlay {
     callback cancel-clicked;
-    // tab-width, query-timeout-secs
-    callback apply-clicked(int, int);
+    // tab-width, query-timeout-secs, slow-query-threshold-ms
+    callback apply-clicked(int, int, int);
 
     in-out property <int> tab-width: 2;
     in-out property <int> query-timeout-secs: 0;
+    in-out property <int> slow-query-threshold-ms: 0;
 
     VerticalLayout {
         padding: Layout.padding-2xl;
@@ -87,6 +88,93 @@ export component EditorPrefsDialog inherits ModalOverlay {
                         vertical-alignment: center;
                     }
                     TouchArea { clicked => { root.tab-width = 8; } }
+                }
+            }
+        }
+
+        // Slow-query-threshold selector row
+        HorizontalLayout {
+            spacing: Layout.spacing-lg;
+            alignment: start;
+
+            Text {
+                text: @tr("Slow Query");
+                color: Colors.subtext1;
+                font-size: Typography.size-base;
+                vertical-alignment: center;
+                width: 90px;
+            }
+
+            // Four segmented buttons: Off / 500ms / 1s / 5s
+            HorizontalLayout {
+                spacing: Layout.spacing-sm;
+
+                sq0 := Rectangle {
+                    width: 44px;
+                    height: 28px;
+                    border-radius: 4px;
+                    border-width: 1px;
+                    border-color: root.slow-query-threshold-ms == 0 ? Colors.blue : Colors.surface2;
+                    background: root.slow-query-threshold-ms == 0 ? Colors.blue : Colors.surface1;
+                    Text {
+                        text: @tr("Off");
+                        color: root.slow-query-threshold-ms == 0 ? Colors.base : Colors.text;
+                        font-size: Typography.size-sm;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                    TouchArea { clicked => { root.slow-query-threshold-ms = 0; } }
+                }
+
+                sq500 := Rectangle {
+                    width: 44px;
+                    height: 28px;
+                    border-radius: 4px;
+                    border-width: 1px;
+                    border-color: root.slow-query-threshold-ms == 500 ? Colors.blue : Colors.surface2;
+                    background: root.slow-query-threshold-ms == 500 ? Colors.blue : Colors.surface1;
+                    Text {
+                        text: @tr("500ms");
+                        color: root.slow-query-threshold-ms == 500 ? Colors.base : Colors.text;
+                        font-size: Typography.size-sm;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                    TouchArea { clicked => { root.slow-query-threshold-ms = 500; } }
+                }
+
+                sq1000 := Rectangle {
+                    width: 44px;
+                    height: 28px;
+                    border-radius: 4px;
+                    border-width: 1px;
+                    border-color: root.slow-query-threshold-ms == 1000 ? Colors.blue : Colors.surface2;
+                    background: root.slow-query-threshold-ms == 1000 ? Colors.blue : Colors.surface1;
+                    Text {
+                        text: @tr("1s");
+                        color: root.slow-query-threshold-ms == 1000 ? Colors.base : Colors.text;
+                        font-size: Typography.size-sm;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                    TouchArea { clicked => { root.slow-query-threshold-ms = 1000; } }
+                }
+
+                sq5000 := Rectangle {
+                    width: 44px;
+                    height: 28px;
+                    border-radius: 4px;
+                    border-width: 1px;
+                    border-color: root.slow-query-threshold-ms == 5000 ? Colors.blue : Colors.surface2;
+                    background: root.slow-query-threshold-ms == 5000 ? Colors.blue : Colors.surface1;
+                    Text {
+                        text: @tr("5s");
+                        color: root.slow-query-threshold-ms == 5000 ? Colors.base : Colors.text;
+                        font-size: Typography.size-sm;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                    TouchArea { clicked => { root.slow-query-threshold-ms = 5000; } }
                 }
             }
         }
@@ -191,7 +279,7 @@ export component EditorPrefsDialog inherits ModalOverlay {
                 text: @tr("Apply");
                 bg: Colors.blue;
                 fg: Colors.base;
-                clicked => { root.apply-clicked(root.tab-width, root.query-timeout-secs); }
+                clicked => { root.apply-clicked(root.tab-width, root.query-timeout-secs, root.slow-query-threshold-ms); }
             }
         }
     }

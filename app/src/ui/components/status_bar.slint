@@ -13,6 +13,9 @@ export component StatusBar inherits Rectangle {
     /// Query lifecycle status string pushed from Rust (status-message in UiState).
     /// Examples: "Running…"  |  "42 ms  ·  128 rows"  |  "Cancelled"  |  "Error: …"
     in property <string> query-status;
+    /// Slow query warning set by Rust when execution_time_ms exceeds the threshold.
+    /// Empty string means no warning is shown.
+    in property <string> slow-query-warning: "";
     /// When true, a green "SSH" badge is shown next to the connection text.
     in property <bool> ssh-active: false;
 
@@ -42,6 +45,13 @@ export component StatusBar inherits Rectangle {
                 horizontal-alignment: center;
                 vertical-alignment: center;
             }
+        }
+
+        if root.slow-query-warning != "": Text {
+            text: root.slow-query-warning;
+            color: Colors.yellow;
+            font-size: Typography.size-base;
+            vertical-alignment: center;
         }
 
         Text {

@@ -775,6 +775,16 @@ pub(super) fn handle_query_finished(
                     .to_string()
                     .into(),
             );
+            let threshold = ui.get_slow_query_threshold_ms();
+            if threshold > 0 && exec_ms >= threshold as u128 {
+                ui.set_slow_query_warning(
+                    rust_i18n::t!("status.slow_query", ms = exec_ms)
+                        .to_string()
+                        .into(),
+                );
+            } else {
+                ui.set_slow_query_warning("".into());
+            }
             ui.set_result_panel_open(true);
         });
     });

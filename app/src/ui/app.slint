@@ -40,6 +40,12 @@ export global UiState {
     // ── Core UI state ─────────────────────────────────────────────────────────
     in-out property <bool>   is-loading:        false;
     in-out property <string> status-message:    "";
+    /// Yellow warning displayed when a query exceeds slow-query-threshold-ms. Empty = no warning.
+    in-out property <string> slow-query-warning: "";
+    /// Slow query detection threshold in milliseconds (0 = disabled). Persisted in config.toml.
+    in-out property <int> slow-query-threshold-ms: 0;
+    /// Persist a new slow-query-threshold-ms; Rust sends Command::UpdateConfig.
+    callback set-slow-query-threshold-ms(int);
     in-out property <string> error-message:     "";
     in-out property <string> status-connection: @tr("Not connected");
     in-out property <bool>   sidebar-loading:   false;
@@ -1166,9 +1172,10 @@ export component AppWindow inherits Window {
             y: menu-bar-height + tab-bar-height + content-height;
             width:  root.width;
             height: 24px;
-            connection-text: UiState.status-connection;
-            query-status:    UiState.status-message;
-            ssh-active:      UiState.ssh-active;
+            connection-text:    UiState.status-connection;
+            query-status:       UiState.status-message;
+            slow-query-warning: UiState.slow-query-warning;
+            ssh-active:         UiState.ssh-active;
         }
 
         // ── Inner edge lines ──────────────────────────────────────────────────
@@ -1430,15 +1437,18 @@ export component AppWindow inherits Window {
         if _editor-prefs-alive: EditorPrefsDialog {
             x: 0; y: 0;
             width: root.width; height: root.height;
-            show:               UiState.show-editor-prefs;
-            tab-width:          UiState.tab-width;
-            query-timeout-secs: UiState.query-timeout-secs;
+            show:                    UiState.show-editor-prefs;
+            tab-width:               UiState.tab-width;
+            query-timeout-secs:      UiState.query-timeout-secs;
+            slow-query-threshold-ms: UiState.slow-query-threshold-ms;
             cancel-clicked => { UiState.show-editor-prefs = false; }
-            apply-clicked(w, t) => {
+            apply-clicked(w, t, s) => {
                 UiState.tab-width = w;
                 UiState.set-tab-width(w);
                 UiState.query-timeout-secs = t;
                 UiState.set-query-timeout-secs(t);
+                UiState.slow-query-threshold-ms = s;
+                UiState.set-slow-query-threshold-ms(s);
                 UiState.show-editor-prefs = false;
             }
             exited => { _editor-prefs-alive = false; }
