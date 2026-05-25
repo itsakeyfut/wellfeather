@@ -48,6 +48,10 @@ const CREATE_TABLE_GROUPS: &str = "
     )
 ";
 
+const CREATE_INDEX_CONN_LAST_USED: &str = "
+    CREATE INDEX IF NOT EXISTS idx_conn_last_used
+        ON connections(last_used_at DESC)";
+
 /// Migrations for existing databases created before group columns were added.
 const MIGRATE_GROUP_COLUMNS: &[&str] = &[
     "ALTER TABLE connections ADD COLUMN group_id TEXT",
@@ -101,7 +105,16 @@ impl ConnectionRepository {
         for stmt in MIGRATE_GROUP_COLUMNS {
             let _ = sqlx::query(stmt).execute(&pool).await;
         }
+        sqlx::query(CREATE_INDEX_CONN_LAST_USED)
+            .execute(&pool)
+            .await
+            .context("failed to create idx_conn_last_used")?;
         Ok(Self { pool })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn pool(&self) -> &SqlitePool {
+        &self.pool
     }
 
     /// In-memory database (for tests only).
@@ -489,6 +502,19 @@ mod tests {
             group_id: None,
             color: None,
         }
+    }
+
+    #[tokio::test]
+    async fn new_should_create_last_used_index() {
+        let repo = ConnectionRepository::open_memory().await.unwrap();
+        let count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM sqlite_schema
+             WHERE type='index' AND name='idx_conn_last_used'",
+        )
+        .fetch_one(repo.pool())
+        .await
+        .unwrap();
+        assert_eq!(count, 1);
     }
 
     #[tokio::test]

@@ -28,6 +28,10 @@ const CREATE_TABLE: &str = "
         connection_id TEXT    NOT NULL
     )";
 
+const CREATE_INDEX: &str = "
+    CREATE INDEX IF NOT EXISTS idx_qe_timestamp
+        ON query_executions(timestamp DESC)";
+
 impl HistoryService {
     /// Accept an already-open [`SqlitePool`] and ensure the schema exists.
     pub async fn new(pool: SqlitePool) -> Result<Self> {
@@ -37,7 +41,13 @@ impl HistoryService {
 
     async fn migrate(pool: &SqlitePool) -> Result<()> {
         sqlx::query(CREATE_TABLE).execute(pool).await?;
+        sqlx::query(CREATE_INDEX).execute(pool).await?;
         Ok(())
+    }
+
+    #[cfg(test)]
+    pub(crate) fn pool(&self) -> &SqlitePool {
+        &self.pool
     }
 
     /// Persist one [`QueryExecution`] record.
@@ -164,6 +174,19 @@ mod tests {
             timestamp: ts,
             connection_id: conn_id.to_string(),
         }
+    }
+
+    #[tokio::test]
+    async fn migrate_should_create_timestamp_index() {
+        let svc = HistoryService::open_memory().await.unwrap();
+        let count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM sqlite_schema
+             WHERE type='index' AND name='idx_qe_timestamp'",
+        )
+        .fetch_one(svc.pool())
+        .await
+        .unwrap();
+        assert_eq!(count, 1);
     }
 
     #[tokio::test]
