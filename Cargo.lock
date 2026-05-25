@@ -7971,7 +7971,7 @@ checksum = "a28ac98ddc8b9274cb41bb4d9d4d5c425b6020c50c46f25559911905610b4a88"
 
 [[package]]
 name = "wellfeather"
-version = "0.9.1"
+version = "0.10.0"
 dependencies = [
  "anyhow",
  "arboard",
@@ -8004,7 +8004,7 @@ dependencies = [
 
 [[package]]
 name = "wf-completion"
-version = "0.9.1"
+version = "0.10.0"
 dependencies = [
  "anyhow",
  "proptest",
@@ -8021,7 +8021,7 @@ dependencies = [
 
 [[package]]
 name = "wf-config"
-version = "0.9.1"
+version = "0.10.0"
 dependencies = [
  "aes-gcm 0.10.3",
  "anyhow",
@@ -8042,7 +8042,7 @@ dependencies = [
 
 [[package]]
 name = "wf-db"
-version = "0.9.1"
+version = "0.10.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -8061,7 +8061,7 @@ dependencies = [
 
 [[package]]
 name = "wf-history"
-version = "0.9.1"
+version = "0.10.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -8074,7 +8074,7 @@ dependencies = [
 
 [[package]]
 name = "wf-query"
-version = "0.9.1"
+version = "0.10.0"
 dependencies = [
  "anyhow",
  "csv",

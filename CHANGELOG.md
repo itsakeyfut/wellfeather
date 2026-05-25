@@ -6,6 +6,41 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-05-25
+
+### v0.10.0 - Advanced Connectivity, History & Undo
+
+#### Added
+
+- SSH tunnel support for database connections: configure host, port, user, and key file via the connection form (#313)
+- SSL/TLS mutual authentication for database connections: CA certificate, client certificate, and client key (#314)
+- Connection group folder organization in the sidebar: drag connections into named groups, persist across restarts (#315)
+- Query history panel (Ctrl+Shift+H): search by keyword or connection, insert into editor, re-run directly (#317)
+- `HistoryService::search` with keyword and connection filter backed by SQLite full-text index (#316)
+- Panel-scoped undo/redo: text undo in SQL editor tabs, action undo for sidebar group operations (#319)
+- Configurable query timeout with auto-cancel: Off / 10s / 30s / 60s, selectable in Editor Preferences (#320)
+- Slow query detection: queries exceeding the configured threshold show a yellow warning in the status bar (#327)
+- Unified Editor Preferences dialog: Font Family, Font Size, Theme, Reduce Motion, Tab Width, Slow Query threshold, Query Timeout, and Language in a single panel (#329)
+- Full keyboard navigation for Editor Preferences dialog: Tab/Shift+Tab between groups, Left/Right within segment buttons, Enter/Space to confirm, Esc to cancel (#330)
+
+#### Fixed
+
+- Restrict `wellfeather.db` file permissions to owner-only (0600) on Unix at startup (#312)
+- Sanitize CSV export cells to prevent formula injection (prefix `=`, `+`, `-`, `@` with a tab) (#311)
+- Use `Zeroizing<Vec<u8>>` to guarantee decrypted passwords are zeroed on all exit paths (#310)
+- Cap regex pattern length and automaton state count to prevent ReDoS in find/replace (#309)
+- Validate SQLite file path to reject directory traversal sequences and special URI schemes (#308)
+- Prevent phantom undo entries on the first keystroke in a new editor tab (#319)
+
+#### Performance
+
+- Move `QueryResult.rows` into `Arc` to eliminate double clone when rendering large result sets (#326)
+- Add SQLite `PRAGMA` tuning (`journal_mode=WAL`, `synchronous=NORMAL`, `cache_size`) and aggregate `next_query_number` query (#325)
+- Add indexes on `timestamp` and `last_used_at` columns in history tables to eliminate full table scans (#324)
+- Await snippet list refresh instead of spawning unbounded tasks on every editor keystroke (#323)
+- Offload SQL formatter to `spawn_blocking` to prevent blocking the Slint event thread (#322)
+- Eliminate O(rows × cols) `String` allocations in `filter_rows` by using byte-level search (#321)
+
 ## [0.9.1] - 2026-05-08
 
 ### Fixed
