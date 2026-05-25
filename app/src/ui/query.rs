@@ -329,7 +329,7 @@ pub(super) fn register_export_callbacks(
                 let orig = original_data.lock().unwrap_or_else(|p| p.into_inner());
                 orig.as_ref().map(|d| {
                     let cols: Vec<String> = d.columns.iter().map(|s| s.to_string()).collect();
-                    (cols, d.rows.clone())
+                    (cols, Arc::clone(&d.rows)) // clone required: tokio::spawn needs 'static
                 })
             };
             let Some((columns, rows)) = snapshot else {
@@ -366,7 +366,7 @@ pub(super) fn register_export_callbacks(
                 let orig = original_data.lock().unwrap_or_else(|p| p.into_inner());
                 orig.as_ref().map(|d| {
                     let cols: Vec<String> = d.columns.iter().map(|s| s.to_string()).collect();
-                    (cols, d.rows.clone())
+                    (cols, Arc::clone(&d.rows)) // clone required: tokio::spawn needs 'static
                 })
             };
             let Some((columns, rows)) = snapshot else {
@@ -403,7 +403,7 @@ pub(super) fn register_export_callbacks(
                 let orig = original_data.lock().unwrap_or_else(|p| p.into_inner());
                 orig.as_ref().map(|d| {
                     let cols: Vec<String> = d.columns.iter().map(|s| s.to_string()).collect();
-                    (cols, d.rows.clone())
+                    (cols, Arc::clone(&d.rows)) // clone required: tokio::spawn needs 'static
                 })
             };
             let Some((columns, rows)) = snapshot else {
@@ -741,14 +741,14 @@ pub(super) fn handle_query_finished(
     let col_count = result.columns.len();
     let columns: Vec<slint::SharedString> =
         result.columns.iter().map(|c| c.clone().into()).collect();
-    let raw_rows: Vec<Vec<Option<String>>> = result.rows.iter().map(|r| r.to_vec()).collect();
+    let raw_rows = Arc::new(result.rows);
     let row_count = result.row_count as i32;
     let exec_ms = result.execution_time_ms;
     {
         let mut orig = original_data.lock().unwrap_or_else(|p| p.into_inner());
         *orig = Some(OriginalQueryData {
             columns: columns.clone(),
-            rows: raw_rows.clone(),
+            rows: Arc::clone(&raw_rows),
             sort_col: None,
             sort_asc: true,
         });
@@ -788,7 +788,7 @@ pub(super) fn handle_table_data_loaded(
     let col_count = result.columns.len();
     let columns: Vec<slint::SharedString> =
         result.columns.iter().map(|c| c.clone().into()).collect();
-    let raw_rows: Vec<Vec<Option<String>>> = result.rows.iter().map(|r| r.to_vec()).collect();
+    let raw_rows = result.rows;
     let row_count = result.row_count as i32;
     // clone required: invoke_from_event_loop closure must be 'static
     let _ = slint::invoke_from_event_loop(move || {

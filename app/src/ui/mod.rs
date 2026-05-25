@@ -125,7 +125,7 @@ fn check_safe_dml(weak: &slint::Weak<crate::AppWindow>, sql: &str, kind: &str) -
 struct OriginalQueryData {
     columns: Vec<slint::SharedString>,
     // None = SQL NULL; Some(s) = value (including empty string)
-    rows: Vec<Vec<Option<String>>>,
+    rows: Arc<Vec<Vec<Option<String>>>>,
     /// None = unsorted; Some(i) = sort column index.
     sort_col: Option<usize>,
     sort_asc: bool,
