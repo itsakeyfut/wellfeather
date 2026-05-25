@@ -120,7 +120,12 @@ fn main() -> anyhow::Result<()> {
                 sqlx::sqlite::SqliteConnectOptions::new()
                     .filename(config_dir.join("wellfeather.db"))
                     .create_if_missing(true)
-                    .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal),
+                    .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal)
+                    .pragma("synchronous", "normal")
+                    .pragma("cache_size", "-20000")
+                    .pragma("mmap_size", "30000000")
+                    .pragma("busy_timeout", "5000")
+                    .pragma("temp_store", "memory"),
             )
             .await
     })?;

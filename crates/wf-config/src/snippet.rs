@@ -171,16 +171,13 @@ impl SnippetRepository {
     /// Finds the highest N already used and returns N+1, so numbers never repeat
     /// even after deletion.
     pub async fn next_query_number(&self) -> anyhow::Result<u64> {
-        let names: Vec<String> =
-            sqlx::query_scalar("SELECT name FROM snippets WHERE name LIKE 'Query %'")
-                .fetch_all(&self.pool)
-                .await?;
-        let max = names
-            .iter()
-            .filter_map(|n| n.strip_prefix("Query ").and_then(|s| s.parse::<u64>().ok()))
-            .max()
-            .unwrap_or(0);
-        Ok(max + 1)
+        let max: Option<i64> = sqlx::query_scalar(
+            "SELECT COALESCE(MAX(CAST(SUBSTR(name, 7) AS INTEGER)), 0)
+             FROM snippets WHERE name GLOB 'Query [0-9]*'",
+        )
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(max.unwrap_or(0) as u64 + 1)
     }
 
     async fn next_sort_order(&self) -> anyhow::Result<i64> {
@@ -355,5 +352,26 @@ mod tests {
         let (x, y) = repo.get_bar_position().await.unwrap();
         assert!((x - 400.0).abs() < 0.001);
         assert!((y - 300.0).abs() < 0.001);
+    }
+
+    #[tokio::test]
+    async fn next_query_number_should_return_one_when_no_snippets() {
+        let repo = open_memory().await;
+        assert_eq!(repo.next_query_number().await.unwrap(), 1);
+    }
+
+    #[tokio::test]
+    async fn next_query_number_should_return_max_plus_one() {
+        let repo = open_memory().await;
+        repo.add(&make_entry("b1", "Query 3", "SELECT 1"))
+            .await
+            .unwrap();
+        repo.add(&make_entry("b2", "Query 7", "SELECT 2"))
+            .await
+            .unwrap();
+        repo.add(&make_entry("b3", "Custom Name", "SELECT 3"))
+            .await
+            .unwrap();
+        assert_eq!(repo.next_query_number().await.unwrap(), 8);
     }
 }
