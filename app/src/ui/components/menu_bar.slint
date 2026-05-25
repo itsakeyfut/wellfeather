@@ -1,4 +1,4 @@
-// Custom menu bar — horizontal strip of top-level menus (File / Edit / Query / Settings).
+// Custom menu bar — horizontal strip of top-level menus (File / Edit / Database / Snippets / Query).
 // Each top-level label shows a PopupWindow dropdown on click.
 // Items reuse MenuItem from common.slint.
 
@@ -14,20 +14,16 @@ export component MenuBar inherits Rectangle {
     callback export-insert-sql();
     callback quit();
     callback toggle-theme();
-    callback toggle-reduce-motion();
     callback open-db-manager();
     callback disconnect();
     callback run-query(string);
     callback run-all(string);
     callback cancel-query();
-    callback set-language(string);
     callback add-snippet();
     callback show-snippets();
     callback open-editor-prefs();
     in property <string> editor-text;
-    in property <string> language: "en";
     in property <bool>   has-active-connection: false;
-    in property <bool>   reduce-motion: false;
 
     // Bottom border separating menu bar from content area
     Rectangle {
@@ -297,63 +293,5 @@ export component MenuBar inherits Rectangle {
             }
         }
 
-        // ── Settings ──────────────────────────────────────────────────────────
-        Rectangle {
-            width: 80px;
-            background: settings-ta.has-hover ? Colors.surface1 : transparent;
-            border-radius: Layout.radius-sm;
-
-            Text {
-                text: @tr("Settings");
-                color: Colors.text;
-                font-size:   Typography.size-base;
-                horizontal-alignment: center;
-                vertical-alignment:   center;
-            }
-            settings-ta := TouchArea {
-                clicked => { settings-popup.show(); }
-            }
-            settings-popup := PopupWindow {
-                x: 0;
-                y: root.height;
-                width:  220px;
-                height: 5 * Layout.height-menu-item + 2px;
-                close-policy: PopupClosePolicy.close-on-click;
-
-                Rectangle {
-                    width:  220px;
-                    height: 5 * Layout.height-menu-item + 2px;
-                    background:    Colors.surface0;
-                    border-radius: Layout.radius-md;
-                    border-width:  1px;
-                    border-color:  Colors.surface2;
-                    drop-shadow-blur:  8px;
-                    drop-shadow-color: Colors.shadow;
-                    clip: true;
-
-                    VerticalLayout {
-                        spacing: 0;
-                        MenuItem { text: @tr("Font Settings (coming soon)"); }
-                        Rectangle { height: 1px; background: Colors.surface1; }
-                        MenuItem {
-                            text: @tr("Reduce Motion");
-                            selected: root.reduce-motion;
-                            clicked => { root.toggle-reduce-motion(); }
-                        }
-                        Rectangle { height: 1px; background: Colors.surface1; }
-                        MenuItem {
-                            text: @tr("English");
-                            selected: root.language == "en";
-                            clicked => { root.set-language("en"); }
-                        }
-                        MenuItem {
-                            text: @tr("Japanese");
-                            selected: root.language == "ja";
-                            clicked => { root.set-language("ja"); }
-                        }
-                    }
-                }
-            }
-        }
     }
 }

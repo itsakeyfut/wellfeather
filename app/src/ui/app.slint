@@ -54,6 +54,10 @@ export global UiState {
     in-out property <string> font-family: "JetBrains Mono";
     in-out property <int>    font-size:   14;  // logical pixels
     in-out property <string> ui-font:     "Segoe UI"; // platform system UI font, set at startup
+    /// Persist a new font family; Rust sends Command::UpdateConfig.
+    callback set-font-family(string);
+    /// Persist a new font size; Rust sends Command::UpdateConfig.
+    callback set-font-size(int);
 
     // ── Editor state ──────────────────────────────────────────────────────────
     in-out property <string> editor-text: "";
@@ -773,23 +777,19 @@ export component AppWindow inherits Window {
             y: 0;
             width:        root.width;
             editor-text:  UiState.editor-text;
-            language:     UiState.language;
             has-active-connection: UiState.active-connection-id != "";
-            reduce-motion: UiState.reduce-motion;
             export-csv        => { UiState.export-csv(); }
             export-json       => { UiState.export-json(); }
             export-insert-sql => { UiState.export-insert-sql(); }
-            quit         => { UiState.quit(); }
-            toggle-theme          => { UiState.toggle-theme(); }
-            toggle-reduce-motion  => { UiState.toggle-reduce-motion(); }
-            open-db-manager  => { UiState.open-db-manager(); }
-            disconnect       => { UiState.disconnect(UiState.active-connection-id); }
-            run-query(sql) => { UiState.run-query(sql); }
-            run-all(sql)   => { UiState.run-all(sql); }
-            cancel-query   => { UiState.cancel-query(); }
-            set-language(lang) => { UiState.set-language(lang); }
-            add-snippet      => { UiState.open-snippet-save(editor-inst.anchor-pos, editor-inst.cursor-pos); }
-            show-snippets    => { UiState.show-snippet-list = true; }
+            quit              => { UiState.quit(); }
+            toggle-theme      => { UiState.toggle-theme(); }
+            open-db-manager   => { UiState.open-db-manager(); }
+            disconnect        => { UiState.disconnect(UiState.active-connection-id); }
+            run-query(sql)    => { UiState.run-query(sql); }
+            run-all(sql)      => { UiState.run-all(sql); }
+            cancel-query      => { UiState.cancel-query(); }
+            add-snippet       => { UiState.open-snippet-save(editor-inst.anchor-pos, editor-inst.cursor-pos); }
+            show-snippets     => { UiState.show-snippet-list = true; }
             open-editor-prefs => { UiState.show-editor-prefs = true; }
         }
 
@@ -1441,14 +1441,26 @@ export component AppWindow inherits Window {
             tab-width:               UiState.tab-width;
             query-timeout-secs:      UiState.query-timeout-secs;
             slow-query-threshold-ms: UiState.slow-query-threshold-ms;
+            font-family:             UiState.font-family;
+            font-size:               UiState.font-size;
+            is-dark:                 UiState.is-dark;
+            reduce-motion:           UiState.reduce-motion;
+            language:                UiState.language;
             cancel-clicked => { UiState.show-editor-prefs = false; }
-            apply-clicked(w, t, s) => {
+            toggle-theme => { UiState.toggle-theme(); }
+            toggle-reduce-motion => { UiState.toggle-reduce-motion(); }
+            apply-clicked(w, t, s, fam, sz, lang) => {
                 UiState.tab-width = w;
                 UiState.set-tab-width(w);
                 UiState.query-timeout-secs = t;
                 UiState.set-query-timeout-secs(t);
                 UiState.slow-query-threshold-ms = s;
                 UiState.set-slow-query-threshold-ms(s);
+                UiState.font-family = fam;
+                UiState.set-font-family(fam);
+                UiState.font-size = sz;
+                UiState.set-font-size(sz);
+                UiState.set-language(lang);
                 UiState.show-editor-prefs = false;
             }
             exited => { _editor-prefs-alive = false; }

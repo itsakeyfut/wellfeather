@@ -3,12 +3,19 @@ import { ActionButton, ModalOverlay } from "../common.slint";
 
 export component EditorPrefsDialog inherits ModalOverlay {
     callback cancel-clicked;
-    // tab-width, query-timeout-secs, slow-query-threshold-ms
-    callback apply-clicked(int, int, int);
+    callback toggle-theme();
+    callback toggle-reduce-motion();
+    // tab-width, query-timeout-secs, slow-query-threshold-ms, font-family, font-size, language
+    callback apply-clicked(int, int, int, string, int, string);
 
-    in-out property <int> tab-width: 2;
-    in-out property <int> query-timeout-secs: 0;
-    in-out property <int> slow-query-threshold-ms: 0;
+    in-out property <int>    tab-width: 2;
+    in-out property <int>    query-timeout-secs: 0;
+    in-out property <int>    slow-query-threshold-ms: 0;
+    in-out property <string> font-family: "JetBrains Mono";
+    in-out property <int>    font-size: 14;
+    in property <bool>       is-dark: false;
+    in property <bool>       reduce-motion: false;
+    in-out property <string> language: "en";
 
     VerticalLayout {
         padding: Layout.padding-2xl;
@@ -20,6 +27,262 @@ export component EditorPrefsDialog inherits ModalOverlay {
             color: Colors.text;
             font-size: Typography.size-xl;
             font-weight: 700;
+        }
+
+        // ── Appearance ────────────────────────────────────────────────────────
+        Text {
+            text: @tr("Appearance");
+            color: Colors.subtext1;
+            font-size: Typography.size-base;
+            font-weight: 600;
+        }
+
+        // Font Family row
+        HorizontalLayout {
+            spacing: Layout.spacing-lg;
+            alignment: start;
+
+            Text {
+                text: @tr("Font Family");
+                color: Colors.subtext1;
+                font-size: Typography.size-base;
+                vertical-alignment: center;
+                width: 90px;
+            }
+
+            Rectangle {
+                width: 130px;
+                height: 28px;
+                border-radius: 4px;
+                border-width: 1px;
+                border-color: Colors.surface2;
+                background: Colors.surface1;
+
+                TextInput {
+                    x: 6px;
+                    width: parent.width - 12px;
+                    height: parent.height;
+                    text <=> root.font-family;
+                    color: Colors.text;
+                    font-size: Typography.size-sm;
+                    vertical-alignment: center;
+                }
+            }
+        }
+
+        // Font Size row
+        HorizontalLayout {
+            spacing: Layout.spacing-lg;
+            alignment: start;
+
+            Text {
+                text: @tr("Font Size");
+                color: Colors.subtext1;
+                font-size: Typography.size-base;
+                vertical-alignment: center;
+                width: 90px;
+            }
+
+            HorizontalLayout {
+                spacing: Layout.spacing-sm;
+
+                fs12 := Rectangle {
+                    width: 36px;
+                    height: 28px;
+                    border-radius: 4px;
+                    border-width: 1px;
+                    border-color: root.font-size == 12 ? Colors.blue : Colors.surface2;
+                    background: root.font-size == 12 ? Colors.blue : Colors.surface1;
+                    Text {
+                        text: @tr("12");
+                        color: root.font-size == 12 ? Colors.base : Colors.text;
+                        font-size: Typography.size-sm;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                    TouchArea { clicked => { root.font-size = 12; } }
+                }
+
+                fs14 := Rectangle {
+                    width: 36px;
+                    height: 28px;
+                    border-radius: 4px;
+                    border-width: 1px;
+                    border-color: root.font-size == 14 ? Colors.blue : Colors.surface2;
+                    background: root.font-size == 14 ? Colors.blue : Colors.surface1;
+                    Text {
+                        text: @tr("14");
+                        color: root.font-size == 14 ? Colors.base : Colors.text;
+                        font-size: Typography.size-sm;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                    TouchArea { clicked => { root.font-size = 14; } }
+                }
+
+                fs16 := Rectangle {
+                    width: 36px;
+                    height: 28px;
+                    border-radius: 4px;
+                    border-width: 1px;
+                    border-color: root.font-size == 16 ? Colors.blue : Colors.surface2;
+                    background: root.font-size == 16 ? Colors.blue : Colors.surface1;
+                    Text {
+                        text: @tr("16");
+                        color: root.font-size == 16 ? Colors.base : Colors.text;
+                        font-size: Typography.size-sm;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                    TouchArea { clicked => { root.font-size = 16; } }
+                }
+
+                fs18 := Rectangle {
+                    width: 36px;
+                    height: 28px;
+                    border-radius: 4px;
+                    border-width: 1px;
+                    border-color: root.font-size == 18 ? Colors.blue : Colors.surface2;
+                    background: root.font-size == 18 ? Colors.blue : Colors.surface1;
+                    Text {
+                        text: @tr("18");
+                        color: root.font-size == 18 ? Colors.base : Colors.text;
+                        font-size: Typography.size-sm;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                    TouchArea { clicked => { root.font-size = 18; } }
+                }
+
+                fs20 := Rectangle {
+                    width: 36px;
+                    height: 28px;
+                    border-radius: 4px;
+                    border-width: 1px;
+                    border-color: root.font-size == 20 ? Colors.blue : Colors.surface2;
+                    background: root.font-size == 20 ? Colors.blue : Colors.surface1;
+                    Text {
+                        text: @tr("20");
+                        color: root.font-size == 20 ? Colors.base : Colors.text;
+                        font-size: Typography.size-sm;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                    TouchArea { clicked => { root.font-size = 20; } }
+                }
+            }
+        }
+
+        // Theme row
+        HorizontalLayout {
+            spacing: Layout.spacing-lg;
+            alignment: start;
+
+            Text {
+                text: @tr("Theme");
+                color: Colors.subtext1;
+                font-size: Typography.size-base;
+                vertical-alignment: center;
+                width: 90px;
+            }
+
+            HorizontalLayout {
+                spacing: Layout.spacing-sm;
+
+                th-dark := Rectangle {
+                    width: 52px;
+                    height: 28px;
+                    border-radius: 4px;
+                    border-width: 1px;
+                    border-color: root.is-dark ? Colors.blue : Colors.surface2;
+                    background: root.is-dark ? Colors.blue : Colors.surface1;
+                    Text {
+                        text: @tr("Dark");
+                        color: root.is-dark ? Colors.base : Colors.text;
+                        font-size: Typography.size-sm;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                    TouchArea { clicked => { if (!root.is-dark) { root.toggle-theme(); } } }
+                }
+
+                th-light := Rectangle {
+                    width: 52px;
+                    height: 28px;
+                    border-radius: 4px;
+                    border-width: 1px;
+                    border-color: !root.is-dark ? Colors.blue : Colors.surface2;
+                    background: !root.is-dark ? Colors.blue : Colors.surface1;
+                    Text {
+                        text: @tr("Light");
+                        color: !root.is-dark ? Colors.base : Colors.text;
+                        font-size: Typography.size-sm;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                    TouchArea { clicked => { if (root.is-dark) { root.toggle-theme(); } } }
+                }
+            }
+        }
+
+        // Reduce Motion row
+        HorizontalLayout {
+            spacing: Layout.spacing-lg;
+            alignment: start;
+
+            Text {
+                text: @tr("Reduce Motion");
+                color: Colors.subtext1;
+                font-size: Typography.size-base;
+                vertical-alignment: center;
+                width: 90px;
+            }
+
+            HorizontalLayout {
+                spacing: Layout.spacing-sm;
+
+                rm-on := Rectangle {
+                    width: 44px;
+                    height: 28px;
+                    border-radius: 4px;
+                    border-width: 1px;
+                    border-color: root.reduce-motion ? Colors.blue : Colors.surface2;
+                    background: root.reduce-motion ? Colors.blue : Colors.surface1;
+                    Text {
+                        text: @tr("On");
+                        color: root.reduce-motion ? Colors.base : Colors.text;
+                        font-size: Typography.size-sm;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                    TouchArea { clicked => { if (!root.reduce-motion) { root.toggle-reduce-motion(); } } }
+                }
+
+                rm-off := Rectangle {
+                    width: 44px;
+                    height: 28px;
+                    border-radius: 4px;
+                    border-width: 1px;
+                    border-color: !root.reduce-motion ? Colors.blue : Colors.surface2;
+                    background: !root.reduce-motion ? Colors.blue : Colors.surface1;
+                    Text {
+                        text: @tr("Off");
+                        color: !root.reduce-motion ? Colors.base : Colors.text;
+                        font-size: Typography.size-sm;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                    TouchArea { clicked => { if (root.reduce-motion) { root.toggle-reduce-motion(); } } }
+                }
+            }
+        }
+
+        // ── Editor ────────────────────────────────────────────────────────────
+        Text {
+            text: @tr("Editor");
+            color: Colors.subtext1;
+            font-size: Typography.size-base;
+            font-weight: 600;
         }
 
         // Tab-width selector row
@@ -35,7 +298,6 @@ export component EditorPrefsDialog inherits ModalOverlay {
                 width: 90px;
             }
 
-            // Three segmented buttons: 2 / 4 / 8
             HorizontalLayout {
                 spacing: Layout.spacing-sm;
 
@@ -105,7 +367,6 @@ export component EditorPrefsDialog inherits ModalOverlay {
                 width: 90px;
             }
 
-            // Four segmented buttons: Off / 500ms / 1s / 5s
             HorizontalLayout {
                 spacing: Layout.spacing-sm;
 
@@ -192,7 +453,6 @@ export component EditorPrefsDialog inherits ModalOverlay {
                 width: 90px;
             }
 
-            // Four segmented buttons: Off / 10s / 30s / 60s
             HorizontalLayout {
                 spacing: Layout.spacing-sm;
 
@@ -221,7 +481,7 @@ export component EditorPrefsDialog inherits ModalOverlay {
                     border-color: root.query-timeout-secs == 10 ? Colors.blue : Colors.surface2;
                     background: root.query-timeout-secs == 10 ? Colors.blue : Colors.surface1;
                     Text {
-                        text: "10s";
+                        text: @tr("10s");
                         color: root.query-timeout-secs == 10 ? Colors.base : Colors.text;
                         font-size: Typography.size-sm;
                         horizontal-alignment: center;
@@ -238,7 +498,7 @@ export component EditorPrefsDialog inherits ModalOverlay {
                     border-color: root.query-timeout-secs == 30 ? Colors.blue : Colors.surface2;
                     background: root.query-timeout-secs == 30 ? Colors.blue : Colors.surface1;
                     Text {
-                        text: "30s";
+                        text: @tr("30s");
                         color: root.query-timeout-secs == 30 ? Colors.base : Colors.text;
                         font-size: Typography.size-sm;
                         horizontal-alignment: center;
@@ -255,7 +515,7 @@ export component EditorPrefsDialog inherits ModalOverlay {
                     border-color: root.query-timeout-secs == 60 ? Colors.blue : Colors.surface2;
                     background: root.query-timeout-secs == 60 ? Colors.blue : Colors.surface1;
                     Text {
-                        text: "60s";
+                        text: @tr("60s");
                         color: root.query-timeout-secs == 60 ? Colors.base : Colors.text;
                         font-size: Typography.size-sm;
                         horizontal-alignment: center;
@@ -264,6 +524,72 @@ export component EditorPrefsDialog inherits ModalOverlay {
                     TouchArea { clicked => { root.query-timeout-secs = 60; } }
                 }
             }
+        }
+
+        // ── General ───────────────────────────────────────────────────────────
+        Text {
+            text: @tr("General");
+            color: Colors.subtext1;
+            font-size: Typography.size-base;
+            font-weight: 600;
+        }
+
+        // Language row
+        HorizontalLayout {
+            spacing: Layout.spacing-lg;
+            alignment: start;
+
+            Text {
+                text: @tr("Language");
+                color: Colors.subtext1;
+                font-size: Typography.size-base;
+                vertical-alignment: center;
+                width: 90px;
+            }
+
+            HorizontalLayout {
+                spacing: Layout.spacing-sm;
+
+                lang-en := Rectangle {
+                    width: 44px;
+                    height: 28px;
+                    border-radius: 4px;
+                    border-width: 1px;
+                    border-color: root.language == "en" ? Colors.blue : Colors.surface2;
+                    background: root.language == "en" ? Colors.blue : Colors.surface1;
+                    Text {
+                        text: @tr("EN");
+                        color: root.language == "en" ? Colors.base : Colors.text;
+                        font-size: Typography.size-sm;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                    TouchArea { clicked => { root.language = "en"; } }
+                }
+
+                lang-ja := Rectangle {
+                    width: 44px;
+                    height: 28px;
+                    border-radius: 4px;
+                    border-width: 1px;
+                    border-color: root.language == "ja" ? Colors.blue : Colors.surface2;
+                    background: root.language == "ja" ? Colors.blue : Colors.surface1;
+                    Text {
+                        text: @tr("JA");
+                        color: root.language == "ja" ? Colors.base : Colors.text;
+                        font-size: Typography.size-sm;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                    TouchArea { clicked => { root.language = "ja"; } }
+                }
+            }
+        }
+
+        Text {
+            text: @tr("Language change takes effect immediately");
+            color: Colors.subtext1;
+            font-size: Typography.size-sm;
         }
 
         HorizontalLayout {
@@ -279,7 +605,16 @@ export component EditorPrefsDialog inherits ModalOverlay {
                 text: @tr("Apply");
                 bg: Colors.blue;
                 fg: Colors.base;
-                clicked => { root.apply-clicked(root.tab-width, root.query-timeout-secs, root.slow-query-threshold-ms); }
+                clicked => {
+                    root.apply-clicked(
+                        root.tab-width,
+                        root.query-timeout-secs,
+                        root.slow-query-threshold-ms,
+                        root.font-family,
+                        root.font-size,
+                        root.language,
+                    );
+                }
             }
         }
     }

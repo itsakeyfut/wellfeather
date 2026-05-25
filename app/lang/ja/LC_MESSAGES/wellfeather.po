@@ -77,14 +77,6 @@ msgid "Cancel (Esc)"
 msgstr "キャンセル (Esc)"
 
 msgctxt "MenuBar"
-msgid "Settings"
-msgstr "設定"
-
-msgctxt "MenuBar"
-msgid "Font Settings (coming soon)"
-msgstr "フォント設定（近日公開）"
-
-msgctxt "MenuBar"
 msgid "Database"
 msgstr "データベース"
 
@@ -95,14 +87,6 @@ msgstr "接続の管理…"
 msgctxt "MenuBar"
 msgid "Disconnect"
 msgstr "切断"
-
-msgctxt "MenuBar"
-msgid "English"
-msgstr "English"
-
-msgctxt "MenuBar"
-msgid "Japanese"
-msgstr "日本語"
 
 msgctxt "Sidebar"
 msgid "Schema"
@@ -373,10 +357,6 @@ msgid "Execute"
 msgstr "実行"
 
 
-msgctxt "MenuBar"
-msgid "Reduce Motion"
-msgstr "モーション軽減"
-
 msgctxt "FindReplaceBar"
 msgid "No results"
 msgstr "一致なし"
@@ -450,6 +430,62 @@ msgid "Editor Preferences"
 msgstr "エディター設定"
 
 msgctxt "EditorPrefsDialog"
+msgid "Appearance"
+msgstr "外観"
+
+msgctxt "EditorPrefsDialog"
+msgid "Font Family"
+msgstr "フォント"
+
+msgctxt "EditorPrefsDialog"
+msgid "Font Size"
+msgstr "フォントサイズ"
+
+msgctxt "EditorPrefsDialog"
+msgid "12"
+msgstr "12"
+
+msgctxt "EditorPrefsDialog"
+msgid "14"
+msgstr "14"
+
+msgctxt "EditorPrefsDialog"
+msgid "16"
+msgstr "16"
+
+msgctxt "EditorPrefsDialog"
+msgid "18"
+msgstr "18"
+
+msgctxt "EditorPrefsDialog"
+msgid "20"
+msgstr "20"
+
+msgctxt "EditorPrefsDialog"
+msgid "Theme"
+msgstr "テーマ"
+
+msgctxt "EditorPrefsDialog"
+msgid "Dark"
+msgstr "ダーク"
+
+msgctxt "EditorPrefsDialog"
+msgid "Light"
+msgstr "ライト"
+
+msgctxt "EditorPrefsDialog"
+msgid "Reduce Motion"
+msgstr "モーション軽減"
+
+msgctxt "EditorPrefsDialog"
+msgid "On"
+msgstr "オン"
+
+msgctxt "EditorPrefsDialog"
+msgid "Editor"
+msgstr "エディター"
+
+msgctxt "EditorPrefsDialog"
 msgid "Tab Width"
 msgstr "タブ幅"
 
@@ -476,6 +512,38 @@ msgstr "クエリタイムアウト"
 msgctxt "EditorPrefsDialog"
 msgid "Off"
 msgstr "オフ"
+
+msgctxt "EditorPrefsDialog"
+msgid "10s"
+msgstr "10秒"
+
+msgctxt "EditorPrefsDialog"
+msgid "30s"
+msgstr "30秒"
+
+msgctxt "EditorPrefsDialog"
+msgid "60s"
+msgstr "60秒"
+
+msgctxt "EditorPrefsDialog"
+msgid "General"
+msgstr "一般"
+
+msgctxt "EditorPrefsDialog"
+msgid "Language"
+msgstr "言語"
+
+msgctxt "EditorPrefsDialog"
+msgid "EN"
+msgstr "英語"
+
+msgctxt "EditorPrefsDialog"
+msgid "JA"
+msgstr "日本語"
+
+msgctxt "EditorPrefsDialog"
+msgid "Language change takes effect immediately"
+msgstr "言語の変更はすぐに反映されます"
 
 msgctxt "EditorPrefsDialog"
 msgid "Cancel"

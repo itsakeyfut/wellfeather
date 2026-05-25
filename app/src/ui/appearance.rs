@@ -234,10 +234,30 @@ pub(super) fn register_editor_prefs_callbacks(
         });
     }
 
-    ui.on_set_slow_query_threshold_ms(move |ms| {
+    {
+        let tx_cmd = tx_cmd.clone(); // clone required: on_set_slow_query_threshold_ms closure
+        ui.on_set_slow_query_threshold_ms(move |ms| {
+            send_cmd(
+                &tx_cmd,
+                Command::UpdateConfig(ConfigUpdate::SlowQueryThreshold(ms.max(0) as u64)),
+            );
+        });
+    }
+
+    {
+        let tx_cmd = tx_cmd.clone(); // clone required: on_set_font_family closure
+        ui.on_set_font_family(move |family| {
+            send_cmd(
+                &tx_cmd,
+                Command::UpdateConfig(ConfigUpdate::FontFamily(family.to_string())),
+            );
+        });
+    }
+
+    ui.on_set_font_size(move |size| {
         send_cmd(
             &tx_cmd,
-            Command::UpdateConfig(ConfigUpdate::SlowQueryThreshold(ms.max(0) as u64)),
+            Command::UpdateConfig(ConfigUpdate::FontSize(size.max(1) as u32)),
         );
     });
 }

@@ -75,6 +75,16 @@ impl AppController {
                     warn!(error = %e, "failed to persist slow_query_threshold_ms to config");
                 }
             }
+            ConfigUpdate::FontFamily(family) => {
+                if let Err(e) = self.session.save_font_family(&family) {
+                    warn!(error = %e, "failed to persist font_family to config");
+                }
+            }
+            ConfigUpdate::FontSize(size) => {
+                if let Err(e) = self.session.save_font_size(size) {
+                    warn!(error = %e, "failed to persist font_size to config");
+                }
+            }
         }
     }
 }
