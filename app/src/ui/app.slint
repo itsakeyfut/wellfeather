@@ -31,6 +31,7 @@ import { SnippetBar }            from "components/snippet_bar.slint";
 import { MetadataSearch }        from "components/metadata_search.slint";
 import { CommandPalette }        from "components/command_palette.slint";
 import { HistoryPanel }          from "components/history_panel.slint";
+import { SnippetPalette }        from "components/snippet_palette.slint";
 import { EditorPrefsDialog }     from "components/dialogs/editor_prefs_dialog.slint";
 import { FingerprintDialog }    from "components/dialogs/fingerprint_dialog.slint";
 
@@ -256,6 +257,18 @@ export global UiState {
     in-out property <bool>  show-snippet-bar: false;
     in-out property <float> snippet-bar-x:    0.0;
     in-out property <float> snippet-bar-y:    100.0;
+
+    // ── Snippet palette (Ctrl+Shift+S) ────────────────────────────────────────
+    in-out property <bool>            show-snippet-palette:    false;
+    in-out property <string>          snippet-palette-query:   "";
+    in-out property <[SnippetEntry]>  snippet-palette-results: [];
+    in-out property <int>             snippet-palette-selected: 0;
+    callback open-snippet-palette();
+    callback snippet-palette-search();
+
+    // ── Sidebar snippet callbacks ─────────────────────────────────────────────
+    callback rename-snippet-item(string, string);  // id, new_name
+    callback set-snippet-folder(string, string);   // id, folder_name
 
     // ── Find / replace bar ────────────────────────────────────────────────────
     in-out property <bool>   show-find-bar:         false;
@@ -615,7 +628,8 @@ export component AppWindow inherits Window {
                     || UiState.show-command-palette
                     || UiState.show-history
                     || UiState.show-editor-prefs
-                    || UiState.show-ssh-fingerprint-dialog) {
+                    || UiState.show-ssh-fingerprint-dialog
+                    || UiState.show-snippet-palette) {
                 EventResult.reject
             } else if (event.modifiers.control
                     && !event.modifiers.shift
@@ -689,6 +703,12 @@ export component AppWindow inherits Window {
                     && !event.modifiers.alt
                     && event.text == "H") {
                 if (!UiState.show-history) { UiState.history-open(); }
+                EventResult.accept
+            } else if (event.modifiers.control
+                    && event.modifiers.shift
+                    && !event.modifiers.alt
+                    && event.text == "S") {
+                if (!UiState.show-snippet-palette) { UiState.open-snippet-palette(); }
                 EventResult.accept
             } else if (event.modifiers.control
                     && !event.modifiers.shift
@@ -814,6 +834,7 @@ export component AppWindow inherits Window {
             tree:               UiState.sidebar-tree;
             is-loading:         UiState.sidebar-loading;
             groups:             UiState.group-list;
+            snippets:           UiState.snippets;
             renaming-group-id <=> UiState.sidebar-renaming-group-id;
             rename-draft      <=> UiState.sidebar-rename-draft;
             toggle-node(id) => { UiState.toggle-sidebar-node(id); }
@@ -824,6 +845,11 @@ export component AppWindow inherits Window {
             delete-group(id)       => { UiState.delete-group(id); }
             move-to-group(conn-id, gid)     => { UiState.move-to-group(conn-id, gid); }
             set-group-color(gid, hex-color) => { UiState.set-group-color(gid, hex-color); }
+            load-snippet-sql(sql)         => { UiState.load-snippet-sql(sql, editor-inst.cursor-pos); }
+            execute-snippet-sql(sql)      => { UiState.execute-snippet-sql(sql); }
+            rename-snippet(id, name)      => { UiState.rename-snippet-item(id, name); }
+            delete-snippet(id)            => { UiState.delete-snippet-item(id); }
+            set-snippet-folder(id, f)     => { UiState.set-snippet-folder(id, f); }
         }
 
         // ── SQL Editor main content panel ─────────────────────────────────────
@@ -1548,6 +1574,37 @@ export component AppWindow inherits Window {
             close-on-blur => {
                 UiState.show-history  = false;
                 UiState.history-query = "";
+            }
+        }
+
+        // ── Snippet palette (Ctrl+Shift+S) ────────────────────────────────────
+        if UiState.show-snippet-palette: SnippetPalette {
+            x: sidebar-width + (main-width - self.width) / 2;
+            y: menu-bar-height + tab-bar-height + 20px;
+            query          <=> UiState.snippet-palette-query;
+            snippets:          UiState.snippet-palette-results;
+            selected-index <=> UiState.snippet-palette-selected;
+            search-changed => { UiState.snippet-palette-search(); }
+            paste(sql) => {
+                UiState.show-snippet-palette  = false;
+                UiState.snippet-palette-query = "";
+                UiState.load-snippet-sql(sql, editor-inst.cursor-pos);
+                editor-inst.grab-focus();
+            }
+            run(sql) => {
+                UiState.execute-snippet-sql(sql);
+                UiState.show-snippet-palette  = false;
+                UiState.snippet-palette-query = "";
+                editor-inst.grab-focus();
+            }
+            close => {
+                UiState.show-snippet-palette  = false;
+                UiState.snippet-palette-query = "";
+                editor-inst.grab-focus();
+            }
+            close-on-blur => {
+                UiState.show-snippet-palette  = false;
+                UiState.snippet-palette-query = "";
             }
         }
 

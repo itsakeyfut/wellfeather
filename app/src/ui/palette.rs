@@ -84,6 +84,9 @@ fn dispatch_palette_command(ui: &crate::UiState, id: &str) {
         "open-metadata-search" => {
             ui.invoke_metadata_search_open();
         }
+        "open-snippet-palette" => {
+            ui.invoke_open_snippet_palette();
+        }
         "save-snippet" => {
             ui.invoke_open_snippet_save(0, 0);
         }

@@ -26,6 +26,11 @@ const STATIC_ACTIONS: &[(&str, &str, &str)] = &[
     ("prev-tab", "Previous Tab", "Ctrl+Shift+Tab"),
     ("toggle-snippet-bar", "Toggle Snippet Bar", "Ctrl+B"),
     ("open-metadata-search", "Metadata Search", "Ctrl+P"),
+    (
+        "open-snippet-palette",
+        "Open Snippet Palette",
+        "Ctrl+Shift+S",
+    ),
     ("save-snippet", "Save Snippet", "Ctrl+D"),
     ("show-snippets", "Show Snippets", ""),
     ("export-csv", "Export CSV", ""),

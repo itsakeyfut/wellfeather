@@ -9,7 +9,8 @@ const CREATE_SNIPPETS: &str = "
         connection_id TEXT,
         sql           TEXT    NOT NULL,
         created_at    TEXT    NOT NULL,
-        sort_order    INTEGER NOT NULL DEFAULT 0
+        sort_order    INTEGER NOT NULL DEFAULT 0,
+        folder        TEXT    NOT NULL DEFAULT ''
     )
 ";
 
@@ -31,6 +32,7 @@ pub struct SnippetEntry {
     pub sql: String,
     pub created_at: String,
     pub sort_order: i64,
+    pub folder: String,
 }
 
 /// Persists snippet entries and bar position to SQLite.
@@ -59,8 +61,8 @@ impl SnippetRepository {
     pub async fn add(&self, entry: &SnippetEntry) -> anyhow::Result<()> {
         let order = self.next_sort_order().await?;
         sqlx::query(
-            "INSERT INTO snippets (id, name, comment, connection_id, sql, created_at, sort_order)
-             VALUES (?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO snippets (id, name, comment, connection_id, sql, created_at, sort_order, folder)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(&entry.id)
         .bind(&entry.name)
@@ -69,6 +71,7 @@ impl SnippetRepository {
         .bind(&entry.sql)
         .bind(&entry.created_at)
         .bind(order)
+        .bind(&entry.folder)
         .execute(&self.pool)
         .await?;
         Ok(())
@@ -79,27 +82,24 @@ impl SnippetRepository {
     /// - `None` → global snippets only (`connection_id IS NULL`).
     /// - `Some(id)` → global snippets plus snippets scoped to that connection.
     pub async fn list(&self, connection_id: Option<&str>) -> anyhow::Result<Vec<SnippetEntry>> {
-        let rows = match connection_id {
-            None => {
-                sqlx::query(
-                    "SELECT id, name, comment, connection_id, sql, created_at, sort_order
+        let rows =
+            match connection_id {
+                None => sqlx::query(
+                    "SELECT id, name, comment, connection_id, sql, created_at, sort_order, folder
                      FROM snippets WHERE connection_id IS NULL
                      ORDER BY sort_order ASC, created_at ASC",
                 )
                 .fetch_all(&self.pool)
-                .await?
-            }
-            Some(id) => {
-                sqlx::query(
-                    "SELECT id, name, comment, connection_id, sql, created_at, sort_order
+                .await?,
+                Some(id) => sqlx::query(
+                    "SELECT id, name, comment, connection_id, sql, created_at, sort_order, folder
                      FROM snippets WHERE connection_id IS NULL OR connection_id = ?
                      ORDER BY sort_order ASC, created_at ASC",
                 )
                 .bind(id)
                 .fetch_all(&self.pool)
-                .await?
-            }
-        };
+                .await?,
+            };
         rows.iter().map(row_to_entry).collect()
     }
 
@@ -167,6 +167,16 @@ impl SnippetRepository {
         Ok(())
     }
 
+    /// Update the folder of an existing snippet.
+    pub async fn set_folder(&self, id: &str, folder: &str) -> anyhow::Result<()> {
+        sqlx::query("UPDATE snippets SET folder = ? WHERE id = ?")
+            .bind(folder)
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
     /// Returns the next sequential number for auto-named snippets ("Query N").
     /// Finds the highest N already used and returns N+1, so numbers never repeat
     /// even after deletion.
@@ -194,13 +204,12 @@ fn row_to_entry(row: &sqlx::sqlite::SqliteRow) -> anyhow::Result<SnippetEntry> {
     Ok(SnippetEntry {
         id: row.try_get("id")?,
         name: row.try_get("name")?,
-        comment: row
-            .try_get::<Option<String>, _>("comment")?
-            .unwrap_or_default(),
+        comment: row.try_get("comment")?,
         connection_id: row.try_get("connection_id")?,
         sql: row.try_get("sql")?,
         created_at: row.try_get("created_at")?,
-        sort_order: row.try_get("sort_order").unwrap_or(0),
+        sort_order: row.try_get("sort_order")?,
+        folder: row.try_get("folder")?,
     })
 }
 
@@ -224,6 +233,7 @@ mod tests {
             sql: sql.to_string(),
             created_at: "2024-01-01T00:00:00Z".to_string(),
             sort_order: 0,
+            folder: String::new(),
         }
     }
 
@@ -358,6 +368,17 @@ mod tests {
     async fn next_query_number_should_return_one_when_no_snippets() {
         let repo = open_memory().await;
         assert_eq!(repo.next_query_number().await.unwrap(), 1);
+    }
+
+    #[tokio::test]
+    async fn snippet_repository_should_set_folder() {
+        let repo = open_memory().await;
+        repo.add(&make_entry("b1", "My Query", "SELECT 1"))
+            .await
+            .unwrap();
+        repo.set_folder("b1", "Reports").await.unwrap();
+        let items = repo.list(None).await.unwrap();
+        assert_eq!(items[0].folder, "Reports");
     }
 
     #[tokio::test]

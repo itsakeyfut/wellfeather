@@ -14,6 +14,7 @@ pub(super) fn snippet_to_slint(b: wf_config::snippet::SnippetEntry) -> crate::Sn
         id: b.id.into(),
         name: b.name.into(),
         comment: b.comment.into(),
+        folder: b.folder.into(),
         sql: b.sql.into(),
     }
 }
@@ -103,6 +104,7 @@ pub(super) fn register_snippet_callbacks(
                     sql,
                     created_at: chrono::Utc::now().to_rfc3339(),
                     sort_order: 0,
+                    folder: String::new(),
                 };
                 if let Err(e) = repo_c.add(&entry).await {
                     tracing::warn!(error = %e, "failed to save snippet");
@@ -184,7 +186,8 @@ pub(super) fn register_snippet_callbacks(
                 let new_text = format!("{}{}{}", &current[..pos], sql, &current[pos..]);
                 let new_cursor = (pos + sql.len()) as i32;
                 *undo_state.last_known.borrow_mut() = new_text.clone();
-                ui.set_editor_text(new_text.into());
+                ui.set_editor_text(new_text.clone().into());
+                ui.invoke_update_highlight(new_text.into());
                 ui.set_editor_cursor_target(new_cursor);
             });
         });
@@ -210,6 +213,122 @@ pub(super) fn register_snippet_callbacks(
                     tracing::warn!(error = %e, "failed to save snippet bar position");
                 }
             });
+        });
+    }
+
+    // rename-snippet-item: update name in DB, refresh list.
+    {
+        let repo = Arc::clone(&snippet_repo);
+        let ww = window.as_weak();
+        ui.on_rename_snippet_item(move |id, new_name| {
+            let Some(w) = ww.upgrade() else { return };
+            let ui = w.global::<crate::UiState>();
+            let conn_id_str = ui.get_active_connection_id().to_string();
+            let conn_id = if conn_id_str.is_empty() {
+                None
+            } else {
+                Some(conn_id_str)
+            };
+            let id = id.to_string();
+            let new_name = new_name.to_string();
+            // clone required: tokio::spawn requires 'static
+            let repo_c = Arc::clone(&repo);
+            // clone required: tokio::spawn requires 'static
+            let ww_c = ww.clone();
+            tokio::spawn(async move {
+                if let Err(e) = repo_c.rename(&id, &new_name).await {
+                    tracing::warn!(error = %e, "failed to rename snippet");
+                    return;
+                }
+                do_refresh_snippets(&ww_c, &repo_c, conn_id.as_deref()).await;
+            });
+        });
+    }
+
+    // set-snippet-folder: update folder in DB, refresh list.
+    {
+        let repo = Arc::clone(&snippet_repo);
+        let ww = window.as_weak();
+        ui.on_set_snippet_folder(move |id, folder| {
+            let Some(w) = ww.upgrade() else { return };
+            let ui = w.global::<crate::UiState>();
+            let conn_id_str = ui.get_active_connection_id().to_string();
+            let conn_id = if conn_id_str.is_empty() {
+                None
+            } else {
+                Some(conn_id_str)
+            };
+            let id = id.to_string();
+            let folder = folder.to_string();
+            // clone required: tokio::spawn requires 'static
+            let repo_c = Arc::clone(&repo);
+            // clone required: tokio::spawn requires 'static
+            let ww_c = ww.clone();
+            tokio::spawn(async move {
+                if let Err(e) = repo_c.set_folder(&id, &folder).await {
+                    tracing::warn!(error = %e, "failed to set snippet folder");
+                    return;
+                }
+                do_refresh_snippets(&ww_c, &repo_c, conn_id.as_deref()).await;
+            });
+        });
+    }
+
+    // open-snippet-palette: load snippets for current connection, show palette.
+    {
+        let repo = Arc::clone(&snippet_repo);
+        let ww = window.as_weak();
+        ui.on_open_snippet_palette(move || {
+            let Some(w) = ww.upgrade() else { return };
+            let ui = w.global::<crate::UiState>();
+            let conn_id_str = ui.get_active_connection_id().to_string();
+            let conn_id = if conn_id_str.is_empty() {
+                None
+            } else {
+                Some(conn_id_str)
+            };
+            // clone required: tokio::spawn requires 'static
+            let repo_c = Arc::clone(&repo);
+            // clone required: tokio::spawn requires 'static
+            let ww_c = ww.clone();
+            tokio::spawn(async move {
+                let items = repo_c.list(conn_id.as_deref()).await.unwrap_or_default();
+                let slint_items: Vec<crate::SnippetEntry> =
+                    items.into_iter().map(snippet_to_slint).collect();
+                let _ = slint::invoke_from_event_loop(move || {
+                    with_ui(&ww_c, move |ui| {
+                        ui.set_snippet_palette_query("".into());
+                        ui.set_snippet_palette_selected(0);
+                        ui.set_snippet_palette_results(
+                            Rc::new(slint::VecModel::from(slint_items)).into(),
+                        );
+                        ui.set_show_snippet_palette(true);
+                    });
+                });
+            });
+        });
+    }
+
+    // snippet-palette-search: filter current snippet list by query string (Slint thread).
+    {
+        let ww = window.as_weak();
+        ui.on_snippet_palette_search(move || {
+            let Some(w) = ww.upgrade() else { return };
+            let ui = w.global::<crate::UiState>();
+            let query = ui.get_snippet_palette_query().to_string().to_lowercase();
+            let all = ui.get_snippets();
+            use slint::Model as _;
+            let filtered: Vec<crate::SnippetEntry> = (0..all.row_count())
+                .filter_map(|i| all.row_data(i))
+                .filter(|s| {
+                    query.is_empty()
+                        || s.name.to_lowercase().contains(&query)
+                        || s.comment.to_lowercase().contains(&query)
+                        || s.sql.to_lowercase().contains(&query)
+                })
+                .collect();
+            ui.set_snippet_palette_selected(0);
+            ui.set_snippet_palette_results(Rc::new(slint::VecModel::from(filtered)).into());
         });
     }
 }
