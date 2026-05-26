@@ -47,8 +47,16 @@ use wf_history::{
 /// Entry point. Runs on the main OS thread; the Slint event loop must stay here.
 fn main() -> anyhow::Result<()> {
     // Initialise tracing first so that enable_dpi_awareness() can log warnings.
+    // tracing-subscriber's fmt().init() installs the log→tracing bridge internally;
+    // suppress noisy ICU4X locale-data warnings from Slint internals with explicit
+    // directives (override with RUST_LOG=i_slint_core=warn if you need them).
     tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::from_default_env()
+                .add_directive("i_slint_core=error".parse().unwrap())
+                .add_directive("icu_segmenter=error".parse().unwrap())
+                .add_directive("icu_provider=error".parse().unwrap()),
+        )
         .init();
 
     // Enable per-monitor DPI awareness before any window is created (Windows only;

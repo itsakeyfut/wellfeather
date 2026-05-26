@@ -3175,6 +3175,7 @@ checksum = "139c4cf31c8b5f33d7e199446eff9c1e02decfc2f0eec2c8d71f65befa45b421"
 dependencies = [
  "displaydoc",
  "icu_locale_core",
+ "log",
  "serde",
  "stable_deref_trait",
  "writeable",
@@ -6288,6 +6289,7 @@ dependencies = [
  "i-slint-core-macros",
  "i-slint-renderer-femtovg",
  "i-slint-renderer-software",
+ "log",
  "num-traits",
  "once_cell",
  "pin-weak",
@@ -7978,6 +7980,7 @@ dependencies = [
  "chrono",
  "directories",
  "fuzzy-matcher",
+ "icu_provider",
  "regex",
  "rfd",
  "rust-i18n",

@@ -5,7 +5,8 @@ edition.workspace  = true
 license.workspace  = true
 
 [dependencies]
-slint              = "1.15.1"
+slint              = { version = "1.15.1", features = ["log"] }
+icu_provider       = { version = "2.2", features = ["logging"] }
 wf-db              = { path = "../crates/wf-db" }
 wf-config          = { path = "../crates/wf-config" }
 wf-query           = { path = "../crates/wf-query" }
