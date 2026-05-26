@@ -64,8 +64,6 @@ fn main() -> anyhow::Result<()> {
     let _guard = runtime.enter();
 
     // Resolve OS-specific directories once at startup and ensure they exist.
-    // The SQLite database is intentionally kept in config_dir (same as ConfigManager::app_dir())
-    // for backward compatibility with existing installations.
     let config_dir = CurrentPlatform::get_config_dir()
         .context("cannot resolve OS application config directory")?;
     let data_dir =

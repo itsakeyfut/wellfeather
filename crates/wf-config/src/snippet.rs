@@ -54,10 +54,6 @@ impl SnippetRepository {
             .execute(&pool)
             .await
             .context("failed to create snippet_bar_position table")?;
-        // Idempotent migration: add folder column to existing DBs (error = already exists).
-        let _ = sqlx::query("ALTER TABLE snippets ADD COLUMN folder TEXT NOT NULL DEFAULT ''")
-            .execute(&pool)
-            .await;
         Ok(Self { pool })
     }
 
@@ -208,17 +204,12 @@ fn row_to_entry(row: &sqlx::sqlite::SqliteRow) -> anyhow::Result<SnippetEntry> {
     Ok(SnippetEntry {
         id: row.try_get("id")?,
         name: row.try_get("name")?,
-        comment: row
-            .try_get::<Option<String>, _>("comment")?
-            .unwrap_or_default(),
+        comment: row.try_get("comment")?,
         connection_id: row.try_get("connection_id")?,
         sql: row.try_get("sql")?,
         created_at: row.try_get("created_at")?,
-        sort_order: row.try_get("sort_order").unwrap_or(0),
-        // unwrap_or_default: pre-migration rows may have NULL despite NOT NULL DEFAULT ''
-        folder: row
-            .try_get::<Option<String>, _>("folder")?
-            .unwrap_or_default(),
+        sort_order: row.try_get("sort_order")?,
+        folder: row.try_get("folder")?,
     })
 }
 

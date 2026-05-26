@@ -52,33 +52,6 @@ const CREATE_INDEX_CONN_LAST_USED: &str = "
     CREATE INDEX IF NOT EXISTS idx_conn_last_used
         ON connections(last_used_at DESC)";
 
-/// Migrations for existing databases created before group columns were added.
-const MIGRATE_GROUP_COLUMNS: &[&str] = &[
-    "ALTER TABLE connections ADD COLUMN group_id TEXT",
-    "ALTER TABLE connections ADD COLUMN color    TEXT",
-];
-
-/// Migrations for existing databases created before SSL columns were added.
-const MIGRATE_SSL_COLUMNS: &[&str] = &[
-    "ALTER TABLE connections ADD COLUMN ssl_enabled     INTEGER NOT NULL DEFAULT 0",
-    "ALTER TABLE connections ADD COLUMN ssl_mode        TEXT    NOT NULL DEFAULT 'require'",
-    "ALTER TABLE connections ADD COLUMN ssl_ca_cert     TEXT",
-    "ALTER TABLE connections ADD COLUMN ssl_client_cert TEXT",
-    "ALTER TABLE connections ADD COLUMN ssl_client_key  TEXT",
-];
-
-/// Migrations for existing databases that were created before SSH columns were added.
-const MIGRATE_SSH_COLUMNS: &[&str] = &[
-    "ALTER TABLE connections ADD COLUMN ssh_enabled              INTEGER NOT NULL DEFAULT 0",
-    "ALTER TABLE connections ADD COLUMN ssh_host                 TEXT",
-    "ALTER TABLE connections ADD COLUMN ssh_port                 INTEGER",
-    "ALTER TABLE connections ADD COLUMN ssh_user                 TEXT",
-    "ALTER TABLE connections ADD COLUMN ssh_auth_method          TEXT NOT NULL DEFAULT 'password'",
-    "ALTER TABLE connections ADD COLUMN ssh_password_encrypted   TEXT",
-    "ALTER TABLE connections ADD COLUMN ssh_key_path             TEXT",
-    "ALTER TABLE connections ADD COLUMN ssh_passphrase_encrypted TEXT",
-];
-
 /// Persists [`ConnectionConfig`] records to SQLite.
 ///
 /// Cheap to clone — all clones share the same underlying connection pool.
@@ -93,18 +66,7 @@ impl ConnectionRepository {
         sqlx::query(CREATE_TABLE)
             .execute(&pool)
             .await
-            .context("failed to migrate connections table")?;
-        // Best-effort: add SSH, SSL, and group columns to existing databases.
-        // Errors are ignored because the column may already exist.
-        for stmt in MIGRATE_SSH_COLUMNS {
-            let _ = sqlx::query(stmt).execute(&pool).await;
-        }
-        for stmt in MIGRATE_SSL_COLUMNS {
-            let _ = sqlx::query(stmt).execute(&pool).await;
-        }
-        for stmt in MIGRATE_GROUP_COLUMNS {
-            let _ = sqlx::query(stmt).execute(&pool).await;
-        }
+            .context("failed to create connections table")?;
         sqlx::query(CREATE_INDEX_CONN_LAST_USED)
             .execute(&pool)
             .await
@@ -325,15 +287,15 @@ fn row_to_config(row: &sqlx::sqlite::SqliteRow) -> anyhow::Result<ConnectionConf
     };
     let port_i: Option<i64> = row.try_get("port")?;
     let ssh_port_i: Option<i64> = row.try_get("ssh_port")?;
-    let ssh_auth_str: Option<String> = row.try_get("ssh_auth_method").ok();
-    let ssh_auth_method = match ssh_auth_str.as_deref() {
-        Some("private_key") => SshAuthMethod::PrivateKey,
+    let ssh_auth_str: String = row.try_get("ssh_auth_method")?;
+    let ssh_auth_method = match ssh_auth_str.as_str() {
+        "private_key" => SshAuthMethod::PrivateKey,
         _ => SshAuthMethod::Password,
     };
-    let ssl_mode_str: Option<String> = row.try_get("ssl_mode").ok();
-    let ssl_mode = match ssl_mode_str.as_deref() {
-        Some("verify_ca") => SslMode::VerifyCa,
-        Some("verify_full") => SslMode::VerifyFull,
+    let ssl_mode_str: String = row.try_get("ssl_mode")?;
+    let ssl_mode = match ssl_mode_str.as_str() {
+        "verify_ca" => SslMode::VerifyCa,
+        "verify_full" => SslMode::VerifyFull,
         _ => SslMode::Require,
     };
     Ok(ConnectionConfig {
@@ -348,7 +310,7 @@ fn row_to_config(row: &sqlx::sqlite::SqliteRow) -> anyhow::Result<ConnectionConf
         database: row.try_get("database_name")?,
         safe_dml: row.try_get::<i64, _>("safe_dml")? != 0,
         read_only: row.try_get::<i64, _>("read_only")? != 0,
-        ssh_enabled: row.try_get::<i64, _>("ssh_enabled").unwrap_or(0) != 0,
+        ssh_enabled: row.try_get::<i64, _>("ssh_enabled")? != 0,
         ssh_host: row.try_get("ssh_host").ok().flatten(),
         ssh_port: ssh_port_i.map(|p| p as u16),
         ssh_user: row.try_get("ssh_user").ok().flatten(),
@@ -356,7 +318,7 @@ fn row_to_config(row: &sqlx::sqlite::SqliteRow) -> anyhow::Result<ConnectionConf
         ssh_password_encrypted: row.try_get("ssh_password_encrypted").ok().flatten(),
         ssh_key_path: row.try_get("ssh_key_path").ok().flatten(),
         ssh_passphrase_encrypted: row.try_get("ssh_passphrase_encrypted").ok().flatten(),
-        ssl_enabled: row.try_get::<i64, _>("ssl_enabled").unwrap_or(0) != 0,
+        ssl_enabled: row.try_get::<i64, _>("ssl_enabled")? != 0,
         ssl_mode,
         ssl_ca_cert: row.try_get("ssl_ca_cert").ok().flatten(),
         ssl_client_cert: row.try_get("ssl_client_cert").ok().flatten(),
