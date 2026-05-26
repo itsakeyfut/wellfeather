@@ -186,7 +186,8 @@ pub(super) fn register_snippet_callbacks(
                 let new_text = format!("{}{}{}", &current[..pos], sql, &current[pos..]);
                 let new_cursor = (pos + sql.len()) as i32;
                 *undo_state.last_known.borrow_mut() = new_text.clone();
-                ui.set_editor_text(new_text.into());
+                ui.set_editor_text(new_text.clone().into());
+                ui.invoke_update_highlight(new_text.into());
                 ui.set_editor_cursor_target(new_cursor);
             });
         });
