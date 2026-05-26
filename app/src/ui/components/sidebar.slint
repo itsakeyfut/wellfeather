@@ -1,4 +1,4 @@
-import { SidebarNode, GroupEntry, ColorPaletteEntry } from "../globals.slint";
+import { SidebarNode, GroupEntry, ColorPaletteEntry, SnippetEntry } from "../globals.slint";
 import { Colors, Typography, Layout, Icons, Animation } from "../theme.slint";
 
 // Preset group color swatches (Catppuccin-inspired, theme-neutral).
@@ -33,6 +33,13 @@ export component Sidebar inherits Rectangle {
     callback move-to-group(string, string);   // conn_id, group_id (empty = ungrouped)
     callback set-group-color(string, string); // group_id, hex_color
 
+    in property <[SnippetEntry]> snippets: [];
+    callback load-snippet-sql(string);           // sql text
+    callback execute-snippet-sql(string);        // sql text
+    callback rename-snippet(string, string);     // id, new_name
+    callback delete-snippet(string);             // id
+    callback set-snippet-folder(string, string); // id, folder_name
+
     /// True while this sidebar holds keyboard focus (used by app.slint to sync focused-pane).
     out property <bool> sidebar-focused: sidebar-fs.has-focus;
     /// Programmatic focus: called by app.slint when Alt+Left navigates to the sidebar.
@@ -45,6 +52,17 @@ export component Sidebar inherits Rectangle {
 
     /// Keyboard-navigation cursor (-1 = none selected).
     property <int> kb-focus: -1;
+
+    // ── Snippet section state ─────────────────────────────────────────────────
+    private property <bool>   snippets-section-expanded: true;
+    private property <string> snippet-renaming-id:       "";
+    private property <string> snippet-rename-draft:      "";
+    private property <string> snippet-folder-id:         "";
+    private property <string> snippet-folder-draft:      "";
+    private property <bool>   snippet-ctx-visible:       false;
+    private property <length> snippet-ctx-y:             0;
+    private property <string> snippet-ctx-id:            "";
+    private property <string> snippet-ctx-name:          "";
 
     // ── Context menu state ────────────────────────────────────────────────────
     private property <bool>   ctx-visible:      false;
@@ -423,6 +441,234 @@ export component Sidebar inherits Rectangle {
                         }
                     }
                 }
+
+                // ── Snippets section divider ───────────────────────────────────
+                Rectangle {
+                    height: 1px;
+                    background: Colors.surface0;
+                }
+
+                // ── Snippets section header ────────────────────────────────────
+                snippets-header := Rectangle {
+                    height: Layout.height-sidebar-row;
+                    background: snip-hdr-ta.has-hover ? Colors.hover-subtle : transparent;
+
+                    HorizontalLayout {
+                        padding-left: Layout.padding-sm;
+                        padding-right: Layout.padding-sm;
+                        spacing: Layout.spacing-sm;
+
+                        Image {
+                            width: Layout.icon-md;
+                            source: root.snippets-section-expanded
+                                ? Icons.chevron-down
+                                : Icons.chevron-right;
+                            colorize: Colors.overlay1;
+                            image-fit: contain;
+                        }
+                        Text {
+                            text: @tr("Snippets");
+                            color: Colors.overlay1;
+                            font-size: Typography.size-md;
+                            vertical-alignment: center;
+                            horizontal-stretch: 1;
+                        }
+                    }
+
+                    snip-hdr-ta := TouchArea {
+                        clicked => {
+                            root.snippets-section-expanded = !root.snippets-section-expanded;
+                            root.snippet-ctx-visible = false;
+                        }
+                    }
+                }
+
+                // ── Snippet rows (collapsible) ─────────────────────────────────
+                if root.snippets-section-expanded : VerticalLayout {
+                    for snippet[si] in root.snippets : Rectangle {
+                        height: 44px;
+                        clip: true;
+
+                        background: snip-row-ta.has-hover ? Colors.hover-subtle : transparent;
+
+                        HorizontalLayout {
+                            padding-left: Layout.padding-md + Layout.icon-md;
+                            padding-right: Layout.padding-sm;
+                            spacing: Layout.spacing-sm;
+
+                            // Inline rename TextInput
+                            if root.snippet-renaming-id == snippet.id : rename-snip-scope := FocusScope {
+                                horizontal-stretch: 1;
+                                height: parent.height;
+
+                                property <bool> had-focus: false;
+                                changed has-focus => {
+                                    if (rename-snip-scope.has-focus) {
+                                        rename-snip-scope.had-focus = true;
+                                    } else if (rename-snip-scope.had-focus) {
+                                        root.snippet-renaming-id = "";
+                                    }
+                                }
+
+                                rename-snip-ti := TextInput {
+                                    width: parent.width;
+                                    height: parent.height;
+                                    text <=> root.snippet-rename-draft;
+                                    font-size: Typography.size-base;
+                                    color: Colors.text;
+                                    vertical-alignment: center;
+                                    single-line: true;
+                                    accepted => {
+                                        root.rename-snippet(snippet.id, root.snippet-rename-draft);
+                                        root.snippet-renaming-id = "";
+                                    }
+                                    key-pressed(e) => {
+                                        if (e.text == Key.Escape) {
+                                            root.snippet-renaming-id = "";
+                                            EventResult.accept
+                                        } else {
+                                            EventResult.reject
+                                        }
+                                    }
+                                }
+
+                                Timer {
+                                    interval: 1ms;
+                                    running: true;
+                                    triggered => {
+                                        self.running = false;
+                                        rename-snip-ti.focus();
+                                    }
+                                }
+                            }
+
+                            // Inline folder TextInput
+                            if root.snippet-folder-id == snippet.id : folder-snip-scope := FocusScope {
+                                horizontal-stretch: 1;
+                                height: parent.height;
+
+                                property <bool> had-focus: false;
+                                changed has-focus => {
+                                    if (folder-snip-scope.has-focus) {
+                                        folder-snip-scope.had-focus = true;
+                                    } else if (folder-snip-scope.had-focus) {
+                                        root.snippet-folder-id = "";
+                                    }
+                                }
+
+                                folder-snip-ti := TextInput {
+                                    width: parent.width;
+                                    height: parent.height;
+                                    text <=> root.snippet-folder-draft;
+                                    font-size: Typography.size-base;
+                                    color: Colors.text;
+                                    vertical-alignment: center;
+                                    single-line: true;
+                                    accepted => {
+                                        root.set-snippet-folder(snippet.id, root.snippet-folder-draft);
+                                        root.snippet-folder-id = "";
+                                    }
+                                    key-pressed(e) => {
+                                        if (e.text == Key.Escape) {
+                                            root.snippet-folder-id = "";
+                                            EventResult.accept
+                                        } else {
+                                            EventResult.reject
+                                        }
+                                    }
+                                }
+
+                                Timer {
+                                    interval: 1ms;
+                                    running: true;
+                                    triggered => {
+                                        self.running = false;
+                                        folder-snip-ti.focus();
+                                    }
+                                }
+                            }
+
+                            // Normal snippet row: name + preview (2-line)
+                            if root.snippet-renaming-id != snippet.id && root.snippet-folder-id != snippet.id : VerticalLayout {
+                                horizontal-stretch: 1;
+                                alignment: center;
+                                spacing: 2px;
+
+                                HorizontalLayout {
+                                    spacing: Layout.spacing-sm;
+
+                                    Text {
+                                        text: snippet.comment != "" ? snippet.comment : snippet.name;
+                                        color: Colors.subtext0;
+                                        font-size: Typography.size-base;
+                                        overflow: elide;
+                                        horizontal-stretch: 1;
+                                    }
+
+                                    if snippet.folder != "": Rectangle {
+                                        width: snip-folder-badge.preferred-width + 8px;
+                                        height: 16px;
+                                        background: Colors.surface2;
+                                        border-radius: Layout.radius-sm;
+
+                                        snip-folder-badge := Text {
+                                            x: 4px;
+                                            text: snippet.folder;
+                                            color: Colors.overlay1;
+                                            font-size: Typography.size-xs;
+                                            vertical-alignment: center;
+                                        }
+                                    }
+                                }
+
+                                Text {
+                                    text: snippet.sql;
+                                    color: Colors.overlay0;
+                                    font-size: Typography.size-xs;
+                                    overflow: elide;
+                                    horizontal-stretch: 1;
+                                }
+                            }
+                        }
+
+                        snip-row-ta := TouchArea {
+                            clicked => {
+                                root.snippet-ctx-visible = false;
+                                root.load-snippet-sql(snippet.sql);
+                            }
+                            pointer-event(pe) => {
+                                if (pe.button == PointerEventButton.right
+                                        && pe.kind == PointerEventKind.down) {
+                                    root.snippet-renaming-id = "";
+                                    root.snippet-folder-id   = "";
+                                    root.snippet-ctx-id   = snippet.id;
+                                    root.snippet-ctx-name = snippet.name;
+                                    root.snippet-ctx-y    = snippets-header.y
+                                        + snippets-header.height
+                                        + si * 44px
+                                        + sidebar-scroll.viewport-y;
+                                    root.snippet-ctx-visible = true;
+                                    root.ctx-visible = false;
+                                }
+                            }
+                        }
+                    }
+
+                    // Empty state
+                    if root.snippets.length == 0 : Rectangle {
+                        height: 28px;
+                        HorizontalLayout {
+                            padding-left: Layout.padding-md + Layout.icon-md;
+                            Text {
+                                text: @tr("No snippets yet");
+                                color: Colors.overlay1;
+                                font-size: Typography.size-sm;
+                                vertical-alignment: center;
+                                font-italic: true;
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -597,6 +843,108 @@ export component Sidebar inherits Rectangle {
                             root.move-to-group(root.ctx-node-raw-id, "");
                             root.ctx-visible = false;
                         }
+                    }
+                }
+            }
+        }
+    }
+
+    // ── Snippet context menu backdrop ────────────────────────────────────────
+    if root.snippet-ctx-visible : TouchArea {
+        x: 0; y: 0;
+        width: root.width; height: root.height;
+        z: 99;
+        clicked => { root.snippet-ctx-visible = false; }
+    }
+
+    // ── Snippet context menu ─────────────────────────────────────────────────
+    if root.snippet-ctx-visible : Rectangle {
+        x: 4px;
+        y: clamp(root.snippet-ctx-y, 4px, root.height - snip-ctx-vl.preferred-height - 4px);
+        z: 100;
+        width: 200px;
+        height: snip-ctx-vl.preferred-height;
+        background: Colors.surface0;
+        border-radius: Layout.radius-md;
+        drop-shadow-blur: 8px;
+        drop-shadow-color: Colors.shadow;
+        border-width: 1px;
+        border-color: Colors.surface1;
+
+        snip-ctx-vl := VerticalLayout {
+            padding: Layout.spacing-sm;
+            spacing: 0;
+
+            // Rename
+            Rectangle {
+                height: Layout.height-menu-item;
+                border-radius: Layout.radius-sm;
+                background: snip-rename-mta.has-hover ? Colors.hover-btn : transparent;
+                HorizontalLayout {
+                    padding-left: Layout.padding-sm;
+                    spacing: Layout.spacing-md;
+                    Image {
+                        width: Layout.icon-md;
+                        source: Icons.edit;
+                        colorize: Colors.text;
+                        image-fit: contain;
+                    }
+                    Text { text: @tr("Rename"); color: Colors.text; vertical-alignment: center; }
+                }
+                snip-rename-mta := TouchArea {
+                    clicked => {
+                        root.snippet-rename-draft = root.snippet-ctx-name;
+                        root.snippet-renaming-id  = root.snippet-ctx-id;
+                        root.snippet-ctx-visible  = false;
+                    }
+                }
+            }
+
+            // Delete
+            Rectangle {
+                height: Layout.height-menu-item;
+                border-radius: Layout.radius-sm;
+                background: snip-delete-mta.has-hover ? Colors.hover-btn : transparent;
+                HorizontalLayout {
+                    padding-left: Layout.padding-sm;
+                    spacing: Layout.spacing-md;
+                    Image {
+                        width: Layout.icon-md;
+                        source: Icons.delete;
+                        colorize: Colors.red;
+                        image-fit: contain;
+                    }
+                    Text { text: @tr("Delete"); color: Colors.red; vertical-alignment: center; }
+                }
+                snip-delete-mta := TouchArea {
+                    clicked => {
+                        root.delete-snippet(root.snippet-ctx-id);
+                        root.snippet-ctx-visible = false;
+                    }
+                }
+            }
+
+            // Move to Folder
+            Rectangle {
+                height: Layout.height-menu-item;
+                border-radius: Layout.radius-sm;
+                background: snip-folder-mta.has-hover ? Colors.hover-btn : transparent;
+                HorizontalLayout {
+                    padding-left: Layout.padding-sm;
+                    spacing: Layout.spacing-md;
+                    Image {
+                        width: Layout.icon-md;
+                        source: Icons.folder;
+                        colorize: Colors.text;
+                        image-fit: contain;
+                    }
+                    Text { text: @tr("Move to Folder"); color: Colors.text; vertical-alignment: center; }
+                }
+                snip-folder-mta := TouchArea {
+                    clicked => {
+                        root.snippet-folder-draft = "";
+                        root.snippet-folder-id    = root.snippet-ctx-id;
+                        root.snippet-ctx-visible  = false;
                     }
                 }
             }

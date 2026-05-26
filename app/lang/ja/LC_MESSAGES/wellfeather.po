@@ -624,3 +624,43 @@ msgstr "実行"
 msgctxt "MetadataSearch"
 msgid "Search tables, columns…"
 msgstr "テーブル・カラムを検索…"
+
+msgctxt "SnippetPalette"
+msgid "Search snippets…"
+msgstr "スニペットを検索…"
+
+msgctxt "SnippetPalette"
+msgid "No snippets"
+msgstr "スニペットがありません"
+
+msgctxt "SnippetPalette"
+msgid "Paste"
+msgstr "貼り付け"
+
+msgctxt "SnippetPalette"
+msgid "Run"
+msgstr "実行"
+
+msgctxt "Sidebar"
+msgid "Add group"
+msgstr "グループを追加"
+
+msgctxt "Sidebar"
+msgid "Move to Folder"
+msgstr "フォルダーへ移動"
+
+msgctxt "Sidebar"
+msgid "Folder name…"
+msgstr "フォルダー名…"
+
+msgctxt "Sidebar"
+msgid "No snippets yet"
+msgstr "スニペットがありません"
+
+msgctxt "Sidebar"
+msgid "Rename"
+msgstr "名前変更"
+
+msgctxt "Sidebar"
+msgid "Delete"
+msgstr "削除"

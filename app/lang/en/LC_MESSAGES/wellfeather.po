@@ -624,3 +624,43 @@ msgstr "Run"
 msgctxt "MetadataSearch"
 msgid "Search tables, columns…"
 msgstr "Search tables, columns…"
+
+msgctxt "SnippetPalette"
+msgid "Search snippets…"
+msgstr "Search snippets…"
+
+msgctxt "SnippetPalette"
+msgid "No snippets"
+msgstr "No snippets"
+
+msgctxt "SnippetPalette"
+msgid "Paste"
+msgstr "Paste"
+
+msgctxt "SnippetPalette"
+msgid "Run"
+msgstr "Run"
+
+msgctxt "Sidebar"
+msgid "Add group"
+msgstr "Add group"
+
+msgctxt "Sidebar"
+msgid "Move to Folder"
+msgstr "Move to Folder"
+
+msgctxt "Sidebar"
+msgid "Folder name…"
+msgstr "Folder name…"
+
+msgctxt "Sidebar"
+msgid "No snippets yet"
+msgstr "No snippets yet"
+
+msgctxt "Sidebar"
+msgid "Rename"
+msgstr "Rename"
+
+msgctxt "Sidebar"
+msgid "Delete"
+msgstr "Delete"

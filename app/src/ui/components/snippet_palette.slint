@@ -1,0 +1,267 @@
+import { Colors, Typography, Layout, Icons } from "../theme.slint";
+import { SnippetEntry } from "../globals.slint";
+
+export component SnippetPalette inherits Rectangle {
+    in property    <[SnippetEntry]> snippets:       [];
+    in-out property <string>        query:          "";
+    in-out property <int>           selected-index: 0;
+    callback search-changed();
+    callback paste(string);   // sql — insert at cursor
+    callback run(string);     // sql — execute immediately
+    callback close();
+    callback close-on-blur();
+
+    property <length> search-row-h: 44px;
+    property <length> row-h:        52px;
+    property <length> results-h:    clamp(root.snippets.length * root.row-h, 0px, root.row-h * 7);
+
+    width:  520px;
+    height: root.search-row-h + root.results-h;
+
+    background:        Colors.surface0;
+    border-radius:     Layout.radius-md;
+    border-width:      1px;
+    border-color:      Colors.surface1;
+    drop-shadow-blur:  12px;
+    drop-shadow-color: Colors.shadow;
+    clip: true;
+
+    property <bool> _input-focused <=> search-input.has-focus;
+    property <length> _results-vpy: 0;
+
+    changed query => {
+        root._results-vpy = 0;
+        root.search-changed();
+    }
+    init => { search-input.focus(); }
+
+    changed _input-focused => {
+        if (!_input-focused) { root.close-on-blur(); }
+    }
+
+    changed selected-index => {
+        if (root.snippets.length > 0) {
+            if (root.selected-index * root.row-h < -root._results-vpy) {
+                root._results-vpy = -(root.selected-index * root.row-h);
+            } else if ((root.selected-index + 1) * root.row-h > -root._results-vpy + root.results-h) {
+                root._results-vpy = -((root.selected-index + 1) * root.row-h - root.results-h);
+            }
+        }
+    }
+
+    palette-focus := FocusScope {
+        focus-on-click: false;
+
+        capture-key-pressed(event) => {
+            if (event.text == Key.Escape) {
+                root.close();
+                EventResult.accept
+            } else if (event.text == Key.UpArrow) {
+                if (root.selected-index > 0) { root.selected-index -= 1; }
+                EventResult.accept
+            } else if (event.text == Key.DownArrow) {
+                if (root.selected-index < root.snippets.length - 1) {
+                    root.selected-index += 1;
+                }
+                EventResult.accept
+            } else if (event.text == Key.Return && event.modifiers.control) {
+                if (root.snippets.length > 0) {
+                    root.run(root.snippets[root.selected-index].sql);
+                }
+                EventResult.accept
+            } else if (event.text == Key.Return) {
+                if (root.snippets.length > 0) {
+                    root.paste(root.snippets[root.selected-index].sql);
+                }
+                EventResult.accept
+            } else {
+                EventResult.reject
+            }
+        }
+
+        VerticalLayout {
+            spacing: 0;
+
+            // ── Search row ────────────────────────────────────────────────────
+            Rectangle {
+                height: root.search-row-h;
+                background: Colors.surface0;
+
+                TouchArea {
+                    mouse-cursor: text;
+                    clicked => { search-input.focus(); }
+                }
+
+                HorizontalLayout {
+                    padding-left:  Layout.padding-sm;
+                    padding-right: Layout.padding-sm;
+                    spacing: Layout.spacing-md;
+
+                    search-input := TextInput {
+                        horizontal-stretch: 1;
+                        single-line: true;
+                        text <=> root.query;
+                        color: Colors.text;
+                        font-size: Typography.size-base;
+                        vertical-alignment: center;
+                    }
+                }
+
+                // Placeholder overlay
+                if root.query == "": Text {
+                    x: Layout.padding-sm;
+                    y: 0;
+                    width: parent.width - Layout.padding-sm;
+                    height: parent.height;
+                    text: @tr("Search snippets\u{2026}");
+                    color: Colors.overlay0;
+                    font-size: Typography.size-base;
+                    vertical-alignment: center;
+                }
+
+                // Bottom separator
+                Rectangle {
+                    x: 0; y: parent.height - 1px;
+                    width: parent.width; height: 1px;
+                    background: Colors.surface1;
+                }
+            }
+
+            // ── Empty state ───────────────────────────────────────────────────
+            if root.snippets.length == 0: Rectangle {
+                height: 36px;
+                background: Colors.surface0;
+                Text {
+                    x: Layout.padding-md;
+                    y: (parent.height - self.height) / 2;
+                    text: @tr("No snippets");
+                    color: Colors.overlay1;
+                    font-size: Typography.size-sm;
+                }
+            }
+
+            // ── Results list ──────────────────────────────────────────────────
+            if root.snippets.length > 0: Rectangle {
+                width: parent.width;
+                height: root.results-h;
+
+                results-flick := Flickable {
+                    width: parent.width;
+                    height: parent.height;
+                    viewport-height: max(self.height, root.snippets.length * root.row-h);
+                    viewport-y <=> root._results-vpy;
+                    interactive: false;
+
+                    VerticalLayout {
+                        width: parent.width;
+                        spacing: 0;
+
+                        for snippet[i] in root.snippets: Rectangle {
+                            height: root.row-h;
+                            background: i == root.selected-index
+                                ? Colors.surface1
+                                : (row-ta.has-hover ? Colors.hover-subtle : transparent);
+
+                            HorizontalLayout {
+                                padding-left:  Layout.padding-md;
+                                padding-right: Layout.spacing-sm;
+                                spacing: Layout.spacing-sm;
+
+                                // Name + preview (2-line, left)
+                                VerticalLayout {
+                                    horizontal-stretch: 1;
+                                    alignment: center;
+                                    spacing: 2px;
+
+                                    Text {
+                                        text: snippet.comment != "" ? snippet.comment : snippet.name;
+                                        color: Colors.text;
+                                        font-size: Typography.size-base;
+                                        overflow: elide;
+                                    }
+                                    Text {
+                                        text: snippet.sql;
+                                        color: Colors.overlay1;
+                                        font-size: Typography.size-sm;
+                                        overflow: elide;
+                                    }
+                                }
+
+                                // Folder badge (dim, only when non-empty)
+                                if snippet.folder != "": Rectangle {
+                                    width: folder-lbl.preferred-width + 8px;
+                                    height: 18px;
+                                    background: Colors.surface2;
+                                    border-radius: Layout.radius-sm;
+
+                                    folder-lbl := Text {
+                                        x: 4px;
+                                        text: snippet.folder;
+                                        color: Colors.overlay1;
+                                        font-size: Typography.size-xs;
+                                        vertical-alignment: center;
+                                    }
+                                }
+
+                                // Paste button (selected row only)
+                                if i == root.selected-index: Rectangle {
+                                    width: paste-lbl.preferred-width + 12px;
+                                    height: 22px;
+                                    background: paste-ta.has-hover ? Colors.blue : Colors.surface2;
+                                    border-radius: Layout.radius-sm;
+                                    horizontal-stretch: 0;
+
+                                    paste-lbl := Text {
+                                        x: 6px;
+                                        text: @tr("Paste");
+                                        color: paste-ta.has-hover ? Colors.base : Colors.text;
+                                        font-size: Typography.size-sm;
+                                        vertical-alignment: center;
+                                    }
+
+                                    paste-ta := TouchArea {
+                                        clicked => { root.paste(snippet.sql); }
+                                    }
+                                }
+
+                                // Run button (selected row only)
+                                if i == root.selected-index: Rectangle {
+                                    width: run-lbl.preferred-width + 12px;
+                                    height: 22px;
+                                    background: run-ta.has-hover ? Colors.green : Colors.surface2;
+                                    border-radius: Layout.radius-sm;
+                                    horizontal-stretch: 0;
+
+                                    run-lbl := Text {
+                                        x: 6px;
+                                        text: @tr("Run");
+                                        color: run-ta.has-hover ? Colors.base : Colors.text;
+                                        font-size: Typography.size-sm;
+                                        vertical-alignment: center;
+                                    }
+
+                                    run-ta := TouchArea {
+                                        clicked => { root.run(snippet.sql); }
+                                    }
+                                }
+                            }
+
+                            // Whole-row click (select + paste)
+                            row-ta := TouchArea {
+                                pointer-event(e) => {
+                                    if (e.kind == PointerEventKind.move) {
+                                        root.selected-index = i;
+                                    }
+                                }
+                                clicked => {
+                                    root.selected-index = i;
+                                    root.paste(snippet.sql);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
