@@ -1,0 +1,208 @@
+import { Colors, Typography, Layout, Icons } from "../theme.slint";
+import { RowData } from "../globals.slint";
+import { ToolbarButton } from "common.slint";
+
+export component FormView inherits Rectangle {
+    background: Colors.base;
+    clip: true;
+
+    in property <[string]>  columns:       [];
+    in property <[RowData]> rows:          [];
+    in-out property <int>   current-index: 0;
+
+    out property <bool> form-focused: form-scope.has-focus;
+    callback toggle-form-view();
+    public function grab-focus() { form-scope.focus(); }
+
+    header := Rectangle {
+        x: 0; y: 0;
+        width: parent.width;
+        height: Layout.height-bar;
+        background: Colors.mantle;
+
+        Rectangle {
+            x: 0; y: parent.height - 1px;
+            width: parent.width; height: 1px;
+            background: Colors.surface0;
+        }
+
+        HorizontalLayout {
+            x: 8px;
+            y: (parent.height - self.height) / 2;
+            width: parent.width - 16px;
+            height: Layout.height-btn-sm;
+            spacing: 4px;
+            alignment: start;
+
+            Rectangle {
+                width: 22px;
+                height: 22px;
+                border-radius: Layout.radius-sm;
+                background: prev-ta.has-hover && root.current-index > 0
+                    ? Colors.surface1 : transparent;
+
+                Image {
+                    width: 10px; height: 10px;
+                    x: (parent.width - self.width) / 2;
+                    y: (parent.height - self.height) / 2;
+                    source: Icons.chevron-left;
+                    colorize: root.current-index > 0 ? Colors.overlay2 : Colors.surface2;
+                    image-fit: contain;
+                }
+
+                prev-ta := TouchArea {
+                    clicked => {
+                        form-scope.focus();
+                        if (root.current-index > 0) { root.current-index -= 1; }
+                    }
+                }
+            }
+
+            Text {
+                text: root.rows.length == 0
+                    ? @tr("No rows")
+                    : @tr("{0} / {1}", root.current-index + 1, root.rows.length);
+                color: Colors.subtext1;
+                font-size: Typography.size-sm;
+                vertical-alignment: center;
+                min-width: 60px;
+            }
+
+            Rectangle {
+                width: 22px;
+                height: 22px;
+                border-radius: Layout.radius-sm;
+                background: next-ta.has-hover
+                        && root.current-index < root.rows.length - 1
+                    ? Colors.surface1 : transparent;
+
+                Image {
+                    width: 10px; height: 10px;
+                    x: (parent.width - self.width) / 2;
+                    y: (parent.height - self.height) / 2;
+                    source: Icons.chevron-right;
+                    colorize: root.current-index < root.rows.length - 1
+                        ? Colors.overlay2 : Colors.surface2;
+                    image-fit: contain;
+                }
+
+                next-ta := TouchArea {
+                    clicked => {
+                        form-scope.focus();
+                        if (root.current-index < root.rows.length - 1) {
+                            root.current-index += 1;
+                        }
+                    }
+                }
+            }
+
+            Rectangle { horizontal-stretch: 1; }
+
+            ToolbarButton {
+                width: 80px;
+                text: @tr("Grid");
+                clicked => { root.toggle-form-view(); }
+            }
+        }
+    }
+
+    form-scope := FocusScope {
+        x: 0;
+        y: header.height;
+        width: parent.width;
+        height: parent.height - header.height;
+
+        capture-key-pressed(event) => {
+            if (event.modifiers.alt && event.text == Key.UpArrow) {
+                if (root.current-index > 0) { root.current-index -= 1; }
+                return EventResult.accept;
+            }
+            if (event.modifiers.alt && event.text == Key.DownArrow) {
+                if (root.current-index < root.rows.length - 1) {
+                    root.current-index += 1;
+                }
+                return EventResult.accept;
+            }
+            EventResult.reject
+        }
+
+        flick := Flickable {
+            x: 0; y: 0;
+            width: parent.width;
+            height: parent.height;
+            viewport-height: body.preferred-height;
+
+            body := VerticalLayout {
+                spacing: 0;
+                alignment: start;
+
+                for col-name[i] in root.columns: Rectangle {
+                    property <string> cell-value:
+                        (root.rows.length > 0
+                            && root.current-index >= 0
+                            && root.current-index < root.rows.length)
+                        ? root.rows[root.current-index].cells[i].value
+                        : "";
+                    property <bool> cell-is-null:
+                        (root.rows.length > 0
+                            && root.current-index >= 0
+                            && root.current-index < root.rows.length)
+                        ? root.rows[root.current-index].cells[i].is-null
+                        : false;
+
+                    height: max(32px, val-text.preferred-height + 8px);
+
+                    Rectangle {
+                        x: 0; y: parent.height - 1px;
+                        width: parent.width; height: 1px;
+                        background: Colors.surface0;
+                    }
+
+                    HorizontalLayout {
+                        x: 0; y: 0;
+                        width: parent.width;
+                        height: parent.height;
+                        spacing: 0;
+
+                        Rectangle {
+                            width: 160px;
+                            height: parent.height;
+                            background: Colors.mantle;
+
+                            Text {
+                                x: 8px;
+                                y: (parent.height - self.preferred-height) / 2;
+                                width: parent.width - 16px;
+                                text: col-name;
+                                color: Colors.subtext1;
+                                font-size: Typography.size-sm;
+                                wrap: no-wrap;
+                                overflow: elide;
+                            }
+
+                            Rectangle {
+                                x: parent.width - 1px; y: 0;
+                                width: 1px; height: parent.height;
+                                background: Colors.surface0;
+                            }
+                        }
+
+                        Rectangle {
+                            height: parent.height;
+
+                            val-text := Text {
+                                x: 8px;
+                                y: 4px;
+                                width: parent.width - 16px;
+                                text: cell-is-null ? "NULL" : cell-value;
+                                color: cell-is-null ? Colors.overlay1 : Colors.text;
+                                font-size: Typography.size-sm;
+                                wrap: word-wrap;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

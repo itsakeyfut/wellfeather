@@ -664,3 +664,19 @@ msgstr "Rename"
 msgctxt "Sidebar"
 msgid "Delete"
 msgstr "Delete"
+
+msgctxt "ResultTableToolbar"
+msgid "Form"
+msgstr "Form"
+
+msgctxt "FormView"
+msgid "No rows"
+msgstr "No rows"
+
+msgctxt "FormView"
+msgid "{0} / {1}"
+msgstr "{0} / {1}"
+
+msgctxt "FormView"
+msgid "Grid"
+msgstr "Grid"
