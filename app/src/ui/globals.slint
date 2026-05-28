@@ -90,8 +90,15 @@ export struct CommandPaletteItem {
     shortcut: string,
 }
 
+export struct ParamRow {
+    name:     string,
+    type-idx: int,    // 0=String, 1=Number, 2=Date, 3=Bool
+    value:    string,
+    is-valid: bool,
+}
+
 /// One syntax-highlight span rendered as a colored Text element over the editor text.
-/// kind: 0=keyword, 1=string-literal, 2=comment, 3=number, 4=identifier (gap fill)
+/// kind: 0=keyword, 1=string-literal, 2=comment, 3=number, 4=identifier (gap fill), 5=parameter
 export struct HighlightSpan {
     line: int,
     col:  int,

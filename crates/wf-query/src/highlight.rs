@@ -7,6 +7,7 @@ pub enum TokenKind {
     StringLiteral = 1,
     Comment = 2,
     Number = 3,
+    Param = 5,
 }
 
 // ── Output type ───────────────────────────────────────────────────────────────
@@ -452,6 +453,27 @@ fn tokenize(sql: &str) -> Vec<RawToken> {
             continue;
         }
 
+        // ── Parameter placeholder :name ───────────────────────────────────────
+        // Reached only outside strings/comments (those are consumed above).
+        // Exclude :: (PostgreSQL cast operator).
+        if b == b':'
+            && i + 1 < len
+            && (bytes[i + 1].is_ascii_alphabetic() || bytes[i + 1] == b'_')
+            && (i == 0 || bytes[i - 1] != b':')
+        {
+            let start = i;
+            i += 1;
+            while i < len && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_') {
+                i += 1;
+            }
+            tokens.push(RawToken {
+                start,
+                end: i,
+                kind: TokenKind::Param,
+            });
+            continue;
+        }
+
         i += 1;
     }
 
@@ -746,5 +768,37 @@ mod tests {
             .find(|s| s.kind == TokenKind::StringLiteral as i32);
         assert!(s.is_some());
         assert_eq!(s.unwrap().text, "'it''s'");
+    }
+
+    #[test]
+    fn highlight_should_detect_param_placeholder() {
+        let result = spans("SELECT :id FROM t");
+        let param = result.iter().find(|s| s.kind == TokenKind::Param as i32);
+        assert!(param.is_some());
+        assert_eq!(param.unwrap().text, ":id");
+    }
+
+    #[test]
+    fn highlight_should_not_detect_colon_in_string() {
+        let result = spans("SELECT ':name' FROM t");
+        assert!(result.iter().all(|s| s.kind != TokenKind::Param as i32));
+    }
+
+    #[test]
+    fn highlight_should_not_detect_colon_in_line_comment() {
+        let result = spans("SELECT 1 -- :param\nFROM t");
+        assert!(result.iter().all(|s| s.kind != TokenKind::Param as i32));
+    }
+
+    #[test]
+    fn highlight_should_detect_multiple_params() {
+        let result = spans("WHERE a = :foo AND b = :bar");
+        let params: Vec<_> = result
+            .iter()
+            .filter(|s| s.kind == TokenKind::Param as i32)
+            .collect();
+        assert_eq!(params.len(), 2);
+        assert!(params.iter().any(|s| s.text == ":foo"));
+        assert!(params.iter().any(|s| s.text == ":bar"));
     }
 }

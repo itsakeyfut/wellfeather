@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::time::Duration;
 
 use chrono::Utc;
@@ -6,7 +7,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
 use wf_db::error::DbError;
 
-use crate::app::{LocalizedMessage, event::Event};
+use crate::app::{LocalizedMessage, command::ParamValue, event::Event};
 
 use super::AppController;
 
@@ -40,6 +41,26 @@ impl AppController {
         };
 
         if self.is_read_only_blocked(&conn_id, &sql).await {
+            return;
+        }
+
+        // If the SQL contains :name placeholders, show the param dialog instead.
+        let raw_params = wf_query::params::extract_params(&sql);
+        if !raw_params.is_empty() {
+            let defaults = self
+                .history
+                .find_last_params(&sql)
+                .await
+                .unwrap_or_default()
+                .unwrap_or_default();
+            let _ = self
+                .tx_event
+                .send(Event::ParamDialogRequired {
+                    sql,
+                    params: raw_params,
+                    defaults,
+                })
+                .await;
             return;
         }
 
@@ -87,6 +108,7 @@ impl AppController {
                         error_message: None,
                         timestamp: now,
                         connection_id: conn_id_hist,
+                        params_json: None,
                     };
                     if let Err(e) = history.insert(&exec).await {
                         warn!("failed to save history: {e}");
@@ -108,6 +130,7 @@ impl AppController {
                         error_message: Some(e.to_string()),
                         timestamp: now,
                         connection_id: conn_id_hist,
+                        params_json: None,
                     };
                     if let Err(he) = history.insert(&exec).await {
                         warn!("failed to save history: {he}");
@@ -119,11 +142,129 @@ impl AppController {
         });
     }
 
+    /// Handle a `RunQueryWithParams` command.
+    ///
+    /// Formats each parameter value according to its type, substitutes them into
+    /// the SQL template, and executes the resulting query. The original SQL (with
+    /// placeholders) and raw parameter values are stored in history.
+    pub(super) async fn handle_run_query_with_params(&self, sql: String, params: Vec<ParamValue>) {
+        info!("handling RunQueryWithParams command");
+        self.state.query.cancel();
+
+        let conn_id = match self.state.conn.active() {
+            Some(c) => c.id.clone(),
+            None => {
+                warn!("RunQueryWithParams: no active connection");
+                let _ = self
+                    .tx_event
+                    .send(Event::QueryError(
+                        t!("error.no_active_connection").to_string(),
+                    ))
+                    .await;
+                return;
+            }
+        };
+
+        if self.is_read_only_blocked(&conn_id, &sql).await {
+            return;
+        }
+
+        // Build raw-value map (for history) and formatted-value map (for substitution).
+        let mut raw_map: HashMap<String, String> = HashMap::new();
+        let mut formatted_map: HashMap<String, String> = HashMap::new();
+        for p in &params {
+            raw_map.insert(p.name.clone(), p.value.clone());
+            let formatted = format_param_value(p.type_idx, &p.value);
+            formatted_map.insert(p.name.clone(), formatted);
+        }
+
+        let substituted = wf_query::params::substitute_params(&sql, &formatted_map);
+        self.state.query.set_last_sql(sql.clone());
+
+        let token = CancellationToken::new();
+        self.state.query.set_cancel_token(token.clone());
+        debug!("sending event: QueryStarted");
+        let _ = self.tx_event.send(Event::QueryStarted).await;
+
+        let page_size = self.state.ui.page_size();
+        let timeout_secs = self.state.ui.query_timeout_secs();
+        let sql_to_run = super::apply_limit(&substituted, page_size);
+        let params_json = serde_json::to_string(&raw_map).ok();
+
+        let db = self.db.clone(); // clone required: tokio::spawn needs 'static
+        let tx = self.tx_event.clone(); // clone required: tokio::spawn needs 'static
+        let history = self.history.clone(); // clone required: tokio::spawn needs 'static
+        let sql_hist = sql.clone(); // clone required: history record needs original sql
+
+        tokio::spawn(async move {
+            let now = Utc::now().timestamp();
+            let result = if timeout_secs > 0 {
+                match tokio::time::timeout(
+                    Duration::from_secs(timeout_secs),
+                    db.execute_with_cancel(&conn_id, &sql_to_run, token.clone()),
+                )
+                .await
+                {
+                    Ok(r) => r,
+                    Err(_elapsed) => {
+                        token.cancel();
+                        Err(DbError::Timeout)
+                    }
+                }
+            } else {
+                db.execute_with_cancel(&conn_id, &sql_to_run, token).await
+            };
+            match result {
+                Ok(result) => {
+                    let exec = wf_db::models::QueryExecution {
+                        id: 0,
+                        sql: sql_hist,
+                        duration_ms: result.execution_time_ms,
+                        success: true,
+                        error_message: None,
+                        timestamp: now,
+                        connection_id: conn_id.clone(),
+                        params_json,
+                    };
+                    if let Err(e) = history.insert(&exec).await {
+                        warn!("failed to save history: {e}");
+                    }
+                    debug!("sending event: QueryFinished (parameterized)");
+                    let _ = tx.send(Event::QueryFinished(result)).await;
+                }
+                Err(DbError::Cancelled) => {
+                    let _ = tx.send(Event::QueryCancelled).await;
+                }
+                Err(e) => {
+                    error!(error = %e, "parameterized query execution failed");
+                    let exec = wf_db::models::QueryExecution {
+                        id: 0,
+                        sql: sql_hist,
+                        duration_ms: 0,
+                        success: false,
+                        error_message: Some(e.to_string()),
+                        timestamp: now,
+                        connection_id: conn_id.clone(),
+                        params_json: None,
+                    };
+                    if let Err(he) = history.insert(&exec).await {
+                        warn!("failed to save history: {he}");
+                    }
+                    let _ = tx.send(Event::QueryError(e.localized_message())).await;
+                }
+            }
+        });
+    }
+
     /// Handle a `RunAll` command.
     ///
     /// Splits the SQL on semicolons and executes each non-empty statement
     /// sequentially using a single cancellation token.  Only the result of the
     /// last statement is surfaced to the UI so the result panel is not spammed.
+    ///
+    /// `:name` placeholder detection is intentionally skipped here — RunAll is
+    /// a bulk-execution path and mixing parameterized dialogs with multi-statement
+    /// runs would be ambiguous (each statement could reference different params).
     pub(super) async fn handle_run_all(&self, sql: String) {
         self.state.query.cancel();
 
@@ -203,6 +344,7 @@ impl AppController {
                                 error_message: None,
                                 timestamp: now,
                                 connection_id: conn_id_hist.clone(),
+                                params_json: None,
                             };
                             if let Err(e) = history.insert(&exec).await {
                                 warn!("failed to save history: {e}");
@@ -226,6 +368,7 @@ impl AppController {
                             error_message: Some(e.to_string()),
                             timestamp: now,
                             connection_id: conn_id_hist.clone(),
+                            params_json: None,
                         };
                         if let Err(he) = history.insert(&exec).await {
                             warn!("failed to save history: {he}");
@@ -261,5 +404,21 @@ impl AppController {
             return true;
         }
         false
+    }
+}
+
+fn format_param_value(type_idx: i32, value: &str) -> String {
+    match type_idx {
+        1 => value.to_string(),    // Number — validated f64, safe to emit as-is
+        2 => format!("'{value}'"), // Date   — validated YYYY-MM-DD, no injection risk
+        3 => {
+            // Bool — normalize to SQL literal regardless of input casing
+            if value.eq_ignore_ascii_case("true") {
+                "TRUE".to_string()
+            } else {
+                "FALSE".to_string()
+            }
+        }
+        _ => format!("'{}'", value.replace('\'', "''")), // String — escape embedded single quotes
     }
 }

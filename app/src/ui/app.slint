@@ -7,7 +7,7 @@ import "../../assets/fonts/NotoSansJP-Bold.ttf";
 import "../../assets/fonts/JetBrainsMono-Regular.ttf";
 import "../../assets/fonts/JetBrainsMono-Bold.ttf";
 
-import { ConnectionEntry, RowData, SidebarNode, GroupEntry, CompletionRow, TabEntry, ColumnData, SnippetEntry, MetadataSearchResult, HighlightSpan, CommandPaletteItem, HistoryEntry } from "globals.slint";
+import { ConnectionEntry, RowData, SidebarNode, GroupEntry, CompletionRow, TabEntry, ColumnData, SnippetEntry, MetadataSearchResult, HighlightSpan, CommandPaletteItem, HistoryEntry, ParamRow } from "globals.slint";
 import { Colors, Typography, Layout, Icons, Animation } from "theme.slint";
 import { CompletionPopup } from "components/completion_popup.slint";
 import { ConnectionForm }  from "components/connection_form.slint";
@@ -34,6 +34,7 @@ import { HistoryPanel }          from "components/history_panel.slint";
 import { SnippetPalette }        from "components/snippet_palette.slint";
 import { EditorPrefsDialog }     from "components/dialogs/editor_prefs_dialog.slint";
 import { FingerprintDialog }    from "components/dialogs/fingerprint_dialog.slint";
+import { ParamDialog }          from "components/dialogs/param_dialog.slint";
 
 // UiState is defined here (root file) so that Slint generates Rust bindings for it.
 // Sub-components that need global state receive properties bound from UiState below.
@@ -171,6 +172,17 @@ export global UiState {
     in-out property <string> ssh-fingerprint-text:        "";
     callback approve-ssh-fingerprint();
     callback reject-ssh-fingerprint();
+    // ── Parameterized query dialog ────────────────────────────────────────────
+    in-out property <bool>        show-param-dialog: false;
+    in-out property <[ParamRow]>  param-dialog-rows: [];
+    in-out property <bool>        params-all-valid:  true;
+    callback param-value-changed(int, string);
+    callback param-type-changed(int, int);
+    callback confirm-param-dialog();
+    callback cancel-param-dialog();
+    pure callback validate-param-number(string) -> bool;
+    pure callback validate-param-date(string) -> bool;
+    pure callback validate-param-bool(string) -> bool;
     // ── SSH active status ─────────────────────────────────────────────────────
     in-out property <bool>   ssh-active: false;
     // ── SSL/TLS form ──────────────────────────────────────────────────────────
@@ -601,6 +613,10 @@ export component AppWindow inherits Window {
     private property <bool> _fp-dialog-open:  UiState.show-ssh-fingerprint-dialog;
     changed _fp-dialog-open => { if (_fp-dialog-open) { _fp-dialog-alive = true; } }
 
+    private property <bool> _param-dialog-alive: false;
+    private property <bool> _param-dialog-open:  UiState.show-param-dialog;
+    changed _param-dialog-open => { if (_param-dialog-open) { _param-dialog-alive = true; } }
+
     // ── Root key-intercept FocusScope ─────────────────────────────────────────
     // Global shortcuts live in key-pressed (bubble phase) so they fire regardless
     // of which inner FocusScope — editor, table-view, sidebar, result — has focus.
@@ -629,7 +645,8 @@ export component AppWindow inherits Window {
                     || UiState.show-history
                     || UiState.show-editor-prefs
                     || UiState.show-ssh-fingerprint-dialog
-                    || UiState.show-snippet-palette) {
+                    || UiState.show-snippet-palette
+                    || UiState.show-param-dialog) {
                 EventResult.reject
             } else if (event.modifiers.control
                     && !event.modifiers.shift
@@ -1501,6 +1518,20 @@ export component AppWindow inherits Window {
             approve => { UiState.approve-ssh-fingerprint(); }
             reject  => { UiState.reject-ssh-fingerprint(); }
             exited  => { _fp-dialog-alive = false; }
+        }
+
+        // ── Parameterized query dialog ────────────────────────────────────────
+        if _param-dialog-alive: ParamDialog {
+            x: 0; y: 0;
+            width: root.width; height: root.height;
+            show:      UiState.show-param-dialog;
+            rows:      UiState.param-dialog-rows;
+            all-valid: UiState.params-all-valid;
+            value-changed(i, v) => { UiState.param-value-changed(i, v); }
+            type-changed(i, t)  => { UiState.param-type-changed(i, t); }
+            confirm => { UiState.confirm-param-dialog(); }
+            cancel  => { UiState.cancel-param-dialog(); }
+            exited  => { _param-dialog-alive = false; }
         }
 
         // ── Metadata search palette (Ctrl+P) ──────────────────────────────────

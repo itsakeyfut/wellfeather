@@ -30,6 +30,7 @@ zeroize            = "1"
 fuzzy-matcher      = "0.3.7"
 directories        = "6.0.0"
 thiserror          = { workspace = true }
+serde_json         = { workspace = true }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows = { version = "0.62.2", features = ["Win32_UI_HiDpi"] }

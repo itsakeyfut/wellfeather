@@ -1,11 +1,13 @@
 use std::cell::RefCell;
 use std::rc::Rc;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+
+use chrono::NaiveDate;
 
 use slint::{ComponentHandle, Model as _};
 use tokio::sync::mpsc;
 
-use crate::app::command::{Command, ConfigUpdate};
+use crate::app::command::{Command, ConfigUpdate, ParamValue};
 use crate::state::SharedState;
 
 use super::appearance::{apply_highlight_spans, compute_highlight_spans};
@@ -816,6 +818,116 @@ pub(super) fn handle_table_data_loaded(
             ui.set_result_total_col_width(total_w);
         });
     });
+}
+
+fn validate_param(type_idx: i32, value: &str) -> bool {
+    if value.is_empty() {
+        return true;
+    }
+    match type_idx {
+        1 => value.parse::<f64>().is_ok(),
+        2 => NaiveDate::parse_from_str(value, "%Y-%m-%d").is_ok(),
+        3 => value.eq_ignore_ascii_case("true") || value.eq_ignore_ascii_case("false"),
+        _ => true,
+    }
+}
+
+pub(super) fn register_param_dialog_callbacks(
+    window: &crate::AppWindow,
+    tx_cmd: mpsc::Sender<Command>,
+    param_pending_sql: Arc<Mutex<Option<String>>>,
+) {
+    let ww = window.as_weak();
+    window
+        .global::<crate::UiState>()
+        .on_param_value_changed(move |i, v| {
+            let Some(win) = ww.upgrade() else { return };
+            let ui = win.global::<crate::UiState>();
+            let model = ui.get_param_dialog_rows();
+            let type_idx = model.row_data(i as usize).map(|r| r.type_idx).unwrap_or(0);
+            let is_valid = validate_param(type_idx, &v);
+            if let Some(mut row) = model.row_data(i as usize) {
+                row.value = v;
+                row.is_valid = is_valid;
+                // Single-row set_row_data (not a loop) is intentional here: replacing the
+                // whole VecModel would trigger Slint to re-run `init =>` on every TextInput,
+                // clearing focus while the user is still typing.
+                model.set_row_data(i as usize, row);
+            }
+            let all_valid = (0..model.row_count())
+                .all(|j| model.row_data(j).map(|r| r.is_valid).unwrap_or(true));
+            ui.set_params_all_valid(all_valid);
+        });
+
+    let ww = window.as_weak();
+    window
+        .global::<crate::UiState>()
+        .on_param_type_changed(move |i, t| {
+            let Some(win) = ww.upgrade() else { return };
+            let ui = win.global::<crate::UiState>();
+            let model = ui.get_param_dialog_rows();
+            if let Some(mut row) = model.row_data(i as usize) {
+                let v = row.value.to_string();
+                row.type_idx = t;
+                row.is_valid = validate_param(t, &v);
+                // Same intentional single-row update as on_param_value_changed above.
+                model.set_row_data(i as usize, row);
+            }
+            let all_valid = (0..model.row_count())
+                .all(|j| model.row_data(j).map(|r| r.is_valid).unwrap_or(true));
+            ui.set_params_all_valid(all_valid);
+        });
+
+    window
+        .global::<crate::UiState>()
+        .on_validate_param_number(|v| v.is_empty() || v.parse::<f64>().is_ok());
+    window
+        .global::<crate::UiState>()
+        .on_validate_param_date(|v| {
+            v.is_empty() || NaiveDate::parse_from_str(&v, "%Y-%m-%d").is_ok()
+        });
+    window
+        .global::<crate::UiState>()
+        .on_validate_param_bool(|v| {
+            v.is_empty() || v.eq_ignore_ascii_case("true") || v.eq_ignore_ascii_case("false")
+        });
+
+    {
+        let ww = window.as_weak();
+        let pps = Arc::clone(&param_pending_sql); // clone required: closure needs owned pps
+        let tx = tx_cmd.clone(); // clone required: send_cmd closure needs owned tx
+        window
+            .global::<crate::UiState>()
+            .on_confirm_param_dialog(move || {
+                let Some(win) = ww.upgrade() else { return };
+                let sql = pps.lock().unwrap_or_else(|p| p.into_inner()).take();
+                let Some(sql) = sql else { return };
+                let ui = win.global::<crate::UiState>();
+                let model = ui.get_param_dialog_rows();
+                let params: Vec<ParamValue> = (0..model.row_count())
+                    .filter_map(|j| model.row_data(j))
+                    .map(|r| ParamValue {
+                        name: r.name.to_string(),
+                        type_idx: r.type_idx,
+                        value: r.value.to_string(),
+                    })
+                    .collect();
+                ui.set_show_param_dialog(false);
+                send_cmd(&tx, Command::RunQueryWithParams { sql, params });
+            });
+    }
+
+    {
+        let ww = window.as_weak();
+        let pps = Arc::clone(&param_pending_sql); // clone required: closure needs owned pps
+        window
+            .global::<crate::UiState>()
+            .on_cancel_param_dialog(move || {
+                let Some(win) = ww.upgrade() else { return };
+                *pps.lock().unwrap_or_else(|p| p.into_inner()) = None;
+                win.global::<crate::UiState>().set_show_param_dialog(false);
+            });
+    }
 }
 
 #[cfg(test)]

@@ -120,6 +120,9 @@ impl AppController {
                 Command::RemoveConnection(id) => this.handle_remove_connection(id).await,
                 Command::RunQuery(sql) => this.handle_run_query(sql).await,
                 Command::RunAll(sql) => this.handle_run_all(sql).await,
+                Command::RunQueryWithParams { sql, params } => {
+                    this.handle_run_query_with_params(sql, params).await
+                }
                 Command::CancelQuery => this.handle_cancel_query().await,
                 Command::UpdateConfig(update) => this.handle_update_config(update).await,
                 Command::FetchCompletion(sql, cursor_pos) => {
