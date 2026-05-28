@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use tokio::sync::oneshot;
 use wf_completion::CompletionItem;
 use wf_config::models::{ConnectionConfig, GroupConfig, Theme};
@@ -67,6 +69,15 @@ pub enum Event {
     TableDataFailed {
         tab_id: String,
         msg: String,
+    },
+    /// Controller detected `:name` placeholders and needs the user to supply values.
+    /// The UI shows the param dialog; on confirm it sends `Command::RunQueryWithParams`.
+    ParamDialogRequired {
+        sql: String,
+        /// Deduplicated param names in order of first appearance.
+        params: Vec<String>,
+        /// Previously used raw values for the same SQL, keyed by name.
+        defaults: HashMap<String, String>,
     },
     // ── History panel ────────────────────────────────────────────────────────
     HistoryLoaded(Vec<QueryExecution>),

@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use sqlx::{Row as _, SqlitePool};
 use wf_db::models::QueryExecution;
 
@@ -25,7 +27,8 @@ const CREATE_TABLE: &str = "
         success       INTEGER NOT NULL,
         error_message TEXT,
         timestamp     INTEGER NOT NULL,
-        connection_id TEXT    NOT NULL
+        connection_id TEXT    NOT NULL,
+        params        TEXT
     )";
 
 const CREATE_INDEX: &str = "
@@ -56,8 +59,8 @@ impl HistoryService {
     pub async fn insert(&self, execution: &QueryExecution) -> Result<()> {
         sqlx::query(
             "INSERT INTO query_executions
-             (sql, duration_ms, success, error_message, timestamp, connection_id)
-             VALUES (?, ?, ?, ?, ?, ?)",
+             (sql, duration_ms, success, error_message, timestamp, connection_id, params)
+             VALUES (?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(&execution.sql)
         .bind(execution.duration_ms as i64)
@@ -65,9 +68,34 @@ impl HistoryService {
         .bind(&execution.error_message)
         .bind(execution.timestamp)
         .bind(&execution.connection_id)
+        .bind(&execution.params_json)
         .execute(&self.pool)
         .await?;
         Ok(())
+    }
+
+    /// Return the parameter values from the most recent successful execution of the same SQL.
+    ///
+    /// Returns `None` when no parameterized execution exists for that exact SQL.
+    pub async fn find_last_params(&self, sql: &str) -> Result<Option<HashMap<String, String>>> {
+        let row = sqlx::query(
+            "SELECT params FROM query_executions
+             WHERE sql = ? AND params IS NOT NULL
+             ORDER BY timestamp DESC
+             LIMIT 1",
+        )
+        .bind(sql)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        match row {
+            None => Ok(None),
+            Some(r) => {
+                let json: String = r.get("params");
+                let map: HashMap<String, String> = serde_json::from_str(&json).unwrap_or_default();
+                Ok(Some(map))
+            }
+        }
     }
 
     /// Return up to `limit` executions matching `keyword` in the SQL text,
@@ -82,7 +110,7 @@ impl HistoryService {
     ) -> Result<Vec<QueryExecution>> {
         let pattern = format!("%{keyword}%");
         let rows = sqlx::query(
-            "SELECT id, sql, duration_ms, success, error_message, timestamp, connection_id
+            "SELECT id, sql, duration_ms, success, error_message, timestamp, connection_id, params
              FROM query_executions
              WHERE sql LIKE ?
                AND connection_id = COALESCE(?, connection_id)
@@ -105,6 +133,7 @@ impl HistoryService {
                 error_message: row.get("error_message"),
                 timestamp: row.get("timestamp"),
                 connection_id: row.get("connection_id"),
+                params_json: row.get("params"),
             })
             .collect();
 
@@ -114,7 +143,7 @@ impl HistoryService {
     /// Return up to `limit` most recent executions, newest first (DESC timestamp).
     pub async fn recent(&self, limit: usize) -> Result<Vec<QueryExecution>> {
         let rows = sqlx::query(
-            "SELECT id, sql, duration_ms, success, error_message, timestamp, connection_id
+            "SELECT id, sql, duration_ms, success, error_message, timestamp, connection_id, params
              FROM query_executions
              ORDER BY timestamp DESC
              LIMIT ?",
@@ -133,6 +162,7 @@ impl HistoryService {
                 error_message: row.get("error_message"),
                 timestamp: row.get("timestamp"),
                 connection_id: row.get("connection_id"),
+                params_json: row.get("params"),
             })
             .collect();
 
@@ -173,6 +203,20 @@ mod tests {
             error_message: err.map(|s| s.to_string()),
             timestamp: ts,
             connection_id: conn_id.to_string(),
+            params_json: None,
+        }
+    }
+
+    fn make_exec_with_params(sql: &str, ts: i64, params_json: &str) -> QueryExecution {
+        QueryExecution {
+            id: 0,
+            sql: sql.to_string(),
+            duration_ms: 5,
+            success: true,
+            error_message: None,
+            timestamp: ts,
+            connection_id: "c1".to_string(),
+            params_json: Some(params_json.to_string()),
         }
     }
 
@@ -303,5 +347,39 @@ mod tests {
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].connection_id, "conn-a");
         assert!(rows[0].sql.contains("users"));
+    }
+
+    #[tokio::test]
+    async fn find_last_params_should_return_none_when_no_match() {
+        let svc = HistoryService::open_memory().await.unwrap();
+        let result = svc.find_last_params("SELECT :id FROM t").await.unwrap();
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn find_last_params_should_return_most_recent_params_for_sql() {
+        let svc = HistoryService::open_memory().await.unwrap();
+        svc.insert(&make_exec_with_params("SELECT :id", 1000, r#"{"id":"1"}"#))
+            .await
+            .unwrap();
+        svc.insert(&make_exec_with_params("SELECT :id", 2000, r#"{"id":"42"}"#))
+            .await
+            .unwrap();
+
+        let result = svc.find_last_params("SELECT :id").await.unwrap();
+        assert!(result.is_some());
+        let map = result.unwrap();
+        assert_eq!(map.get("id").map(|s| s.as_str()), Some("42"));
+    }
+
+    #[tokio::test]
+    async fn find_last_params_should_ignore_rows_without_params() {
+        let svc = HistoryService::open_memory().await.unwrap();
+        svc.insert(&make_exec("SELECT :id", 1000, true, None))
+            .await
+            .unwrap();
+
+        let result = svc.find_last_params("SELECT :id").await.unwrap();
+        assert!(result.is_none());
     }
 }

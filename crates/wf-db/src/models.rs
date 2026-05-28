@@ -146,6 +146,9 @@ pub struct QueryExecution {
     /// Unix epoch seconds.
     pub timestamp: i64,
     pub connection_id: String,
+    /// JSON-encoded map of parameter name → raw value for parameterized queries.
+    /// `None` for non-parameterized queries.
+    pub params_json: Option<String>,
 }
 
 // ---------------------------------------------------------------------------

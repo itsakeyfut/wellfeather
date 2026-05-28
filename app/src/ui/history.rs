@@ -126,6 +126,7 @@ mod tests {
             error_message: None,
             timestamp: ts,
             connection_id: "c1".to_string(),
+            params_json: None,
         }
     }
 

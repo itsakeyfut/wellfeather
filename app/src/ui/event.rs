@@ -19,6 +19,7 @@ use super::{
     config_connections_to_entries, groups_to_slint, with_sidebar, with_sidebar_mut, with_ui,
 };
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn spawn_event_handler(
     window: &crate::AppWindow,
     mut rx_event: mpsc::Receiver<Event>,
@@ -27,6 +28,7 @@ pub(super) fn spawn_event_handler(
     original_data: SharedOriginalData,
     snippet_repo: Arc<SnippetRepository>,
     fp_approval_tx: Arc<Mutex<Option<tokio::sync::oneshot::Sender<bool>>>>,
+    param_pending_sql: Arc<Mutex<Option<String>>>,
 ) {
     let window_weak = window.as_weak();
     tokio::spawn(async move {
@@ -151,6 +153,35 @@ pub(super) fn spawn_event_handler(
                     state.clone(), // clone required: passed to spawned handler
                 ),
                 Event::HistoryLoaded(rows) => handle_history_loaded(rows, window_weak.clone()),
+                Event::ParamDialogRequired {
+                    sql,
+                    params,
+                    defaults,
+                } => {
+                    *param_pending_sql.lock().unwrap_or_else(|p| p.into_inner()) = Some(sql);
+                    let rows_data: Vec<crate::ParamRow> = params
+                        .iter()
+                        .map(|name| crate::ParamRow {
+                            name: name.as_str().into(),
+                            type_idx: 0,
+                            value: defaults
+                                .get(name.as_str())
+                                .map(|s| s.as_str())
+                                .unwrap_or("")
+                                .into(),
+                            is_valid: true,
+                        })
+                        .collect();
+                    let ww = window_weak.clone();
+                    let _ = slint::invoke_from_event_loop(move || {
+                        with_ui(&ww, |ui| {
+                            let model = Rc::new(slint::VecModel::from(rows_data));
+                            ui.set_param_dialog_rows(model.into());
+                            ui.set_params_all_valid(true);
+                            ui.set_show_param_dialog(true);
+                        });
+                    });
+                }
                 _ => {}
             }
         }

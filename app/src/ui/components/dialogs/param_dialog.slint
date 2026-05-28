@@ -1,0 +1,166 @@
+import { Colors, Typography, Layout, Animation } from "../../theme.slint";
+import { ActionButton } from "../common.slint";
+import { ParamRow } from "../../globals.slint";
+
+export component ParamDialog inherits Rectangle {
+    background: Colors.modal-overlay;
+
+    in property <bool>       show: true;
+    in property <[ParamRow]> rows;
+    in property <bool>       all-valid: true;
+
+    callback value-changed(int, string);
+    callback type-changed(int, int);
+    callback confirm();
+    callback cancel();
+    callback exited();
+
+    changed show => {
+        if (!show) { root.exited(); }
+    }
+
+    VerticalLayout {
+        alignment: center;
+        HorizontalLayout {
+            alignment: center;
+
+            card := Rectangle {
+                width: 520px;
+                background: Colors.surface0;
+                border-radius: Layout.radius-lg;
+                border-width: 1px;
+                border-color: Colors.surface2;
+                drop-shadow-blur: 20px;
+                drop-shadow-color: Colors.shadow;
+
+                VerticalLayout {
+                    padding: Layout.padding-2xl;
+                    spacing: Layout.spacing-2xl;
+
+                    // Title
+                    Text {
+                        text: @tr("Query Parameters");
+                        color: Colors.text;
+                        font-size: Typography.size-xl;
+                        font-weight: 700;
+                    }
+
+                    // Scrollable rows
+                    Flickable {
+                        height: min(rows-layout.preferred-height, 300px);
+                        viewport-height: rows-layout.preferred-height;
+                        interactive: rows-layout.preferred-height > 300px;
+
+                        rows-layout := VerticalLayout {
+                            spacing: Layout.spacing-md;
+
+                            for row[i] in root.rows: HorizontalLayout {
+                                spacing: Layout.spacing-lg;
+                                height: Layout.height-row;
+
+                                // Param name label
+                                Rectangle {
+                                    width: 120px;
+                                    HorizontalLayout {
+                                        alignment: start;
+                                        padding-top: 6px;
+                                        Text {
+                                            text: ":" + row.name;
+                                            color: Colors.hl-param;
+                                            font-size: Typography.size-base;
+                                            font-family: Typography.font-mono;
+                                            overflow: elide;
+                                        }
+                                    }
+                                }
+
+                                // Type selector (4 small toggle buttons)
+                                HorizontalLayout {
+                                    spacing: 2px;
+                                    width: 148px;
+
+                                    for lbl[t] in [@tr("Str"), @tr("Num"), @tr("Date"), @tr("Bool")]:
+                                    Rectangle {
+                                        width: 34px;
+                                        height: Layout.height-row;
+                                        border-radius: Layout.radius-sm;
+                                        background: row.type-idx == t ? Colors.blue : Colors.surface1;
+
+                                        type-ta := TouchArea {
+                                            clicked => { root.type-changed(i, t); }
+                                        }
+                                        Text {
+                                            text: lbl;
+                                            color: row.type-idx == t ? Colors.base : Colors.subtext0;
+                                            font-size: Typography.size-sm;
+                                            horizontal-alignment: center;
+                                            vertical-alignment: center;
+                                        }
+                                        Rectangle {
+                                            border-radius: parent.border-radius;
+                                            background: Colors.hover-btn;
+                                            opacity: type-ta.has-hover ? 1.0 : 0.0;
+                                            animate opacity { duration: Animation.feedback; easing: Animation.enter-ease; }
+                                        }
+                                    }
+                                }
+
+                                // Value input
+                                input-rect := Rectangle {
+                                    border-radius: Layout.radius-md;
+                                    border-width: 1px;
+                                    border-color: row.is-valid ? Colors.surface2 : Colors.red;
+                                    background: Colors.surface1;
+                                    horizontal-stretch: 1;
+
+                                    TextInput {
+                                        x: Layout.padding-input;
+                                        width: parent.width - 2 * Layout.padding-input;
+                                        height: parent.height;
+                                        color: Colors.text;
+                                        font-size: Typography.size-base;
+                                        vertical-alignment: center;
+                                        single-line: true;
+
+                                        init => { self.text = row.value; }
+                                        edited => { root.value-changed(i, self.text); }
+                                    }
+                                }
+
+                                // Validation indicator dot
+                                if row.type-idx != 0 : Rectangle {
+                                    width: 8px;
+                                    height: 8px;
+                                    y: (parent.height - self.height) / 2;
+                                    border-radius: 4px;
+                                    background: row.is-valid ? Colors.green : Colors.red;
+                                }
+                            }
+                        }
+                    }
+
+                    // Footer buttons
+                    HorizontalLayout {
+                        spacing: Layout.spacing-lg;
+                        alignment: end;
+
+                        ActionButton {
+                            width: 90px;
+                            text: @tr("Cancel");
+                            clicked => { root.cancel(); }
+                        }
+
+                        ActionButton {
+                            width: 90px;
+                            text: @tr("Run");
+                            bg: root.all-valid ? Colors.blue : Colors.surface2;
+                            fg: root.all-valid ? Colors.base : Colors.subtext0;
+                            enabled: root.all-valid;
+                            clicked => { root.confirm(); }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

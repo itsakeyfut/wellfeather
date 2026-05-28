@@ -26,6 +26,16 @@ pub enum ConfigUpdate {
     FontSize(u32),
 }
 
+/// A single parameter value submitted from the param-input dialog.
+#[derive(Debug)]
+pub struct ParamValue {
+    pub name: String,
+    /// 0=String, 1=Number, 2=Date, 3=Bool
+    pub type_idx: i32,
+    /// Raw user input (not yet formatted for SQL).
+    pub value: String,
+}
+
 /// UI → Controller channel messages.
 #[derive(Debug)]
 pub enum Command {
@@ -41,6 +51,12 @@ pub enum Command {
     RemoveConnection(String), // connection_id — disconnect + delete from config
     RunQuery(String),         // sql
     RunAll(String),           // sql (entire editor)
+    /// Run a parameterized query after the user has supplied values in the dialog.
+    RunQueryWithParams {
+        /// Original SQL with `:name` placeholders.
+        sql: String,
+        params: Vec<ParamValue>,
+    },
     CancelQuery,
     FetchCompletion(String, usize), // sql, cursor_pos
     UpdateConfig(ConfigUpdate),
@@ -109,6 +125,7 @@ impl Command {
             Self::RemoveConnection(..) => "RemoveConnection",
             Self::RunQuery(..) => "RunQuery",
             Self::RunAll(..) => "RunAll",
+            Self::RunQueryWithParams { .. } => "RunQueryWithParams",
             Self::CancelQuery => "CancelQuery",
             Self::FetchCompletion(..) => "FetchCompletion",
             Self::UpdateConfig(..) => "UpdateConfig",

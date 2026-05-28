@@ -765,6 +765,7 @@ export component Editor inherits Rectangle {
                      : span.kind == 1 ? Colors.hl-string
                      : span.kind == 2 ? Colors.hl-comment
                      : span.kind == 3 ? Colors.hl-number
+                     : span.kind == 5 ? Colors.hl-param
                      : Colors.hl-identifier;
             }
         }

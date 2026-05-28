@@ -520,6 +520,10 @@ impl UI {
         let fp_approval_tx: Arc<Mutex<Option<tokio::sync::oneshot::Sender<bool>>>> =
             Arc::new(Mutex::new(None));
 
+        // Written by the async event handler when the controller detects :name placeholders;
+        // consumed by on_confirm_param_dialog on the Slint thread.
+        let param_pending_sql: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+
         // Restore or create tab state. Track whether tabs were loaded from DB
         // so we can fall back to last_query on first launch.
         let handle = tokio::runtime::Handle::current();
@@ -555,6 +559,11 @@ impl UI {
             Arc::clone(&fp_approval_tx),
         );
         query::register_editor_callbacks(&window, tx_cmd.clone());
+        query::register_param_dialog_callbacks(
+            &window,
+            tx_cmd.clone(),
+            Arc::clone(&param_pending_sql),
+        );
         completion::register_completion_callbacks(&window, tx_cmd.clone());
         completion::register_completion_accept_callback(&window);
         let hl_model: Rc<slint::VecModel<crate::HighlightSpan>> =
@@ -752,6 +761,7 @@ impl UI {
             Arc::clone(&original_data),
             Arc::clone(&snippet_repo),
             Arc::clone(&fp_approval_tx),
+            Arc::clone(&param_pending_sql),
         );
 
         Ok(Self { window })
