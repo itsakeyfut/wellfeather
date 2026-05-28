@@ -849,6 +849,9 @@ pub(super) fn register_param_dialog_callbacks(
             if let Some(mut row) = model.row_data(i as usize) {
                 row.value = v;
                 row.is_valid = is_valid;
+                // Single-row set_row_data (not a loop) is intentional here: replacing the
+                // whole VecModel would trigger Slint to re-run `init =>` on every TextInput,
+                // clearing focus while the user is still typing.
                 model.set_row_data(i as usize, row);
             }
             let all_valid = (0..model.row_count())
@@ -867,6 +870,7 @@ pub(super) fn register_param_dialog_callbacks(
                 let v = row.value.to_string();
                 row.type_idx = t;
                 row.is_valid = validate_param(t, &v);
+                // Same intentional single-row update as on_param_value_changed above.
                 model.set_row_data(i as usize, row);
             }
             let all_valid = (0..model.row_count())

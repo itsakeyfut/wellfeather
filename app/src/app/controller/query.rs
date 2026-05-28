@@ -261,6 +261,10 @@ impl AppController {
     /// Splits the SQL on semicolons and executes each non-empty statement
     /// sequentially using a single cancellation token.  Only the result of the
     /// last statement is surfaced to the UI so the result panel is not spammed.
+    ///
+    /// `:name` placeholder detection is intentionally skipped here — RunAll is
+    /// a bulk-execution path and mixing parameterized dialogs with multi-statement
+    /// runs would be ambiguous (each statement could reference different params).
     pub(super) async fn handle_run_all(&self, sql: String) {
         self.state.query.cancel();
 
@@ -405,15 +409,16 @@ impl AppController {
 
 fn format_param_value(type_idx: i32, value: &str) -> String {
     match type_idx {
-        1 => value.to_string(),
-        2 => format!("'{value}'"),
+        1 => value.to_string(),    // Number — validated f64, safe to emit as-is
+        2 => format!("'{value}'"), // Date   — validated YYYY-MM-DD, no injection risk
         3 => {
+            // Bool — normalize to SQL literal regardless of input casing
             if value.eq_ignore_ascii_case("true") {
                 "TRUE".to_string()
             } else {
                 "FALSE".to_string()
             }
         }
-        _ => format!("'{}'", value.replace('\'', "''")),
+        _ => format!("'{}'", value.replace('\'', "''")), // String — escape embedded single quotes
     }
 }

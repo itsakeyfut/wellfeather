@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use sqlx::{Row as _, SqlitePool};
+use tracing::warn;
 use wf_db::models::QueryExecution;
 
 use crate::error::HistoryError;
@@ -92,8 +93,13 @@ impl HistoryService {
             None => Ok(None),
             Some(r) => {
                 let json: String = r.get("params");
-                let map: HashMap<String, String> = serde_json::from_str(&json).unwrap_or_default();
-                Ok(Some(map))
+                match serde_json::from_str::<HashMap<String, String>>(&json) {
+                    Ok(map) => Ok(Some(map)),
+                    Err(e) => {
+                        warn!("stored params JSON is invalid, ignoring defaults: {e}");
+                        Ok(None)
+                    }
+                }
             }
         }
     }
