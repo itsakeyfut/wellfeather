@@ -664,3 +664,19 @@ msgstr "名前変更"
 msgctxt "Sidebar"
 msgid "Delete"
 msgstr "削除"
+
+msgctxt "ResultTableToolbar"
+msgid "Form"
+msgstr "フォーム"
+
+msgctxt "FormView"
+msgid "No rows"
+msgstr "行なし"
+
+msgctxt "FormView"
+msgid "{0} / {1}"
+msgstr "{0} / {1}"
+
+msgctxt "FormView"
+msgid "Grid"
+msgstr "グリッド"

@@ -7,15 +7,17 @@ export component ResultTableToolbar inherits Rectangle {
     background: Colors.mantle;
     clip: true;
 
-    in property <int> col-count:  0;
-    in property <int> row-count:  0;
-    in property <int> total-rows: 0;
-    in property <int> page-size:  500;
+    in property <int>  col-count:       0;
+    in property <int>  row-count:       0;
+    in property <int>  total-rows:      0;
+    in property <int>  page-size:       500;
+    in property <bool> form-view-active: false;
 
     callback change-page-size(int);
     callback export-csv();
     callback export-json();
     callback export-insert-sql();
+    callback toggle-form-view();
 
     Rectangle {
         x: 0; y: parent.height - 1px;
@@ -31,6 +33,14 @@ export component ResultTableToolbar inherits Rectangle {
             : @tr("{0} rows", root.row-count);
         color: Colors.surface2;
         font-size: Typography.size-md;
+    }
+
+    if root.col-count > 0: ToolbarButton {
+        x: parent.width - 356px;
+        y: (parent.height - self.height) / 2;
+        width: 80px;
+        text: @tr("Form");
+        clicked => { root.toggle-form-view(); }
     }
 
     if root.col-count > 0: ToolbarButton {

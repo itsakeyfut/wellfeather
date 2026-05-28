@@ -36,6 +36,7 @@ import { EditorPrefsDialog }     from "components/dialogs/editor_prefs_dialog.sl
 import { FingerprintDialog }    from "components/dialogs/fingerprint_dialog.slint";
 import { ParamDialog }          from "components/dialogs/param_dialog.slint";
 import { TreeViewer }           from "components/tree_viewer.slint";
+import { FormView }             from "components/form_view.slint";
 
 // UiState is defined here (root file) so that Slint generates Rust bindings for it.
 // Sub-components that need global state receive properties bound from UiState below.
@@ -497,6 +498,10 @@ export global UiState {
     callback sidebar-undo();
     /// Fired when Ctrl+Shift+Z is pressed while the sidebar has focus.
     callback sidebar-redo();
+
+    // ── Form view ─────────────────────────────────────────────────────────────
+    in-out property <bool> form-view-active:       false;
+    in-out property <int>  form-view-record-index: 0;
 }
 
 export component AppWindow inherits Window {
@@ -520,6 +525,10 @@ export component AppWindow inherits Window {
     property <bool> _reduce-motion-sync: UiState.reduce-motion;
     changed _reduce-motion-sync => { Animation.reduce-motion = UiState.reduce-motion; }
 
+    // Reset record index when query results change.
+    property <int> _form-row-count: UiState.result-rows.length;
+    changed _form-row-count => { UiState.form-view-record-index = 0; }
+
     // ── Layout geometry helpers ───────────────────────────────────────────────
     property <length> menu-bar-height:   Layout.height-bar;
     property <length> tab-bar-height:    Layout.height-tab-bar;
@@ -530,8 +539,9 @@ export component AppWindow inherits Window {
     // Width of the shared line-number gutter column.
     // Must match the gutter rectangle width defined in the container below.
     property <length> gutter-col-width:  48px;
-    // Preview strip height: taller in tree-view mode to accommodate expandable nodes.
-    property <length> preview-strip-h: UiState.cell-preview-mode != 0 ? 220px : 60px;
+    // Preview strip height: 0 in form view, taller in tree-view mode for expandable nodes.
+    property <length> preview-strip-h: UiState.form-view-active ? 0px
+        : (UiState.cell-preview-mode != 0 ? 220px : 60px);
 
     // ── Overlay panel geometry ────────────────────────────────────────────────
     // The result/error panel overlays the editor from the bottom (VSCode style).
@@ -1098,6 +1108,7 @@ export component AppWindow inherits Window {
 
                 // ── Result table content ──────────────────────────────────────
                 result-table-inst := ResultTable {
+                    visible: !UiState.form-view-active;
                     x: 0;
                     y: root.panel-header-height;
                     width:  parent.width;
@@ -1134,6 +1145,20 @@ export component AppWindow inherits Window {
                             UiState.update-page-size(n);
                         }
                     }
+                    form-view-active: UiState.form-view-active;
+                    toggle-form-view => { UiState.form-view-active = !UiState.form-view-active; }
+                }
+
+                // ── Form view ─────────────────────────────────────────────────
+                if UiState.form-view-active: FormView {
+                    x: 0;
+                    y: root.panel-header-height;
+                    width:  parent.width;
+                    height: root.panel-height - root.panel-header-height;
+                    columns: UiState.result-columns;
+                    rows:    UiState.result-rows;
+                    current-index <=> UiState.form-view-record-index;
+                    toggle-form-view => { UiState.form-view-active = false; }
                 }
 
                 // ── Cell-value preview strip ──────────────────────────────────

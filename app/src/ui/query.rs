@@ -490,6 +490,7 @@ pub(super) fn register_result_callbacks(
                 let rows: Vec<crate::RowData> =
                     filtered.into_iter().map(|r| rows_to_ui(r)).collect();
                 ui.set_result_rows(Rc::new(slint::VecModel::from(rows)).into());
+                ui.set_form_view_record_index(0);
                 ui.set_result_row_count(row_count);
                 ui.set_result_active_filter(query);
             });
@@ -515,6 +516,7 @@ pub(super) fn register_result_callbacks(
                 let ui_rows: Vec<crate::RowData> =
                     rows.into_iter().map(|r| rows_to_ui(r)).collect();
                 ui.set_result_rows(Rc::new(slint::VecModel::from(ui_rows)).into());
+                ui.set_form_view_record_index(0);
                 ui.set_result_row_count(row_count);
                 ui.set_result_active_filter("".into());
             });
@@ -726,6 +728,7 @@ pub(super) fn register_result_callbacks(
                     (new_col, new_asc, row_count, ui_rows)
                 };
                 ui.set_result_rows(Rc::new(slint::VecModel::from(ui_rows)).into());
+                ui.set_form_view_record_index(0);
                 ui.set_result_row_count(row_count);
                 ui.set_result_sort_col(new_col.map(|c| c as i32).unwrap_or(-1));
                 ui.set_result_sort_asc(new_asc);
@@ -766,6 +769,7 @@ pub(super) fn handle_query_finished(
             ui.set_result_columns(col_model.into());
             let rows: Vec<crate::RowData> = raw_rows.iter().map(|r| rows_to_ui(r)).collect();
             ui.set_result_rows(Rc::new(slint::VecModel::from(rows)).into());
+            ui.set_form_view_record_index(0);
             ui.set_result_row_count(row_count);
             ui.set_result_total_rows(row_count);
             let widths: Vec<f32> = vec![DEFAULT_COLUMN_WIDTH; col_count];
@@ -811,6 +815,7 @@ pub(super) fn handle_table_data_loaded(
             ui.set_result_columns(col_model.into());
             let rows: Vec<crate::RowData> = raw_rows.iter().map(|r| rows_to_ui(r)).collect();
             ui.set_result_rows(Rc::new(slint::VecModel::from(rows)).into());
+            ui.set_form_view_record_index(0);
             ui.set_result_row_count(row_count);
             let widths: Vec<f32> = vec![DEFAULT_COLUMN_WIDTH; col_count];
             let total_w = col_count as f32 * DEFAULT_COLUMN_WIDTH;

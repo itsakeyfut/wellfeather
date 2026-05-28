@@ -25,6 +25,8 @@ export component ResultTable inherits Rectangle {
     in property <bool>      sort-asc:        true;
     in property <string>    font-family:     "JetBrains Mono";
     in property <int>       font-size-px:    12;
+    in property <bool> form-view-active: false;
+    callback toggle-form-view();
     callback resize-column(int, float);
     callback filter-rows(string);
     callback clear-filter();
@@ -60,14 +62,16 @@ export component ResultTable inherits Rectangle {
         height: root.height - root.bottom-total;
 
         toolbar-inst := ResultTableToolbar {
-            col-count:  root.columns.length;
-            row-count:  root.row-count;
-            total-rows: root.total-rows;
-            page-size:  root.page-size;
+            col-count:       root.columns.length;
+            row-count:       root.row-count;
+            total-rows:      root.total-rows;
+            page-size:       root.page-size;
+            form-view-active: root.form-view-active;
             change-page-size(n) => { root.change-page-size(n); }
             export-csv        => { root.export-csv(); }
             export-json       => { root.export-json(); }
             export-insert-sql => { root.export-insert-sql(); }
+            toggle-form-view  => { root.toggle-form-view(); }
         }
 
         header-inst := ResultTableHeader {
