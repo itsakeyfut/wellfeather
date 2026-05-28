@@ -10,6 +10,7 @@ mod query;
 mod snippet;
 mod tabs;
 mod tabs_state;
+mod tree_viewer;
 mod undo;
 
 use std::cell::RefCell;
@@ -693,6 +694,7 @@ impl UI {
             Rc::clone(&tabs_state),
             Rc::clone(&undo_state),
         );
+        tree_viewer::register_callbacks(&window);
         metadata_search::register_metadata_search_callbacks(&window, Arc::clone(&sidebar_state));
         palette::register_command_palette_callbacks(
             &window,

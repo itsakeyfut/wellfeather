@@ -1,0 +1,198 @@
+import { Colors, Typography, Layout, Icons } from "../theme.slint";
+import { TreeNode } from "../globals.slint";
+import { MenuItem } from "common.slint";
+
+// Scrollable JSON / XML tree shown in the cell-value preview strip.
+// Nodes are supplied as a pre-flattened visible list by the Rust side.
+export component TreeViewer inherits Rectangle {
+    background: Colors.mantle;
+    clip: true;
+
+    in property <[TreeNode]> nodes: [];
+    callback toggle(string);           // path of node to expand/collapse
+    callback copy-path(string);        // copy path to clipboard
+    callback copy-value(string);       // copy value to clipboard
+
+    private property <length> ctx-menu-x: 0;
+    private property <length> ctx-menu-y: 0;
+    private property <string> ctx-path:   "";
+    private property <string> ctx-value:  "";
+
+    ctx-popup := PopupWindow {
+        x: root.ctx-menu-x;
+        y: root.ctx-menu-y;
+        width:  160px;
+        height: 2 * Layout.height-menu-item;
+        close-policy: PopupClosePolicy.close-on-click;
+
+        Rectangle {
+            width: 160px;
+            height: 2 * Layout.height-menu-item;
+            background: Colors.surface0;
+            border-radius: Layout.radius-md;
+            border-width: 1px;
+            border-color: Colors.surface2;
+            drop-shadow-blur: 8px;
+            drop-shadow-color: Colors.shadow;
+            clip: true;
+
+            VerticalLayout {
+                spacing: 0;
+                MenuItem {
+                    text: @tr("Copy Path");
+                    clicked => { root.copy-path(root.ctx-path); }
+                }
+                MenuItem {
+                    text: @tr("Copy Value");
+                    clicked => { root.copy-value(root.ctx-value); }
+                }
+            }
+        }
+    }
+
+    flick := Flickable {
+        x: 0; y: 0;
+        width:  parent.width;
+        height: parent.height;
+        viewport-height: node-list.preferred-height;
+
+        node-list := VerticalLayout {
+            spacing: 0;
+            alignment: start;
+
+            for node[i] in root.nodes: Rectangle {
+                height: 22px;
+                background: row-touch.has-hover ? Colors.hover-subtle : transparent;
+
+                HorizontalLayout {
+                    x: node.depth * 14px + 4px;
+                    width: parent.width - self.x;
+                    height: parent.height;
+                    spacing: 2px;
+                    alignment: start;
+
+                    // Expand/collapse chevron — click handled by row-touch below
+                    if node.has-children: Rectangle {
+                        width: 14px;
+                        Image {
+                            width: 10px;
+                            height: 10px;
+                            x: (parent.width - self.width) / 2;
+                            y: (parent.height - self.height) / 2;
+                            source: node.is-expanded ? Icons.chevron-down : Icons.chevron-right;
+                            colorize: Colors.overlay2;
+                            image-fit: contain;
+                        }
+                    }
+                    if !node.has-children: Rectangle { width: 14px; }
+
+                    // Key label
+                    if node.key != "": Text {
+                        text: node.key + ": ";
+                        color: Colors.subtext1;
+                        font-size: Typography.size-sm;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
+
+                    // JSON string (green)
+                    if node.node-kind == 2: Text {
+                        text: "\"" + node.value + "\"";
+                        color: Colors.green;
+                        font-size: Typography.size-sm;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
+
+                    // JSON number (blue)
+                    if node.node-kind == 3: Text {
+                        text: node.value;
+                        color: Colors.blue;
+                        font-size: Typography.size-sm;
+                        vertical-alignment: center;
+                    }
+
+                    // JSON boolean (yellow)
+                    if node.node-kind == 4: Text {
+                        text: node.value;
+                        color: Colors.yellow;
+                        font-size: Typography.size-sm;
+                        vertical-alignment: center;
+                    }
+
+                    // JSON null (grey)
+                    if node.node-kind == 5: Text {
+                        text: "null";
+                        color: Colors.overlay2;
+                        font-size: Typography.size-sm;
+                        vertical-alignment: center;
+                    }
+
+                    // JSON object/array — collapsed summary
+                    if (node.node-kind == 0 || node.node-kind == 1) && !node.is-expanded: Text {
+                        text: node.node-kind == 0
+                            ? "{ " + node.child-count + " }"
+                            : "[ " + node.child-count + " ]";
+                        color: Colors.overlay1;
+                        font-size: Typography.size-sm;
+                        vertical-alignment: center;
+                    }
+
+                    // XML element tag (<name>)
+                    if node.node-kind == 6: Text {
+                        text: "<" + node.value + ">";
+                        color: Colors.blue;
+                        font-size: Typography.size-sm;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
+
+                    // XML attribute (@key = "value")
+                    if node.node-kind == 7: Text {
+                        text: "= \"" + node.value + "\"";
+                        color: Colors.hl-param;
+                        font-size: Typography.size-sm;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
+
+                    // XML text node
+                    if node.node-kind == 8: Text {
+                        text: node.value;
+                        color: Colors.subtext0;
+                        font-size: Typography.size-sm;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
+                }
+
+                row-touch := TouchArea {
+                    x: 0; y: 0;
+                    width: parent.width;
+                    height: parent.height;
+                    clicked => {
+                        if (node.has-children) { root.toggle(node.path); }
+                    }
+                    pointer-event(event) => {
+                        if (event.button == PointerEventButton.right
+                                && event.kind == PointerEventKind.down) {
+                            root.ctx-path  = node.path;
+                            root.ctx-value = node.value;
+                            root.ctx-menu-x = clamp(
+                                self.mouse-x,
+                                0,
+                                root.width - 164px
+                            );
+                            root.ctx-menu-y = clamp(
+                                i * 22px - flick.viewport-y + self.mouse-y,
+                                0,
+                                root.height - 2 * Layout.height-menu-item
+                            );
+                            ctx-popup.show();
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

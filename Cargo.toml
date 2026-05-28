@@ -34,6 +34,7 @@ tracing       = "0.1.44"
 sqlx          = { version = "0.8.6", features = ["postgres", "mysql", "sqlite", "runtime-tokio", "macros", "chrono", "uuid", "tls-rustls-ring"] }
 uuid          = { version = "1.23.0", features = ["v4"] }
 chrono        = { version = "0.4.44", features = ["serde"] }
+quick-xml     = { version = "0.40.1", features = ["serialize"] }
 
 [profile.release]
 opt-level     = 3

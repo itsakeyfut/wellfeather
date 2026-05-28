@@ -7,7 +7,7 @@ import "../../assets/fonts/NotoSansJP-Bold.ttf";
 import "../../assets/fonts/JetBrainsMono-Regular.ttf";
 import "../../assets/fonts/JetBrainsMono-Bold.ttf";
 
-import { ConnectionEntry, RowData, SidebarNode, GroupEntry, CompletionRow, TabEntry, ColumnData, SnippetEntry, MetadataSearchResult, HighlightSpan, CommandPaletteItem, HistoryEntry, ParamRow } from "globals.slint";
+import { ConnectionEntry, RowData, SidebarNode, GroupEntry, CompletionRow, TabEntry, ColumnData, SnippetEntry, MetadataSearchResult, HighlightSpan, CommandPaletteItem, HistoryEntry, ParamRow, TreeNode } from "globals.slint";
 import { Colors, Typography, Layout, Icons, Animation } from "theme.slint";
 import { CompletionPopup } from "components/completion_popup.slint";
 import { ConnectionForm }  from "components/connection_form.slint";
@@ -35,6 +35,7 @@ import { SnippetPalette }        from "components/snippet_palette.slint";
 import { EditorPrefsDialog }     from "components/dialogs/editor_prefs_dialog.slint";
 import { FingerprintDialog }    from "components/dialogs/fingerprint_dialog.slint";
 import { ParamDialog }          from "components/dialogs/param_dialog.slint";
+import { TreeViewer }           from "components/tree_viewer.slint";
 
 // UiState is defined here (root file) so that Slint generates Rust bindings for it.
 // Sub-components that need global state receive properties bound from UiState below.
@@ -476,6 +477,21 @@ export global UiState {
     /// Fired on every user text edit; Rust uses this to drive the debounce snapshot.
     callback text-changed(string);
 
+    // ── Cell-value tree viewer ────────────────────────────────────────────────
+    /// Flat visible-node list for the JSON / XML tree viewer; rebuilt by Rust
+    /// on cell selection and on each expand/collapse toggle.
+    in-out property <[TreeNode]> cell-tree-nodes:   [];
+    /// 0 = plain-text preview, 1 = JSON tree, 2 = XML tree.
+    in-out property <int>        cell-preview-mode: 0;
+    /// Fired when a result cell is selected; Rust parses JSON/XML and updates tree nodes.
+    callback cell-value-selected(string);
+    /// Fired when a tree node is clicked to toggle expand/collapse; arg is node path.
+    callback cell-tree-node-toggle(string);
+    /// Copy a tree node path to the clipboard.
+    callback cell-copy-path(string);
+    /// Copy a tree node value to the clipboard.
+    callback cell-copy-node-value(string);
+
     // ── Sidebar action undo / redo ────────────────────────────────────────────
     /// Fired when Ctrl+Z is pressed while the sidebar has focus.
     callback sidebar-undo();
@@ -514,8 +530,8 @@ export component AppWindow inherits Window {
     // Width of the shared line-number gutter column.
     // Must match the gutter rectangle width defined in the container below.
     property <length> gutter-col-width:  48px;
-    // Fixed-height preview strip shown above the result panel.
-    property <length> preview-strip-h:   60px;
+    // Preview strip height: taller in tree-view mode to accommodate expandable nodes.
+    property <length> preview-strip-h: UiState.cell-preview-mode != 0 ? 220px : 60px;
 
     // ── Overlay panel geometry ────────────────────────────────────────────────
     // The result/error panel overlays the editor from the bottom (VSCode style).
@@ -552,6 +568,13 @@ export component AppWindow inherits Window {
     property <bool> _result-active: result-table-inst.result-focused;
     changed _result-active => {
         if (root._result-active) { root.focused-pane = 2; }
+    }
+
+    // Fire cell-value-selected whenever the selected result cell changes so Rust
+    // can attempt JSON / XML parsing and update cell-preview-mode + cell-tree-nodes.
+    property <string> _cell-value-alias: result-table-inst.selected-cell-value;
+    changed _cell-value-alias => {
+        UiState.cell-value-selected(result-table-inst.selected-cell-value);
     }
 
     // When switching to a Table View tab, give it focus so keyboard shortcuts work.
@@ -1129,8 +1152,64 @@ export component AppWindow inherits Window {
                         background: Colors.surface1;
                     }
 
+                    // ── Tree mode (JSON or XML) ───────────────────────────────
+                    if UiState.cell-preview-mode != 0: VerticalLayout {
+                        x: 0; y: 1px;
+                        width:  parent.width;
+                        height: parent.height - 1px;
+                        spacing: 0;
+
+                        // Header bar: label + "View as Text" button
+                        HorizontalLayout {
+                            height: 22px;
+                            padding-left: 6px;
+                            padding-right: 4px;
+                            spacing: 4px;
+                            alignment: start;
+                            Text {
+                                vertical-alignment: center;
+                                font-size: Typography.size-sm;
+                                color: Colors.overlay2;
+                                text: UiState.cell-preview-mode == 1
+                                    ? @tr("JSON")
+                                    : @tr("XML");
+                            }
+                            Rectangle { horizontal-stretch: 1; }
+                            // "View as Text" button
+                            TouchArea {
+                                width: view-as-text-label.preferred-width + 12px;
+                                height: 18px;
+                                y: 2px;
+                                clicked => { UiState.cell-preview-mode = 0; }
+                                Rectangle {
+                                    border-radius: 3px;
+                                    background: parent.has-hover
+                                        ? Colors.hover-btn
+                                        : transparent;
+                                    view-as-text-label := Text {
+                                        x: 6px;
+                                        text: @tr("View as Text");
+                                        font-size: Typography.size-sm;
+                                        color: Colors.overlay2;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                            }
+                        }
+
+                        TreeViewer {
+                            vertical-stretch: 1;
+                            nodes: UiState.cell-tree-nodes;
+                            toggle(path)      => { UiState.cell-tree-node-toggle(path); }
+                            copy-path(path)   => { UiState.cell-copy-path(path); }
+                            copy-value(value) => { UiState.cell-copy-node-value(value); }
+                        }
+                    }
+
+                    // ── Text mode (plain preview) ────────────────────────────
                     // Placeholder — nothing selected or row-only selection
-                    if !result-table-inst.selected-cell-is-null
+                    if UiState.cell-preview-mode == 0
+                            && !result-table-inst.selected-cell-is-null
                             && result-table-inst.selected-cell-value == "": Text {
                         x: 10px; y: 8px;
                         color: Colors.surface1;
@@ -1139,7 +1218,8 @@ export component AppWindow inherits Window {
                     }
 
                     // NULL indicator
-                    if result-table-inst.selected-cell-is-null: Text {
+                    if UiState.cell-preview-mode == 0
+                            && result-table-inst.selected-cell-is-null: Text {
                         x: 10px; y: 8px;
                         color: Colors.overlay2;
                         font-size: Typography.size-base;
@@ -1147,7 +1227,8 @@ export component AppWindow inherits Window {
                     }
 
                     // Cell value — word-wrapped, vertically scrollable
-                    if !result-table-inst.selected-cell-is-null
+                    if UiState.cell-preview-mode == 0
+                            && !result-table-inst.selected-cell-is-null
                             && result-table-inst.selected-cell-value != "": Flickable {
                         x: 0; y: 4px;
                         width:  parent.width;

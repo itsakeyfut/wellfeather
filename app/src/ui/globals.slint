@@ -115,3 +115,17 @@ export struct HistoryEntry {
     success:        bool,
     connection-id:  string,
 }
+
+/// One visible node in the cell-value tree viewer.
+/// node-kind: 0=json-object, 1=json-array, 2=json-string, 3=json-number,
+///            4=json-bool, 5=json-null, 6=xml-element, 7=xml-attr, 8=xml-text
+export struct TreeNode {
+    depth:        int,
+    key:          string,
+    value:        string,
+    node-kind:    int,
+    has-children: bool,
+    is-expanded:  bool,
+    child-count:  int,
+    path:         string,
+}
